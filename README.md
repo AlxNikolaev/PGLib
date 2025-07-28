@@ -1,8 +1,10 @@
 ﻿# What is this repo:
 
 - Various utilities for procedural geometry workflows in UE (presumably 5+).
-- 2D Voronoi tesselation (sadly, I couldn't find a way to use original Voro++, except converting whole diagram to the 2D space which was a bit expensive)
-- 2D points scattering
+- 2D Voronoi tesselation (sadly, I couldn't find a way to use original Voro++, except converting the whole diagram to the 2D space which was a bit expensive)
+- 2D points grid scattering
+- Drunkard's walk 2D Graph gen (configurable)
+- Cellular automata (configurable)
 
 # How can I use it:
 - However you want, I've spent multiple months learning these things, hope this code can save some time for you!
