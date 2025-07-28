@@ -12,9 +12,9 @@
 Here's small example of what I've been doing and the reason I've created this repo.
 
 Overall generation layout (multiple Voronoi diagrams)
-![img_1.png](img_1.png)
+![Diagrams.png](Docs/Images/Diagrams.png)
 
 Procedural meshes (walls are spawned via PCGGraph though). UVs are fully customizable, foundations are UProceduralMeshComponent sections
-![img_2.png](img_2.png)
-
+![ProcMesh.png](Docs/Images/ProcMesh.png)
+![SimpleSection.png](Docs/Images/SimpleSection.png)
 > These screenshots are made using some additional code, not presented in this repo. Feel free to ask questions about implementation details if you want :)
