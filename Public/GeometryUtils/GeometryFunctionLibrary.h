@@ -1,42 +1,21 @@
 ﻿#pragma once
 
-inline bool SortPlaneVerticesByAngle(TArray<FVector2D> InVertices, TArray<FVector2D>& OutVertices)
+class PROCEDURALGEOMETRY_API FGeometryUtils
 {
-	if (InVertices.Num() < 3)
-	{
-		return false;
-	}
-	
-	FVector2D Centroid = FVector2D::ZeroVector;
-	for (const FVector2D& Vertex : InVertices)
-	{
-		Centroid += Vertex;
-	}
-	Centroid /= InVertices.Num();
-	
-	TArray<TPair<int32, float>> VertexAngles;
-	VertexAngles.Reserve(InVertices.Num());
+public:
+	static bool SortPlaneVerticesByAngle(const TArray<FVector2D>& InVertices, TArray<FVector2D>& OutSortedVertices);
+	static bool ComputeBisector2D(const FVector2D& P1, const FVector2D& P2, const FVector2D& OutStart, const FVector2D& OutEnd);
+	static bool ClipPolygonByHalfPlane(TArray<FVector2D>& OutPolygon, const FVector2D& PlanePoint, const FVector2D& PlaneNormal);
 
-	for (int32 i = 0; i < InVertices.Num(); ++i)
-	{
-		const FVector2D Direction = InVertices[i] - Centroid;
-		float Angle = FMath::Atan2(Direction.Y, Direction.X); // I.k., it's so expensive
-		VertexAngles.Emplace(i, Angle);
-	}
-	
-	VertexAngles.Sort([](const TPair<int32, float>& A, const TPair<int32, float>& B)
-	{
-		return A.Value < B.Value;
-	});
-	
-	TArray<FVector2D> SortedVertices;
-	SortedVertices.Reserve(InVertices.Num());
-	for (const auto& VertexAngle : VertexAngles)
-	{
-		SortedVertices.Add(InVertices[VertexAngle.Key]);
-	}
-	
-	OutVertices.Empty();
-	OutVertices = MoveTemp(SortedVertices);
-	return true;
-}
+	// Polygon utilities for POI placement
+	static bool	 PointInPolygon(const TArray<FVector2D>& PolygonVertices, const FVector2D& Point);
+	static float DistanceToPolygonBoundary(const TArray<FVector2D>& PolygonVertices, const FVector2D& Point);
+	static bool	 MaxInscribedCircle(const TArray<FVector2D>& PolygonVertices, FVector2D& OutCenter, float& OutRadius, float Epsilon = 10.0f);
+	static void	 PoissonDiskSampling(
+		 const TArray<FVector2D>& PolygonVertices, float Radius, int32 MaxPoints, FRandomStream& RandomStream, TArray<FVector2D>& OutPoints);
+	static FVector2D GetPolygonCentroid(const TArray<FVector2D>& PolygonVertices);
+
+private:
+	// Helper functions for polygon operations
+	static float DistanceToLineSegment(const FVector2D& Point, const FVector2D& LineStart, const FVector2D& LineEnd);
+};
