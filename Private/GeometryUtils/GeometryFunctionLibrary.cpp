@@ -1,4 +1,4 @@
-﻿#include "GeometryFunctionLibrary.h"
+﻿#include "GeometryUtils/GeometryFunctionLibrary.h"
 
 bool FGeometryUtils::SortPlaneVerticesByAngle(const TArray<FVector2D>& InVertices, TArray<FVector2D>& OutSortedVertices)
 {
@@ -22,19 +22,6 @@ bool FGeometryUtils::SortPlaneVerticesByAngle(const TArray<FVector2D>& InVertice
 		const float AngleB = FMath::Atan2(B.Y - Centroid.Y, B.X - Centroid.X);
 		return AngleA < AngleB;
 	});
-
-	return true;
-}
-
-bool FGeometryUtils::ComputeBisector2D(const FVector2D& P1, const FVector2D& P2, const FVector2D& OutStart, const FVector2D& OutEnd)
-{
-	if (P1.Equals(P2, UE_KINDA_SMALL_NUMBER))
-		return false;
-
-	FVector2D Mid = (P1 + P2) / 2;
-
-	FVector2D Direction = (P2 - P1).GetRotated(90.f);
-	Direction.Normalize();
 
 	return true;
 }
