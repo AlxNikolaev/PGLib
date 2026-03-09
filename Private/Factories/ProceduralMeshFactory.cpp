@@ -3,6 +3,8 @@
 #include "ProceduralGeometry/Public/Factories/ProceduralMeshFactory.h"
 #include "ProceduralMeshComponent.h"
 
+DEFINE_LOG_CATEGORY_STATIC(LogRoguelikeGeometry, Log, All);
+
 bool UProceduralMeshFactory::CreatePrismMesh(const FMeshGenerationParams& Params, FMeshData& OutMeshData)
 {
 	if (!ValidateInput(Params))
@@ -38,7 +40,7 @@ bool UProceduralMeshFactory::ValidateInput(const FMeshGenerationParams& Params)
 {
 	if (Params.FoundationVertices.Num() < 3)
 	{
-		UE_LOG(LogTemp,
+		UE_LOG(LogRoguelikeGeometry,
 			Warning,
 			TEXT("ProceduralMeshGenerator: Invalid foundation vertices count (%d), minimum 3 required"),
 			Params.FoundationVertices.Num());
@@ -47,7 +49,7 @@ bool UProceduralMeshFactory::ValidateInput(const FMeshGenerationParams& Params)
 
 	if (Params.Height <= 0.0f)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("ProceduralMeshGenerator: Invalid height (%f), must be positive"), Params.Height);
+		UE_LOG(LogRoguelikeGeometry, Warning, TEXT("ProceduralMeshGenerator: Invalid height (%f), must be positive"), Params.Height);
 		return false;
 	}
 
