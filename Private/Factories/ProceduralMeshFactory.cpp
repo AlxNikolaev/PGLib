@@ -1,6 +1,6 @@
 ﻿// Fill out your copyright notice in the Description page of Project Settings.
 
-#include "ProceduralGeometry/Public/Factories/ProceduralMeshFactory.h"
+#include "Factories/ProceduralMeshFactory.h"
 #include "ProceduralMeshComponent.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogRoguelikeGeometry, Log, All);
@@ -30,8 +30,8 @@ bool UProceduralMeshFactory::CreatePrismMesh(const FMeshGenerationParams& Params
 	ComposeFaceTriangles(VertexCount, OutMeshData.Triangles);
 	CalcNormals(VertexCount, OutMeshData);
 	CalcUVs(BottomVerts, TopVerts, Params.UVScale, OutMeshData);
-	CalcTangentsAndColors(TotalVertices, Params.MeshColor, OutMeshData);
 	BuildSideGeometry(BottomVerts, TopVerts, Params, OutMeshData);
+	CalcTangentsAndColors(OutMeshData.Vertices.Num(), Params.MeshColor, OutMeshData);
 
 	return true;
 }

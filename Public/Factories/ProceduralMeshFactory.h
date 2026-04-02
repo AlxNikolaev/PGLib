@@ -4,12 +4,11 @@
 
 #include "CoreMinimal.h"
 #include "UObject/Object.h"
+#include "ProceduralMeshComponent.h"
 #include "ProceduralMeshFactory.generated.h"
 
-struct FProcMeshTangent;
-
 USTRUCT(BlueprintType)
-struct FMeshGenerationParams
+struct PROCEDURALGEOMETRY_API FMeshGenerationParams
 {
 	GENERATED_BODY()
 
@@ -30,7 +29,7 @@ struct FMeshGenerationParams
 };
 
 USTRUCT(BlueprintType)
-struct FMeshData
+struct PROCEDURALGEOMETRY_API FMeshData
 {
 	GENERATED_BODY()
 

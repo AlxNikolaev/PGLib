@@ -37,6 +37,16 @@ bool FGeometryUtils::ClipPolygonByHalfPlane(TArray<FVector2D>& OutPolygon, const
 	FVector2D		  Prev = OutPolygon.Last();
 	double			  PrevSide = FVector2D::DotProduct(Prev - PlanePoint, PlaneNormal);
 
+	auto SafeAlpha = [](double InPrevSide, double InCurrSide) -> double
+	{
+		double Denominator = InPrevSide - InCurrSide;
+		if (FMath::Abs(Denominator) < UE_DOUBLE_KINDA_SMALL_NUMBER)
+		{
+			return 0.5;
+		}
+		return InPrevSide / Denominator;
+	};
+
 	for (const FVector2D& Curr : OutPolygon)
 	{
 		double CurrSide = FVector2D::DotProduct(Curr - PlanePoint, PlaneNormal);
@@ -47,12 +57,12 @@ bool FGeometryUtils::ClipPolygonByHalfPlane(TArray<FVector2D>& OutPolygon, const
 		}
 		else if (PrevSide <= 0.0 && CurrSide > 0.0)
 		{
-			float Alpha = PrevSide / (PrevSide - CurrSide);
+			double Alpha = SafeAlpha(PrevSide, CurrSide);
 			Result.Add(FMath::Lerp(Prev, Curr, Alpha));
 		}
 		else if (PrevSide > 0.0 && CurrSide <= 0.0)
 		{
-			float Alpha = PrevSide / (PrevSide - CurrSide);
+			double Alpha = SafeAlpha(PrevSide, CurrSide);
 			Result.Add(FMath::Lerp(Prev, Curr, Alpha));
 			Result.Add(Curr);
 		}
@@ -140,16 +150,8 @@ bool FGeometryUtils::MaxInscribedCircle(const TArray<FVector2D>& PolygonVertices
 	}
 
 	// Get polygon bounding box
-	FVector2D MinBounds(FLT_MAX, FLT_MAX);
-	FVector2D MaxBounds(-FLT_MAX, -FLT_MAX);
-
-	for (const FVector2D& Vertex : PolygonVertices)
-	{
-		MinBounds.X = FMath::Min(MinBounds.X, Vertex.X);
-		MinBounds.Y = FMath::Min(MinBounds.Y, Vertex.Y);
-		MaxBounds.X = FMath::Max(MaxBounds.X, Vertex.X);
-		MaxBounds.Y = FMath::Max(MaxBounds.Y, Vertex.Y);
-	}
+	FVector2D MinBounds, MaxBounds;
+	GetPolygonBounds(PolygonVertices, MinBounds, MaxBounds);
 
 	// Grid-based polylabel algorithm
 	struct FCell
@@ -190,14 +192,14 @@ bool FGeometryUtils::MaxInscribedCircle(const TArray<FVector2D>& PolygonVertices
 		}
 	}
 
-	// Sort by potential (max-heap)
-	CellQueue.Sort([](const FCell& A, const FCell& B) { return A.Potential > B.Potential; });
+	// Sort by potential (ascending — best candidate at back for O(1) Pop)
+	CellQueue.Sort([](const FCell& A, const FCell& B) { return A.Potential < B.Potential; });
 
 	// Main polylabel loop
-	while (CellQueue.Num() > 0 && CellQueue[0].Potential - BestCell.Distance > Epsilon)
+	while (CellQueue.Num() > 0 && CellQueue.Last().Potential - BestCell.Distance > Epsilon)
 	{
-		FCell CurrentCell = CellQueue[0];
-		CellQueue.RemoveAt(0);
+		FCell CurrentCell = CellQueue.Last();
+		CellQueue.Pop();
 
 		// Don't subdivide further if we can't possibly get better
 		if (CurrentCell.Potential - BestCell.Distance <= Epsilon)
@@ -230,8 +232,8 @@ bool FGeometryUtils::MaxInscribedCircle(const TArray<FVector2D>& PolygonVertices
 			}
 		}
 
-		// Re-sort queue
-		CellQueue.Sort([](const FCell& A, const FCell& B) { return A.Potential > B.Potential; });
+		// Re-sort queue (ascending — best at back)
+		CellQueue.Sort([](const FCell& A, const FCell& B) { return A.Potential < B.Potential; });
 	}
 
 	OutCenter = BestCell.Center;
@@ -244,31 +246,28 @@ void FGeometryUtils::PoissonDiskSampling(
 {
 	OutPoints.Empty();
 
-	if (PolygonVertices.Num() < 3 || Radius <= 0 || MaxPoints <= 0)
+	if (PolygonVertices.Num() < 3 || Radius < UE_KINDA_SMALL_NUMBER || MaxPoints <= 0)
 	{
 		return;
 	}
 
 	// Get polygon bounds
-	FVector2D MinBounds(FLT_MAX, FLT_MAX);
-	FVector2D MaxBounds(-FLT_MAX, -FLT_MAX);
-
-	for (const FVector2D& Vertex : PolygonVertices)
-	{
-		MinBounds.X = FMath::Min(MinBounds.X, Vertex.X);
-		MinBounds.Y = FMath::Min(MinBounds.Y, Vertex.Y);
-		MaxBounds.X = FMath::Max(MaxBounds.X, Vertex.X);
-		MaxBounds.Y = FMath::Max(MaxBounds.Y, Vertex.Y);
-	}
+	FVector2D MinBounds, MaxBounds;
+	GetPolygonBounds(PolygonVertices, MinBounds, MaxBounds);
 
 	// Grid for spatial acceleration
 	const float CellSize = Radius / FMath::Sqrt(2.0f);
 	const int32 GridWidth = FMath::CeilToInt((MaxBounds.X - MinBounds.X) / CellSize);
 	const int32 GridHeight = FMath::CeilToInt((MaxBounds.Y - MinBounds.Y) / CellSize);
 
-	// Grid to store point indices (-1 means empty)
-	TArray<int32> Grid;
-	Grid.Init(-1, GridWidth * GridHeight);
+	if (GridWidth <= 0 || GridHeight <= 0)
+	{
+		return;
+	}
+
+	// Grid to store point indices per cell
+	TArray<TArray<int32>> Grid;
+	Grid.SetNum(GridWidth * GridHeight);
 
 	auto GetGridIndex = [&](const FVector2D& Point) -> int32 {
 		int32 X = FMath::FloorToInt((Point.X - MinBounds.X) / CellSize);
@@ -300,7 +299,7 @@ void FGeometryUtils::PoissonDiskSampling(
 
 	// Add initial point
 	OutPoints.Add(InitialPoint);
-	Grid[GetGridIndex(InitialPoint)] = 0;
+	Grid[GetGridIndex(InitialPoint)].Add(0);
 
 	TArray<int32> ActivePoints;
 	ActivePoints.Add(0);
@@ -345,13 +344,14 @@ void FGeometryUtils::PoissonDiskSampling(
 					if (CheckX >= 0 && CheckX < GridWidth && CheckY >= 0 && CheckY < GridHeight)
 					{
 						const int32 CheckIndex = CheckY * GridWidth + CheckX;
-						if (Grid[CheckIndex] >= 0)
+						for (const int32 NeighborIndex : Grid[CheckIndex])
 						{
-							const FVector2D& ExistingPoint = OutPoints[Grid[CheckIndex]];
+							const FVector2D& ExistingPoint = OutPoints[NeighborIndex];
 							const float		 DistSq = FVector2D::DistSquared(CandidatePoint, ExistingPoint);
 							if (DistSq < Radius * Radius)
 							{
 								bTooClose = true;
+								break;
 							}
 						}
 					}
@@ -362,7 +362,7 @@ void FGeometryUtils::PoissonDiskSampling(
 			{
 				// Add valid candidate
 				const int32 NewPointIndex = OutPoints.Add(CandidatePoint);
-				Grid[GetGridIndex(CandidatePoint)] = NewPointIndex;
+				Grid[GetGridIndex(CandidatePoint)].Add(NewPointIndex);
 				ActivePoints.Add(NewPointIndex);
 				bFoundValidCandidate = true;
 				break;
@@ -378,6 +378,20 @@ void FGeometryUtils::PoissonDiskSampling(
 }
 
 // Helper functions
+
+void FGeometryUtils::GetPolygonBounds(const TArray<FVector2D>& PolygonVertices, FVector2D& OutMin, FVector2D& OutMax)
+{
+	OutMin = FVector2D(FLT_MAX, FLT_MAX);
+	OutMax = FVector2D(-FLT_MAX, -FLT_MAX);
+
+	for (const FVector2D& Vertex : PolygonVertices)
+	{
+		OutMin.X = FMath::Min(OutMin.X, Vertex.X);
+		OutMin.Y = FMath::Min(OutMin.Y, Vertex.Y);
+		OutMax.X = FMath::Max(OutMax.X, Vertex.X);
+		OutMax.Y = FMath::Max(OutMax.Y, Vertex.Y);
+	}
+}
 
 float FGeometryUtils::DistanceToLineSegment(const FVector2D& Point, const FVector2D& LineStart, const FVector2D& LineEnd)
 {
@@ -399,16 +413,42 @@ float FGeometryUtils::DistanceToLineSegment(const FVector2D& Point, const FVecto
 
 FVector2D FGeometryUtils::GetPolygonCentroid(const TArray<FVector2D>& PolygonVertices)
 {
-	if (PolygonVertices.Num() == 0)
+	const int32 Num = PolygonVertices.Num();
+
+	if (Num == 0)
 	{
 		return FVector2D::ZeroVector;
 	}
-
-	FVector2D Centroid = FVector2D::ZeroVector;
-	for (const FVector2D& Vertex : PolygonVertices)
+	if (Num == 1)
 	{
-		Centroid += Vertex;
+		return PolygonVertices[0];
+	}
+	if (Num == 2)
+	{
+		return (PolygonVertices[0] + PolygonVertices[1]) * 0.5f;
 	}
 
-	return Centroid / static_cast<float>(PolygonVertices.Num());
+	FVector2D Centroid = FVector2D::ZeroVector;
+	float SignedArea = 0.0f;
+
+	for (int32 i = 0; i < Num; ++i)
+	{
+		const FVector2D& V1 = PolygonVertices[i];
+		const FVector2D& V2 = PolygonVertices[(i + 1) % Num];
+		const float CrossProduct = V1.X * V2.Y - V2.X * V1.Y;
+		SignedArea += CrossProduct;
+		Centroid += (V1 + V2) * CrossProduct;
+	}
+
+	if (FMath::Abs(SignedArea) < UE_KINDA_SMALL_NUMBER)
+	{
+		Centroid = FVector2D::ZeroVector;
+		for (const FVector2D& Vertex : PolygonVertices)
+		{
+			Centroid += Vertex;
+		}
+		return Centroid / static_cast<float>(Num);
+	}
+
+	return Centroid / (3.0f * SignedArea);
 }

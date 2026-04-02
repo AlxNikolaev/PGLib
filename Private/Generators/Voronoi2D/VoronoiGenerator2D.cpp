@@ -1,6 +1,10 @@
 ﻿#include "Generators/Voronoi2D/VoronoiGenerator2D.h"
+#if ENABLE_DRAW_DEBUG
 #include "DrawDebugHelpers.h"
+#endif
 #include "GeometryUtils/GeometryFunctionLibrary.h"
+
+static constexpr int32 VoroSiteGenMaxAttempts = 30;
 
 float FVoronoiCell2D::GetArea() const
 {
@@ -19,61 +23,15 @@ float FVoronoiCell2D::GetArea() const
 
 FVector2D FVoronoiCell2D::GetCentroid() const
 {
-	if (Vertices.Num() == 0)
-		return FVector2D::ZeroVector;
-
-	FVector2D Centroid = FVector2D::ZeroVector;
-	float	  SignedArea = 0.0f;
-
-	for (int32 i = 0; i < Vertices.Num(); ++i)
-	{
-		const FVector2D& V1 = Vertices[i];
-		const FVector2D& V2 = Vertices[(i + 1) % Vertices.Num()];
-		const float		 CrossProduct = V1.X * V2.Y - V2.X * V1.Y;
-		SignedArea += CrossProduct;
-		Centroid += (V1 + V2) * CrossProduct;
-	}
-
-	if (FMath::Abs(SignedArea) > KINDA_SMALL_NUMBER)
-	{
-		Centroid /= (3.0f * SignedArea);
-	}
-	else
-	{
-		for (const FVector2D& V : Vertices)
-		{
-			Centroid += V;
-		}
-		Centroid /= Vertices.Num();
-	}
-
-	return Centroid;
+	return FGeometryUtils::GetPolygonCentroid(Vertices);
 }
 
 bool FVoronoiCell2D::ContainsPoint(const FVector2D& Point) const
 {
-	if (Vertices.Num() < 3)
-		return false;
-
-	int32 CrossingCount = 0;
-	for (int32 i = 0; i < Vertices.Num(); ++i)
-	{
-		const FVector2D& V1 = Vertices[i];
-		const FVector2D& V2 = Vertices[(i + 1) % Vertices.Num()];
-
-		if ((V1.Y <= Point.Y && V2.Y > Point.Y) || (V1.Y > Point.Y && V2.Y <= Point.Y))
-		{
-			float T = (Point.Y - V1.Y) / (V2.Y - V1.Y);
-			if (Point.X < V1.X + T * (V2.X - V1.X))
-			{
-				CrossingCount++;
-			}
-		}
-	}
-
-	return (CrossingCount % 2) == 1;
+	return FGeometryUtils::PointInPolygon(Vertices, Point);
 }
 
+#if ENABLE_DRAW_DEBUG
 void FVoronoiDiagram2D::DrawDebug(const UWorld* World, const float Duration, const float ZHeight) const
 {
 	if (!World)
@@ -102,6 +60,7 @@ void FVoronoiDiagram2D::DrawDebug(const UWorld* World, const float Duration, con
 		DrawDebugSphere(World, SitePos, 10.0f, 8, Color);
 	}
 }
+#endif
 
 int32 FVoronoiDiagram2D::FindCellContainingPoint(const FVector2D& Point) const
 {
@@ -124,7 +83,9 @@ bool FVoronoiDiagram2D::GetSharedEdge(const int32 CellA, const int32 CellB, FVec
 	const FVoronoiCell2D& B = Cells[CellB];
 
 	TArray<FVector2D> SharedVertices;
-	const float		  Tolerance = 0.01f;
+	// Scale tolerance relative to diagram bounds — proportional to MaxDimension * 5e-5
+	const float MaxExtent = FMath::Max(Bounds.GetExtent().X, Bounds.GetExtent().Y);
+	const float Tolerance = MaxExtent * 1e-4f;
 
 	for (const FVector2D& VA : A.Vertices)
 	{
@@ -281,9 +242,8 @@ void UVoronoiGenerator2D::ComputeVoronoiCells(const TArray<FVector2D>& Sites, FV
 	}
 }
 
-FVoronoiCell2D UVoronoiGenerator2D::ComputeCellForSite(FVoronoiCell2D& OutCell, int32 SiteIndex, const TArray<FVector2D>& AllSites) const
+void UVoronoiGenerator2D::ComputeCellForSite(FVoronoiCell2D& OutCell, int32 SiteIndex, const TArray<FVector2D>& AllSites) const
 {
-
 	OutCell.SiteLocation = AllSites[SiteIndex];
 	OutCell.CellIndex = SiteIndex;
 
@@ -298,7 +258,7 @@ FVoronoiCell2D UVoronoiGenerator2D::ComputeCellForSite(FVoronoiCell2D& OutCell, 
 		if (!FGeometryUtils::ClipPolygonByHalfPlane(OutCell.Vertices, MidPoint, Normal))
 		{
 			OutCell.bIsValid = false;
-			return OutCell;
+			return;
 		}
 	}
 
@@ -313,7 +273,6 @@ FVoronoiCell2D UVoronoiGenerator2D::ComputeCellForSite(FVoronoiCell2D& OutCell, 
 	}
 
 	OutCell.bIsValid = OutCell.Vertices.Num() >= 3;
-	return OutCell;
 }
 
 TArray<FVector2D> UVoronoiGenerator2D::GeneratePoissonDiscSites(const int32 TargetCount) const
@@ -333,7 +292,7 @@ TArray<FVector2D> UVoronoiGenerator2D::GeneratePoissonDiscSites(const int32 Targ
 		const FVector2D CurrentSite = ActiveList[RandomIndex];
 		bool			bFoundNewSite = false;
 
-		for (int32 Attempt = 0; Attempt < VORO_SITE_GEN_MAX_ATTEMPTS; ++Attempt)
+		for (int32 Attempt = 0; Attempt < VoroSiteGenMaxAttempts; ++Attempt)
 		{
 			const float Angle = RandomStream.FRand() * 2.0f * PI;
 			const float Distance = RandomStream.FRandRange(MinSiteDistance, MinSiteDistance * 2.0f);
@@ -380,6 +339,8 @@ void UVoronoiGenerator2D::RelaxSites(TArray<FVector2D>& Sites)
 	TempDiagram.Sites = Sites;
 
 	ComputeVoronoiCells(Sites, TempDiagram);
+
+	check(TempDiagram.Cells.Num() == Sites.Num());
 
 	for (int32 i = 0; i < TempDiagram.Cells.Num(); ++i)
 	{
