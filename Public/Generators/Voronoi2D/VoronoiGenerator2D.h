@@ -3,14 +3,12 @@
 #include "Generators/LayoutGenerator.h"
 #include "VoronoiGenerator2D.generated.h"
 
-#define VORO_SITE_GEN_MAX_ATTEMPTS (30)
-
 USTRUCT()
 struct PROCEDURALGEOMETRY_API FVoronoiCell2D
 {
 	GENERATED_BODY()
 
-	// Convex, clockwise vertices
+	// Convex, counter-clockwise vertices
 	UPROPERTY()
 	TArray<FVector2D> Vertices;
 
@@ -68,7 +66,9 @@ struct PROCEDURALGEOMETRY_API FVoronoiDiagram2D
 	UPROPERTY()
 	FString Seed;
 
-	void  DrawDebug(const UWorld* World, float Duration = 5.0f, float ZHeight = 0.0f) const;
+#if ENABLE_DRAW_DEBUG
+	void DrawDebug(const UWorld* World, float Duration = 5.0f, float ZHeight = 0.0f) const;
+#endif
 	int32 FindCellContainingPoint(const FVector2D& Point) const;
 	bool  GetSharedEdge(int32 CellA, int32 CellB, FVector2D& OutStart, FVector2D& OutEnd) const;
 	int32 FindClosestCellBySite(const FVector2D& Point) const;
@@ -98,7 +98,7 @@ public:
 
 private:
 	void		   ComputeVoronoiCells(const TArray<FVector2D>& Sites, FVoronoiDiagram2D& OutDiagram) const;
-	FVoronoiCell2D ComputeCellForSite(FVoronoiCell2D& OutCell, int32 SiteIndex, const TArray<FVector2D>& AllSites) const;
+	void ComputeCellForSite(FVoronoiCell2D& OutCell, int32 SiteIndex, const TArray<FVector2D>& AllSites) const;
 
 	// Helpers
 	TArray<FVector2D> GeneratePoissonDiscSites(int32 TargetCount) const;

@@ -1,5 +1,7 @@
 ﻿#pragma once
 
+#include "CoreMinimal.h"
+
 class PROCEDURALGEOMETRY_API FGeometryUtils
 {
 public:
@@ -17,4 +19,5 @@ public:
 private:
 	// Helper functions for polygon operations
 	static float DistanceToLineSegment(const FVector2D& Point, const FVector2D& LineStart, const FVector2D& LineEnd);
+	static void	 GetPolygonBounds(const TArray<FVector2D>& PolygonVertices, FVector2D& OutMin, FVector2D& OutMax);
 };

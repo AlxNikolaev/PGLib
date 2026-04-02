@@ -4,7 +4,7 @@
 #include "LayoutGenerator.generated.h"
 
 USTRUCT()
-struct FLayoutCell2D
+struct PROCEDURALGEOMETRY_API FLayoutCell2D
 {
 	GENERATED_BODY()
 
@@ -36,7 +36,7 @@ struct FLayoutCell2D
 };
 
 USTRUCT()
-struct FLayoutDiagram2D
+struct PROCEDURALGEOMETRY_API FLayoutDiagram2D
 {
 	GENERATED_BODY()
 
@@ -57,7 +57,7 @@ struct FLayoutDiagram2D
 };
 
 UCLASS(Abstract)
-class ULayoutGenerator : public UObject
+class PROCEDURALGEOMETRY_API ULayoutGenerator : public UObject
 {
 	GENERATED_BODY()
 
@@ -84,9 +84,10 @@ public:
 	virtual ULayoutGenerator* SetSeed(const FString& InSeed);
 	virtual ULayoutGenerator* SetGridSize(int32 InSize);
 
-	FLayoutDiagram2D Generate() PURE_VIRTUAL(ULayoutGenerator::Generate, return FLayoutDiagram2D(););
+	virtual FLayoutDiagram2D Generate() PURE_VIRTUAL(ULayoutGenerator::Generate, return FLayoutDiagram2D(););
 
 protected:
 	void	  InitializeRandomStream();
 	FVector2D ClampToBounds(const FVector2D& Point) const;
+	FLayoutDiagram2D ConvertGridToDiagram(const TArray<bool>& Grid, int32 GridWidth, int32 GridHeight) const;
 };
