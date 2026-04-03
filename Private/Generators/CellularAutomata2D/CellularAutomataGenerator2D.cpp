@@ -117,46 +117,70 @@ int32 UCellularAutomataGenerator2D::CountWallNeighbors(const TArray<bool>& Grid,
 
 FLayoutDiagram2D UCellularAutomataGenerator2D::Generate()
 {
+	return GenerateInternal().Diagram;
+}
+
+FCellularAutomataGridData UCellularAutomataGenerator2D::GenerateWithGridData()
+{
+	return GenerateInternal();
+}
+
+FCellularAutomataGridData UCellularAutomataGenerator2D::GenerateInternal()
+{
 	const double StartTime = FPlatformTime::Seconds();
 
-	UE_LOG(LogRoguelikeGeometry, Log,
+	UE_LOG(LogRoguelikeGeometry,
+		Log,
 		TEXT("[CA] Generate() — Bounds=(%.1f,%.1f)-(%.1f,%.1f) GridSize=%d Seed='%s' FillProb=%.2f Iterations=%d MinRegion=%d KeepCenter=%s"),
-		Bounds.Min.X, Bounds.Min.Y, Bounds.Max.X, Bounds.Max.Y,
-		GridSize, *Seed, FillProbability, Iterations, MinRegionSize, bKeepCenterRegion ? TEXT("true") : TEXT("false"));
+		Bounds.Min.X,
+		Bounds.Min.Y,
+		Bounds.Max.X,
+		Bounds.Max.Y,
+		GridSize,
+		*Seed,
+		FillProbability,
+		Iterations,
+		MinRegionSize,
+		bKeepCenterRegion ? TEXT("true") : TEXT("false"));
 
-	const float CellSize = static_cast<float>(GridSize);
+	const float CellSizeVal = static_cast<float>(GridSize);
 	const float BoundsWidth = Bounds.Max.X - Bounds.Min.X;
 	const float BoundsHeight = Bounds.Max.Y - Bounds.Min.Y;
 
-	const int32 GridWidth = FMath::CeilToInt(BoundsWidth / CellSize);
-	const int32 GridHeight = FMath::CeilToInt(BoundsHeight / CellSize);
+	const int32 GWidth = FMath::CeilToInt(BoundsWidth / CellSizeVal);
+	const int32 GHeight = FMath::CeilToInt(BoundsHeight / CellSizeVal);
 
-	UE_LOG(LogRoguelikeGeometry, Log, TEXT("[CA] Grid dimensions: %dx%d (%d total cells)"), GridWidth, GridHeight, GridWidth * GridHeight);
+	UE_LOG(LogRoguelikeGeometry, Log, TEXT("[CA] Grid dimensions: %dx%d (%d total cells)"), GWidth, GHeight, GWidth * GHeight);
 
 	// OOM guard
-	if (GridWidth <= 0 || GridHeight <= 0 || (int64)GridWidth * GridHeight > 4'194'304)
+	if (GWidth <= 0 || GHeight <= 0 || (int64)GWidth * GHeight > 4'194'304)
 	{
-		UE_LOG(LogRoguelikeGeometry, Error, TEXT("[CA] OOM guard triggered: %dx%d exceeds limit"), GridWidth, GridHeight);
-		return FLayoutDiagram2D();
+		UE_LOG(LogRoguelikeGeometry, Error, TEXT("[CA] OOM guard triggered: %dx%d exceeds limit"), GWidth, GHeight);
+		FCellularAutomataGridData EmptyResult;
+		EmptyResult.CenterRegionId = -1;
+		EmptyResult.GridWidth = 0;
+		EmptyResult.GridHeight = 0;
+		EmptyResult.CellSize = CellSizeVal;
+		return EmptyResult;
 	}
 
-	const int32 TotalCells = GridWidth * GridHeight;
+	const int32 TotalCells = GWidth * GHeight;
 
 	// Initialize grid: true = floor, false = wall
 	TArray<bool> Grid;
 	Grid.Init(false, TotalCells);
 
-	for (int32 Y = 0; Y < GridHeight; ++Y)
+	for (int32 Y = 0; Y < GHeight; ++Y)
 	{
-		for (int32 X = 0; X < GridWidth; ++X)
+		for (int32 X = 0; X < GWidth; ++X)
 		{
 			// Boundary cells are always walls
-			if (X == 0 || X == GridWidth - 1 || Y == 0 || Y == GridHeight - 1)
+			if (X == 0 || X == GWidth - 1 || Y == 0 || Y == GHeight - 1)
 			{
 				continue;
 			}
 			// Floor if random value exceeds fill probability (fill = wall probability)
-			Grid[Y * GridWidth + X] = (RandomStream.FRand() >= FillProbability);
+			Grid[Y * GWidth + X] = (RandomStream.FRand() >= FillProbability);
 		}
 	}
 
@@ -169,21 +193,21 @@ FLayoutDiagram2D UCellularAutomataGenerator2D::Generate()
 
 	for (int32 Iter = 0; Iter < Iterations; ++Iter)
 	{
-		for (int32 Y = 0; Y < GridHeight; ++Y)
+		for (int32 Y = 0; Y < GHeight; ++Y)
 		{
-			for (int32 X = 0; X < GridWidth; ++X)
+			for (int32 X = 0; X < GWidth; ++X)
 			{
-				const int32 Index = Y * GridWidth + X;
+				const int32 Index = Y * GWidth + X;
 
 				// Boundary cells stay walls
-				if (X == 0 || X == GridWidth - 1 || Y == 0 || Y == GridHeight - 1)
+				if (X == 0 || X == GWidth - 1 || Y == 0 || Y == GHeight - 1)
 				{
 					NewGrid[Index] = false;
 					continue;
 				}
 
-				const int32 WallNeighbors = CountWallNeighbors(Grid, X, Y, GridWidth, GridHeight);
-				const bool bIsWall = !Grid[Index];
+				const int32 WallNeighbors = CountWallNeighbors(Grid, X, Y, GWidth, GHeight);
+				const bool	bIsWall = !Grid[Index];
 
 				if (bIsWall)
 				{
@@ -211,8 +235,12 @@ FLayoutDiagram2D UCellularAutomataGenerator2D::Generate()
 				++FloorCount;
 			}
 		}
-		UE_LOG(LogRoguelikeGeometry, Log, TEXT("[CA] After %d iterations: %d floor cells (%.1f%% of grid)"),
-			Iterations, FloorCount, 100.0f * FloorCount / TotalCells);
+		UE_LOG(LogRoguelikeGeometry,
+			Log,
+			TEXT("[CA] After %d iterations: %d floor cells (%.1f%% of grid)"),
+			Iterations,
+			FloorCount,
+			100.0f * FloorCount / TotalCells);
 	}
 
 	// Flood-fill: iterative BFS to identify connected floor regions
@@ -220,25 +248,25 @@ FLayoutDiagram2D UCellularAutomataGenerator2D::Generate()
 	RegionIds.Init(-1, TotalCells);
 
 	TArray<TArray<FIntPoint>> Regions;
-	int32 CenterRegionId = -1;
-	const int32 CenterX = GridWidth / 2;
-	const int32 CenterY = GridHeight / 2;
+	int32					  CenterRegionId = -1;
+	const int32				  CenterX = GWidth / 2;
+	const int32				  CenterY = GHeight / 2;
 
 	const int32 DX[] = { 1, -1, 0, 0 };
 	const int32 DY[] = { 0, 0, 1, -1 };
 
-	for (int32 Y = 0; Y < GridHeight; ++Y)
+	for (int32 Y = 0; Y < GHeight; ++Y)
 	{
-		for (int32 X = 0; X < GridWidth; ++X)
+		for (int32 X = 0; X < GWidth; ++X)
 		{
-			const int32 Index = Y * GridWidth + X;
+			const int32 Index = Y * GWidth + X;
 			if (!Grid[Index] || RegionIds[Index] >= 0)
 			{
 				continue;
 			}
 
 			// Start new region with BFS
-			const int32 RegionId = Regions.Num();
+			const int32		   RegionId = Regions.Num();
 			TArray<FIntPoint>& Region = Regions.AddDefaulted_GetRef();
 
 			TArray<FIntPoint> Queue;
@@ -256,9 +284,9 @@ FLayoutDiagram2D UCellularAutomataGenerator2D::Generate()
 					const int32 NX = Cell.X + DX[Dir];
 					const int32 NY = Cell.Y + DY[Dir];
 
-					if (NX >= 0 && NX < GridWidth && NY >= 0 && NY < GridHeight)
+					if (NX >= 0 && NX < GWidth && NY >= 0 && NY < GHeight)
 					{
-						const int32 NIndex = NY * GridWidth + NX;
+						const int32 NIndex = NY * GWidth + NX;
 						if (Grid[NIndex] && RegionIds[NIndex] < 0)
 						{
 							RegionIds[NIndex] = RegionId;
@@ -271,7 +299,7 @@ FLayoutDiagram2D UCellularAutomataGenerator2D::Generate()
 			// Check if this region contains the center cell
 			if (CenterRegionId < 0)
 			{
-				const int32 CenterIndex = CenterY * GridWidth + CenterX;
+				const int32 CenterIndex = CenterY * GWidth + CenterX;
 				if (RegionIds[CenterIndex] == RegionId)
 				{
 					CenterRegionId = RegionId;
@@ -280,8 +308,11 @@ FLayoutDiagram2D UCellularAutomataGenerator2D::Generate()
 		}
 	}
 
-	UE_LOG(LogRoguelikeGeometry, Log, TEXT("[CA] Flood-fill found %d regions, center region=%d"),
-		Regions.Num(), CenterRegionId);
+	UE_LOG(LogRoguelikeGeometry, Log, TEXT("[CA] Flood-fill found %d regions, center region=%d"), Regions.Num(), CenterRegionId);
+
+	// Build SurvivingRegions array before culling
+	TArray<bool> SurvivingRegions;
+	SurvivingRegions.Init(true, Regions.Num());
 
 	// Cull small regions
 	int32 CulledCount = 0;
@@ -296,36 +327,234 @@ FLayoutDiagram2D UCellularAutomataGenerator2D::Generate()
 
 			for (const FIntPoint& Cell : Regions[RegionId])
 			{
-				Grid[Cell.Y * GridWidth + Cell.X] = false;
+				Grid[Cell.Y * GWidth + Cell.X] = false;
 			}
+			SurvivingRegions[RegionId] = false;
 			++CulledCount;
 		}
 	}
 
-	UE_LOG(LogRoguelikeGeometry, Log, TEXT("[CA] Culled %d regions below MinRegionSize=%d, %d surviving"),
-		CulledCount, MinRegionSize, Regions.Num() - CulledCount);
+	UE_LOG(LogRoguelikeGeometry,
+		Log,
+		TEXT("[CA] Culled %d regions below MinRegionSize=%d, %d surviving"),
+		CulledCount,
+		MinRegionSize,
+		Regions.Num() - CulledCount);
 
-	FLayoutDiagram2D Result = BuildDiagramFromRegions(Grid, RegionIds, Regions, CenterRegionId, GridWidth, GridHeight);
+	FLayoutDiagram2D Diagram = BuildDiagramFromRegions(Grid, RegionIds, Regions, CenterRegionId, GWidth, GHeight);
 
 	const double ElapsedMs = (FPlatformTime::Seconds() - StartTime) * 1000.0;
-	UE_LOG(LogRoguelikeGeometry, Log, TEXT("[CA] Generate() complete: %d cells in %.2fms"), Result.Cells.Num(), ElapsedMs);
+	UE_LOG(LogRoguelikeGeometry, Log, TEXT("[CA] Generate() complete: %d cells in %.2fms"), Diagram.Cells.Num(), ElapsedMs);
+
+	FCellularAutomataGridData Result;
+	Result.Grid = MoveTemp(Grid);
+	Result.RegionIds = MoveTemp(RegionIds);
+	Result.Regions = MoveTemp(Regions);
+	Result.SurvivingRegions = MoveTemp(SurvivingRegions);
+	Result.CenterRegionId = CenterRegionId;
+	Result.GridWidth = GWidth;
+	Result.GridHeight = GHeight;
+	Result.CellSize = CellSizeVal;
+	Result.Diagram = MoveTemp(Diagram);
 
 	return Result;
 }
 
-FLayoutDiagram2D UCellularAutomataGenerator2D::BuildDiagramFromRegions(
-	const TArray<bool>& Grid,
-	const TArray<int32>& RegionIds,
-	const TArray<TArray<FIntPoint>>& Regions,
-	int32 CenterRegionId,
-	int32 InGridWidth,
-	int32 InGridHeight)
+void UCellularAutomataGenerator2D::CarveCorridors(FCellularAutomataGridData& GridData, float Probability, int32 Width, FRandomStream& InRandomStream)
+{
+	if (Probability <= 0.0f)
+	{
+		UE_LOG(LogRoguelikeGeometry, Verbose, TEXT("[CA] CarveCorridors: probability=0, skipping"));
+		return;
+	}
+
+	Width = FMath::Max(1, Width);
+
+	// Identify surviving region indices
+	TArray<int32> SurvivingIds;
+	for (int32 i = 0; i < GridData.SurvivingRegions.Num(); ++i)
+	{
+		if (GridData.SurvivingRegions[i])
+		{
+			SurvivingIds.Add(i);
+		}
+	}
+
+	if (SurvivingIds.Num() < 2)
+	{
+		UE_LOG(LogRoguelikeGeometry, Verbose, TEXT("[CA] CarveCorridors: fewer than 2 surviving regions, nothing to connect"));
+		return;
+	}
+
+	// Build neighbor set from current diagram for surviving regions
+	TMap<int32, int32> RegionToDiagramCell;
+	for (int32 CellIdx = 0; CellIdx < GridData.Diagram.Cells.Num(); ++CellIdx)
+	{
+		// Map by finding which surviving region index this diagram cell corresponds to
+		// The diagram cells are ordered by surviving region (same order as BuildDiagramFromRegions)
+		if (CellIdx < SurvivingIds.Num())
+		{
+			RegionToDiagramCell.Add(SurvivingIds[CellIdx], CellIdx);
+		}
+	}
+
+	// Find disconnected pairs (surviving regions that are NOT neighbors in the diagram)
+	TSet<TPair<int32, int32>> ConnectedPairs;
+	for (int32 CellIdx = 0; CellIdx < GridData.Diagram.Cells.Num(); ++CellIdx)
+	{
+		for (int32 NeighborIdx : GridData.Diagram.Cells[CellIdx].Neighbors)
+		{
+			int32 MinIdx = FMath::Min(CellIdx, NeighborIdx);
+			int32 MaxIdx = FMath::Max(CellIdx, NeighborIdx);
+			ConnectedPairs.Add(TPair<int32, int32>(MinIdx, MaxIdx));
+		}
+	}
+
+	int32 CorridorsCarved = 0;
+
+	for (int32 a = 0; a < SurvivingIds.Num(); ++a)
+	{
+		for (int32 b = a + 1; b < SurvivingIds.Num(); ++b)
+		{
+			const int32* CellA = RegionToDiagramCell.Find(SurvivingIds[a]);
+			const int32* CellB = RegionToDiagramCell.Find(SurvivingIds[b]);
+
+			if (!CellA || !CellB)
+			{
+				continue;
+			}
+
+			int32 MinCell = FMath::Min(*CellA, *CellB);
+			int32 MaxCell = FMath::Max(*CellA, *CellB);
+
+			if (ConnectedPairs.Contains(TPair<int32, int32>(MinCell, MaxCell)))
+			{
+				// Already connected — skip
+				continue;
+			}
+
+			// Probabilistic check
+			if (InRandomStream.FRand() > Probability)
+			{
+				continue;
+			}
+
+			// Find nearest cells between the two regions
+			const int32				 RegionIdA = SurvivingIds[a];
+			const int32				 RegionIdB = SurvivingIds[b];
+			const TArray<FIntPoint>& RegionCellsA = GridData.Regions[RegionIdA];
+			const TArray<FIntPoint>& RegionCellsB = GridData.Regions[RegionIdB];
+
+			// Find the closest pair of cells between the two regions
+			float	  BestDistSq = FLT_MAX;
+			FIntPoint BestA(0, 0);
+			FIntPoint BestB(0, 0);
+
+			for (const FIntPoint& CellPtA : RegionCellsA)
+			{
+				for (const FIntPoint& CellPtB : RegionCellsB)
+				{
+					const float DistSq = static_cast<float>(FMath::Square(CellPtA.X - CellPtB.X) + FMath::Square(CellPtA.Y - CellPtB.Y));
+					if (DistSq < BestDistSq)
+					{
+						BestDistSq = DistSq;
+						BestA = CellPtA;
+						BestB = CellPtB;
+					}
+				}
+			}
+
+			// Carve a straight-line corridor from BestA to BestB
+			const int32 HalfWidth = Width / 2;
+
+			// Bresenham-like line from BestA to BestB
+			int32		X0 = BestA.X, Y0 = BestA.Y;
+			int32		X1 = BestB.X, Y1 = BestB.Y;
+			const int32 DX = FMath::Abs(X1 - X0);
+			const int32 DY = -FMath::Abs(Y1 - Y0);
+			const int32 SX = X0 < X1 ? 1 : -1;
+			const int32 SY = Y0 < Y1 ? 1 : -1;
+			int32		Err = DX + DY;
+
+			while (true)
+			{
+				// Carve a band of width cells centered on (X0, Y0)
+				for (int32 OffY = -HalfWidth; OffY <= HalfWidth; ++OffY)
+				{
+					for (int32 OffX = -HalfWidth; OffX <= HalfWidth; ++OffX)
+					{
+						const int32 CX = X0 + OffX;
+						const int32 CY = Y0 + OffY;
+
+						// Stay within bounds, keep boundary walls intact
+						if (CX > 0 && CX < GridData.GridWidth - 1 && CY > 0 && CY < GridData.GridHeight - 1)
+						{
+							const int32 Idx = CY * GridData.GridWidth + CX;
+							if (!GridData.Grid[Idx])
+							{
+								GridData.Grid[Idx] = true;
+								GridData.RegionIds[Idx] = RegionIdA;
+							}
+						}
+					}
+				}
+
+				if (X0 == X1 && Y0 == Y1)
+				{
+					break;
+				}
+
+				const int32 E2 = 2 * Err;
+				if (E2 >= DY)
+				{
+					Err += DY;
+					X0 += SX;
+				}
+				if (E2 <= DX)
+				{
+					Err += DX;
+					Y0 += SY;
+				}
+			}
+
+			++CorridorsCarved;
+		}
+	}
+
+	UE_LOG(LogRoguelikeGeometry,
+		Log,
+		TEXT("[CA] CarveCorridors: carved %d corridors (probability=%.2f, width=%d)"),
+		CorridorsCarved,
+		Probability,
+		Width);
+}
+
+void UCellularAutomataGenerator2D::RebuildDiagram(FCellularAutomataGridData& GridData)
+{
+	UE_LOG(LogRoguelikeGeometry,
+		Verbose,
+		TEXT("[CA] RebuildDiagram: rebuilding diagram from modified grid (%dx%d)"),
+		GridData.GridWidth,
+		GridData.GridHeight);
+
+	GridData.Diagram = BuildDiagramFromRegions(
+		GridData.Grid, GridData.RegionIds, GridData.Regions, GridData.CenterRegionId, GridData.GridWidth, GridData.GridHeight);
+
+	UE_LOG(LogRoguelikeGeometry, Log, TEXT("[CA] RebuildDiagram: produced %d cells"), GridData.Diagram.Cells.Num());
+}
+
+FLayoutDiagram2D UCellularAutomataGenerator2D::BuildDiagramFromRegions(const TArray<bool>& Grid,
+	const TArray<int32>&																   RegionIds,
+	const TArray<TArray<FIntPoint>>&													   Regions,
+	int32																				   CenterRegionId,
+	int32																				   InGridWidth,
+	int32																				   InGridHeight)
 {
 	const float CellSize = static_cast<float>(GridSize);
 
 	// Stage 1: Identify surviving regions
 	TMap<int32, int32> RegionToCellIndex;
-	TArray<int32> SurvivingRegionIds;
+	TArray<int32>	   SurvivingRegionIds;
 
 	for (int32 RegionId = 0; RegionId < Regions.Num(); ++RegionId)
 	{
@@ -353,26 +582,28 @@ FLayoutDiagram2D UCellularAutomataGenerator2D::BuildDiagramFromRegions(
 
 	for (int32 i = 0; i < SurvivingRegionIds.Num(); ++i)
 	{
-		const int32 RegionId = SurvivingRegionIds[i];
+		const int32				 RegionId = SurvivingRegionIds[i];
 		const TArray<FIntPoint>& Region = Regions[RegionId];
 
 		FLayoutCell2D Cell;
 		Cell.CellIndex = i;
 		Cell.Vertices = TraceBoundaryPolygon(Region, RegionIds, RegionId, InGridWidth, InGridHeight, CellSize);
 
-		UE_LOG(LogRoguelikeGeometry, Verbose, TEXT("[CA] Region %d: %d grid cells, %d boundary vertices, exterior=%s"),
-			RegionId, Region.Num(), Cell.Vertices.Num(),
+		UE_LOG(LogRoguelikeGeometry,
+			Verbose,
+			TEXT("[CA] Region %d: %d grid cells, %d boundary vertices, exterior=%s"),
+			RegionId,
+			Region.Num(),
+			Cell.Vertices.Num(),
 			(Cell.Vertices.Num() > 0) ? TEXT("pending") : TEXT("n/a"));
 
 		// Compute center as arithmetic mean of constituent cell centers
 		FVector2D CenterSum = FVector2D::ZeroVector;
-		bool bTouchesBoundary = false;
+		bool	  bTouchesBoundary = false;
 
 		for (const FIntPoint& GridCell : Region)
 		{
-			CenterSum += FVector2D(
-				Bounds.Min.X + (GridCell.X + 0.5f) * CellSize,
-				Bounds.Min.Y + (GridCell.Y + 0.5f) * CellSize);
+			CenterSum += FVector2D(Bounds.Min.X + (GridCell.X + 0.5f) * CellSize, Bounds.Min.Y + (GridCell.Y + 0.5f) * CellSize);
 
 			if (GridCell.X == 0 || GridCell.X == InGridWidth - 1 || GridCell.Y == 0 || GridCell.Y == InGridHeight - 1)
 			{
@@ -413,7 +644,7 @@ FLayoutDiagram2D UCellularAutomataGenerator2D::BuildDiagramFromRegions(
 
 				if (NX >= 0 && NX < InGridWidth && NY >= 0 && NY < InGridHeight && Grid[NY * InGridWidth + NX])
 				{
-					const int32 NRegionId = RegionIds[NY * InGridWidth + NX];
+					const int32	 NRegionId = RegionIds[NY * InGridWidth + NX];
 					const int32* CellIdx = RegionToCellIndex.Find(NRegionId);
 					if (CellIdx)
 					{
@@ -452,18 +683,12 @@ FLayoutDiagram2D UCellularAutomataGenerator2D::BuildDiagramFromRegions(
 }
 
 TArray<FVector2D> UCellularAutomataGenerator2D::TraceBoundaryPolygon(
-	const TArray<FIntPoint>& Region,
-	const TArray<int32>& RegionIds,
-	int32 RegionId,
-	int32 InGridWidth,
-	int32 InGridHeight,
-	float InCellSize) const
+	const TArray<FIntPoint>& Region, const TArray<int32>& RegionIds, int32 RegionId, int32 InGridWidth, int32 InGridHeight, float InCellSize) const
 {
 	// Collect directed boundary edges in grid corner coordinates (CCW, interior on left)
 	TMap<FIntPoint, FIntPoint> EdgeMap;
 
-	auto IsOutsideRegion = [&](int32 NX, int32 NY) -> bool
-	{
+	auto IsOutsideRegion = [&](int32 NX, int32 NY) -> bool {
 		if (NX < 0 || NX >= InGridWidth || NY < 0 || NY >= InGridHeight)
 		{
 			return true;
@@ -471,8 +696,7 @@ TArray<FVector2D> UCellularAutomataGenerator2D::TraceBoundaryPolygon(
 		return RegionIds[NY * InGridWidth + NX] != RegionId;
 	};
 
-	auto TryAddEdge = [&](const FIntPoint& Start, const FIntPoint& End)
-	{
+	auto TryAddEdge = [&](const FIntPoint& Start, const FIntPoint& End) {
 		if (ensure(!EdgeMap.Contains(Start)))
 		{
 			EdgeMap.Add(Start, End);
@@ -509,7 +733,7 @@ TArray<FVector2D> UCellularAutomataGenerator2D::TraceBoundaryPolygon(
 
 	// Chain edges into closed loops
 	TArray<TArray<FIntPoint>> Loops;
-	TSet<FIntPoint> Visited;
+	TSet<FIntPoint>			  Visited;
 
 	for (const auto& Edge : EdgeMap)
 	{
@@ -520,7 +744,7 @@ TArray<FVector2D> UCellularAutomataGenerator2D::TraceBoundaryPolygon(
 		}
 
 		TArray<FIntPoint> Loop;
-		FIntPoint Current = Start;
+		FIntPoint		  Current = Start;
 
 		while (!Visited.Contains(Current))
 		{
@@ -578,7 +802,7 @@ float UCellularAutomataGenerator2D::ComputePolygonArea(const TArray<FIntPoint>& 
 TArray<FVector2D> UCellularAutomataGenerator2D::SimplifyAndConvert(const TArray<FIntPoint>& Loop, float InCellSize) const
 {
 	TArray<FVector2D> Result;
-	const int32 N = Loop.Num();
+	const int32		  N = Loop.Num();
 
 	for (int32 i = 0; i < N; ++i)
 	{

@@ -97,7 +97,7 @@ public:
 	FVoronoiDiagram2D GenerateRelaxed(int32 NumSites);
 
 private:
-	void		   ComputeVoronoiCells(const TArray<FVector2D>& Sites, FVoronoiDiagram2D& OutDiagram) const;
+	void ComputeVoronoiCells(const TArray<FVector2D>& Sites, FVoronoiDiagram2D& OutDiagram) const;
 	void ComputeCellForSite(FVoronoiCell2D& OutCell, int32 SiteIndex, const TArray<FVector2D>& AllSites) const;
 
 	// Helpers

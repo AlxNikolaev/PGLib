@@ -36,6 +36,32 @@ class PROCEDURALGEOMETRY_API ADrunkardWalk2DVisualizer : public AActor
 	UPROPERTY(EditInstanceOnly, meta = (ClampMin = 1))
 	int32 RoomRadius = 1;
 
+	// --- Visualization layer toggles ---
+
+	UPROPERTY(EditInstanceOnly, Category = "Visualization Layers", meta = (ToolTip = "Wall/floor cell fill."))
+	bool bShowGridCells = true;
+
+	UPROPERTY(EditInstanceOnly, Category = "Visualization Layers", meta = (ToolTip = "Per-region distinct hue tinting on floor cells."))
+	bool bShowRegionColors = true;
+
+	UPROPERTY(EditInstanceOnly, Category = "Visualization Layers", meta = (ToolTip = "Distinct tint overlay for room cells vs corridor cells."))
+	bool bShowRoomHighlights = true;
+
+	UPROPERTY(EditInstanceOnly, Category = "Visualization Layers", meta = (ToolTip = "Thin lines at cell boundaries."))
+	bool bShowGridLines = false;
+
+	UPROPERTY(EditInstanceOnly, Category = "Visualization Layers", meta = (ToolTip = "Lines showing each walker's trajectory, color per walker."))
+	bool bShowWalkerPaths = true;
+
+	UPROPERTY(EditInstanceOnly, Category = "Visualization Layers", meta = (ToolTip = "Thick outlines around region polygons from Diagram."))
+	bool bShowRegionBoundaries = true;
+
+	UPROPERTY(EditInstanceOnly, Category = "Visualization Layers", meta = (ToolTip = "Lines between neighboring region centers."))
+	bool bShowAdjacencyGraph = false;
+
+	UPROPERTY(EditInstanceOnly, Category = "Visualization Layers", meta = (ToolTip = "Highlighted cell at grid center."))
+	bool bShowCenterMarker = true;
+
 public:
 	ADrunkardWalk2DVisualizer();
 

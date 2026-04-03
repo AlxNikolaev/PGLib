@@ -105,7 +105,7 @@ FLayoutDiagram2D ULayoutGenerator::ConvertGridToDiagram(const TArray<bool>& Grid
 	}
 
 	// Second pass: compute neighbors and find center cell
-	float BestCenterDistSq = FLT_MAX;
+	float		BestCenterDistSq = FLT_MAX;
 	const int32 DX[] = { 1, -1, 0, 0 };
 	const int32 DY[] = { 0, 0, 1, -1 };
 

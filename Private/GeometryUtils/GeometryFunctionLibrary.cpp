@@ -37,8 +37,7 @@ bool FGeometryUtils::ClipPolygonByHalfPlane(TArray<FVector2D>& OutPolygon, const
 	FVector2D		  Prev = OutPolygon.Last();
 	double			  PrevSide = FVector2D::DotProduct(Prev - PlanePoint, PlaneNormal);
 
-	auto SafeAlpha = [](double InPrevSide, double InCurrSide) -> double
-	{
+	auto SafeAlpha = [](double InPrevSide, double InCurrSide) -> double {
 		double Denominator = InPrevSide - InCurrSide;
 		if (FMath::Abs(Denominator) < UE_DOUBLE_KINDA_SMALL_NUMBER)
 		{
@@ -377,6 +376,34 @@ void FGeometryUtils::PoissonDiskSampling(
 	}
 }
 
+void FGeometryUtils::ChaikinSubdivide(TArray<FVector2D>& Vertices, int32 Iterations)
+{
+	if (Vertices.Num() < 3 || Iterations <= 0)
+	{
+		return;
+	}
+
+	for (int32 Iter = 0; Iter < Iterations; ++Iter)
+	{
+		const int32		  N = Vertices.Num();
+		TArray<FVector2D> Subdivided;
+		Subdivided.Reserve(N * 2);
+
+		for (int32 i = 0; i < N; ++i)
+		{
+			const FVector2D& P0 = Vertices[i];
+			const FVector2D& P1 = Vertices[(i + 1) % N];
+
+			// Q = 3/4 * P0 + 1/4 * P1
+			Subdivided.Add(P0 * 0.75f + P1 * 0.25f);
+			// R = 1/4 * P0 + 3/4 * P1
+			Subdivided.Add(P0 * 0.25f + P1 * 0.75f);
+		}
+
+		Vertices = MoveTemp(Subdivided);
+	}
+}
+
 // Helper functions
 
 void FGeometryUtils::GetPolygonBounds(const TArray<FVector2D>& PolygonVertices, FVector2D& OutMin, FVector2D& OutMax)
@@ -429,13 +456,13 @@ FVector2D FGeometryUtils::GetPolygonCentroid(const TArray<FVector2D>& PolygonVer
 	}
 
 	FVector2D Centroid = FVector2D::ZeroVector;
-	float SignedArea = 0.0f;
+	float	  SignedArea = 0.0f;
 
 	for (int32 i = 0; i < Num; ++i)
 	{
 		const FVector2D& V1 = PolygonVertices[i];
 		const FVector2D& V2 = PolygonVertices[(i + 1) % Num];
-		const float CrossProduct = V1.X * V2.Y - V2.X * V1.Y;
+		const float		 CrossProduct = V1.X * V2.Y - V2.X * V1.Y;
 		SignedArea += CrossProduct;
 		Centroid += (V1 + V2) * CrossProduct;
 	}

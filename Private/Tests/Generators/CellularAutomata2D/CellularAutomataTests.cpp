@@ -1,4 +1,5 @@
 #include "Generators/CellularAutomata2D/CellularAutomataGenerator2D.h"
+#include "Generators/CellularAutomata2D/CellularAutomataConfig.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
 
@@ -9,8 +10,7 @@ namespace
 } // namespace
 
 // Test 1: Default Generate() produces non-empty diagram
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FCellularAutomataDefaultGenerateTest, "ProceduralGeometry.CellularAutomata.DefaultGenerate", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCellularAutomataDefaultGenerateTest, "ProceduralGeometry.CellularAutomata.DefaultGenerate", DefaultTestFlags)
 
 bool FCellularAutomataDefaultGenerateTest::RunTest(const FString& Parameters)
 {
@@ -31,12 +31,11 @@ bool FCellularAutomataDefaultGenerateTest::RunTest(const FString& Parameters)
 }
 
 // Test 2: Determinism - same seed produces identical diagram
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FCellularAutomataDeterminismTest, "ProceduralGeometry.CellularAutomata.Determinism", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCellularAutomataDeterminismTest, "ProceduralGeometry.CellularAutomata.Determinism", DefaultTestFlags)
 
 bool FCellularAutomataDeterminismTest::RunTest(const FString& Parameters)
 {
-	const FBox2D TestBounds(FVector2D(-500, -500), FVector2D(500, 500));
+	const FBox2D  TestBounds(FVector2D(-500, -500), FVector2D(500, 500));
 	const FString TestSeed = TEXT("DeterminismTest");
 
 	UCellularAutomataGenerator2D* Gen1 = NewObject<UCellularAutomataGenerator2D>();
@@ -56,18 +55,19 @@ bool FCellularAutomataDeterminismTest::RunTest(const FString& Parameters)
 
 		TestEqual(FString::Printf(TEXT("Cell %d center X"), i),
 			static_cast<float>(Diagram1.Cells[i].Center.X),
-			static_cast<float>(Diagram2.Cells[i].Center.X), 0.01f);
+			static_cast<float>(Diagram2.Cells[i].Center.X),
+			0.01f);
 		TestEqual(FString::Printf(TEXT("Cell %d center Y"), i),
 			static_cast<float>(Diagram1.Cells[i].Center.Y),
-			static_cast<float>(Diagram2.Cells[i].Center.Y), 0.01f);
+			static_cast<float>(Diagram2.Cells[i].Center.Y),
+			0.01f);
 	}
 
 	return true;
 }
 
 // Test 3: Neighbor symmetry - if A neighbors B, B neighbors A
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FCellularAutomataNeighborSymmetryTest, "ProceduralGeometry.CellularAutomata.NeighborSymmetry", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCellularAutomataNeighborSymmetryTest, "ProceduralGeometry.CellularAutomata.NeighborSymmetry", DefaultTestFlags)
 
 bool FCellularAutomataNeighborSymmetryTest::RunTest(const FString& Parameters)
 {
@@ -98,8 +98,7 @@ bool FCellularAutomataNeighborSymmetryTest::RunTest(const FString& Parameters)
 }
 
 // Test 4: FillProbability=0.0 carves most interior cells (low fill = mostly floor)
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FCellularAutomataLowFillTest, "ProceduralGeometry.CellularAutomata.LowFillProbability", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCellularAutomataLowFillTest, "ProceduralGeometry.CellularAutomata.LowFillProbability", DefaultTestFlags)
 
 bool FCellularAutomataLowFillTest::RunTest(const FString& Parameters)
 {
@@ -114,8 +113,7 @@ bool FCellularAutomataLowFillTest::RunTest(const FString& Parameters)
 
 	// With FillProbability=0.0 and 0 iterations, all 64 interior floor cells
 	// form one connected region that merges into a single cell
-	TestEqual("FillProbability=0 with 0 iterations should produce 1 merged region",
-		Diagram.Cells.Num(), 1);
+	TestEqual("FillProbability=0 with 0 iterations should produce 1 merged region", Diagram.Cells.Num(), 1);
 
 	// The boundary of an 8x8 rectangular interior block simplifies to 4 vertices
 	if (Diagram.Cells.Num() > 0)
@@ -127,8 +125,7 @@ bool FCellularAutomataLowFillTest::RunTest(const FString& Parameters)
 }
 
 // Test 5: FillProbability=1.0 produces empty or near-empty diagram
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FCellularAutomataHighFillTest, "ProceduralGeometry.CellularAutomata.HighFillProbability", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCellularAutomataHighFillTest, "ProceduralGeometry.CellularAutomata.HighFillProbability", DefaultTestFlags)
 
 bool FCellularAutomataHighFillTest::RunTest(const FString& Parameters)
 {
@@ -148,12 +145,11 @@ bool FCellularAutomataHighFillTest::RunTest(const FString& Parameters)
 }
 
 // Test 6: MinRegionSize filter removes small regions
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FCellularAutomataMinRegionSizeTest, "ProceduralGeometry.CellularAutomata.MinRegionSize", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCellularAutomataMinRegionSizeTest, "ProceduralGeometry.CellularAutomata.MinRegionSize", DefaultTestFlags)
 
 bool FCellularAutomataMinRegionSizeTest::RunTest(const FString& Parameters)
 {
-	const FBox2D TestBounds(FVector2D(-500, -500), FVector2D(500, 500));
+	const FBox2D  TestBounds(FVector2D(-500, -500), FVector2D(500, 500));
 	const FString TestSeed = TEXT("RegionSizeTest");
 
 	// Generate with MinRegionSize=1 (keep all regions)
@@ -173,19 +169,17 @@ bool FCellularAutomataMinRegionSizeTest::RunTest(const FString& Parameters)
 	TestTrue("Keeping all regions should have cells", DiagramAll.Cells.Num() > 0);
 
 	// Culling small regions should produce fewer or equal cells
-	TestTrue("High MinRegionSize should produce fewer or equal cells",
-		DiagramCulled.Cells.Num() <= DiagramAll.Cells.Num());
+	TestTrue("High MinRegionSize should produce fewer or equal cells", DiagramCulled.Cells.Num() <= DiagramAll.Cells.Num());
 
 	return true;
 }
 
 // Test 7: bKeepCenterRegion=true preserves center region even when below MinRegionSize
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FCellularAutomataKeepCenterTest, "ProceduralGeometry.CellularAutomata.KeepCenterRegion", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCellularAutomataKeepCenterTest, "ProceduralGeometry.CellularAutomata.KeepCenterRegion", DefaultTestFlags)
 
 bool FCellularAutomataKeepCenterTest::RunTest(const FString& Parameters)
 {
-	const FBox2D TestBounds(FVector2D(-500, -500), FVector2D(500, 500));
+	const FBox2D  TestBounds(FVector2D(-500, -500), FVector2D(500, 500));
 	const FString TestSeed = TEXT("CenterRegionTest");
 
 	// Generate with bKeepCenterRegion=true and high MinRegionSize
@@ -208,15 +202,13 @@ bool FCellularAutomataKeepCenterTest::RunTest(const FString& Parameters)
 		DiagramKeep.CenterCellIndex >= 0 && DiagramKeep.CenterCellIndex < DiagramKeep.Cells.Num());
 
 	// With bKeepCenterRegion=false and very high MinRegionSize, all regions may be culled
-	TestTrue("KeepCenterRegion=true should produce >= cells compared to false",
-		DiagramKeep.Cells.Num() >= DiagramCull.Cells.Num());
+	TestTrue("KeepCenterRegion=true should produce >= cells compared to false", DiagramKeep.Cells.Num() >= DiagramCull.Cells.Num());
 
 	return true;
 }
 
 // Test 8: OOM guard - huge bounds + small GridSize returns empty diagram
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FCellularAutomataOOMGuardTest, "ProceduralGeometry.CellularAutomata.OOMGuard", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCellularAutomataOOMGuardTest, "ProceduralGeometry.CellularAutomata.OOMGuard", DefaultTestFlags)
 
 bool FCellularAutomataOOMGuardTest::RunTest(const FString& Parameters)
 {
@@ -233,8 +225,7 @@ bool FCellularAutomataOOMGuardTest::RunTest(const FString& Parameters)
 }
 
 // Test 9: Region merging produces correct region-level cells
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FCellularAutomataRegionMergingTest, "ProceduralGeometry.CellularAutomata.RegionMerging", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCellularAutomataRegionMergingTest, "ProceduralGeometry.CellularAutomata.RegionMerging", DefaultTestFlags)
 
 bool FCellularAutomataRegionMergingTest::RunTest(const FString& Parameters)
 {
@@ -251,16 +242,13 @@ bool FCellularAutomataRegionMergingTest::RunTest(const FString& Parameters)
 
 	// Region merging should produce fewer cells than total possible interior cells
 	TestTrue("Should have cells", Diagram.Cells.Num() > 0);
-	TestTrue("Merged regions should be fewer than raw grid cells",
-		Diagram.Cells.Num() < 8 * 8);
+	TestTrue("Merged regions should be fewer than raw grid cells", Diagram.Cells.Num() < 8 * 8);
 
 	// Each cell should have a valid polygon
 	for (int32 i = 0; i < Diagram.Cells.Num(); ++i)
 	{
-		TestTrue(FString::Printf(TEXT("Cell %d should have >= 3 vertices"), i),
-			Diagram.Cells[i].Vertices.Num() >= 3);
-		TestEqual(FString::Printf(TEXT("Cell %d index matches"), i),
-			Diagram.Cells[i].CellIndex, i);
+		TestTrue(FString::Printf(TEXT("Cell %d should have >= 3 vertices"), i), Diagram.Cells[i].Vertices.Num() >= 3);
+		TestEqual(FString::Printf(TEXT("Cell %d index matches"), i), Diagram.Cells[i].CellIndex, i);
 	}
 
 	// Neighbor symmetry at region level
@@ -268,8 +256,7 @@ bool FCellularAutomataRegionMergingTest::RunTest(const FString& Parameters)
 	{
 		for (int32 NeighborIdx : Diagram.Cells[i].Neighbors)
 		{
-			TestTrue(FString::Printf(TEXT("Neighbor %d of cell %d is valid"), NeighborIdx, i),
-				NeighborIdx >= 0 && NeighborIdx < Diagram.Cells.Num());
+			TestTrue(FString::Printf(TEXT("Neighbor %d of cell %d is valid"), NeighborIdx, i), NeighborIdx >= 0 && NeighborIdx < Diagram.Cells.Num());
 
 			if (NeighborIdx >= 0 && NeighborIdx < Diagram.Cells.Num())
 			{
@@ -280,8 +267,188 @@ bool FCellularAutomataRegionMergingTest::RunTest(const FString& Parameters)
 	}
 
 	// CenterCellIndex should be valid
-	TestTrue("CenterCellIndex should be valid",
-		Diagram.CenterCellIndex >= 0 && Diagram.CenterCellIndex < Diagram.Cells.Num());
+	TestTrue("CenterCellIndex should be valid", Diagram.CenterCellIndex >= 0 && Diagram.CenterCellIndex < Diagram.Cells.Num());
+
+	return true;
+}
+
+// Test 10: CarveCorridors connects disconnected regions
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FCellularAutomataCarveCorridorsTest, "ProceduralGeometry.CellularAutomata.CarveCorridorsConnectsDisconnected", DefaultTestFlags)
+
+bool FCellularAutomataCarveCorridorsTest::RunTest(const FString& Parameters)
+{
+	// SwissCheese config produces many small isolated pockets — good for testing corridor carving
+	UCellularAutomataGenerator2D* Generator = NewObject<UCellularAutomataGenerator2D>();
+	Generator->SetBounds(FBox2D(FVector2D(-500, -500), FVector2D(500, 500)))->SetGridSize(20)->SetSeed(TEXT("corridor_test_disconnect"));
+	Generator->SetFillProbability(0.45f);
+	Generator->SetIterations(5);
+	Generator->SetBirthRule({ 6, 7, 8 });
+	Generator->SetSurvivalRule({ 3, 4, 5 });
+	Generator->SetMinRegionSize(5);
+	Generator->SetKeepCenterRegion(true);
+
+	FCellularAutomataGridData GridData = Generator->GenerateWithGridData();
+
+	// Count surviving regions
+	int32 SurvivingCount = 0;
+	for (bool bSurvived : GridData.SurvivingRegions)
+	{
+		if (bSurvived)
+		{
+			++SurvivingCount;
+		}
+	}
+
+	TestTrue("At least 2 surviving regions", SurvivingCount >= 2);
+
+	if (SurvivingCount < 2)
+	{
+		AddWarning(TEXT("Grid randomness produced fewer than 2 surviving regions — corridor carving assertions skipped"));
+		return true;
+	}
+
+	// Check for disconnected pairs
+	TSet<TPair<int32, int32>> ConnectedPairs;
+	for (int32 CellIdx = 0; CellIdx < GridData.Diagram.Cells.Num(); ++CellIdx)
+	{
+		for (int32 NeighborIdx : GridData.Diagram.Cells[CellIdx].Neighbors)
+		{
+			int32 MinIdx = FMath::Min(CellIdx, NeighborIdx);
+			int32 MaxIdx = FMath::Max(CellIdx, NeighborIdx);
+			ConnectedPairs.Add(TPair<int32, int32>(MinIdx, MaxIdx));
+		}
+	}
+
+	// Count total possible pairs vs connected pairs
+	const int32 TotalPossiblePairs = GridData.Diagram.Cells.Num() * (GridData.Diagram.Cells.Num() - 1) / 2;
+	const bool	bHasDisconnectedPairs = ConnectedPairs.Num() < TotalPossiblePairs;
+
+	if (!bHasDisconnectedPairs)
+	{
+		AddWarning(TEXT("All surviving regions are already connected — corridor carving connectivity assertions skipped"));
+		return true;
+	}
+
+	// Snapshot floor count before carving
+	int32 FloorBefore = 0;
+	for (bool bIsFloor : GridData.Grid)
+	{
+		if (bIsFloor)
+		{
+			++FloorBefore;
+		}
+	}
+
+	// Carve with probability 1.0 and width 2
+	FRandomStream CorridorStream(42);
+	UCellularAutomataGenerator2D::CarveCorridors(GridData, 1.0f, 2, CorridorStream);
+
+	int32 FloorAfter = 0;
+	for (bool bIsFloor : GridData.Grid)
+	{
+		if (bIsFloor)
+		{
+			++FloorAfter;
+		}
+	}
+
+	TestTrue("Carving added floor cells", FloorAfter > FloorBefore);
+
+	// Verify carved cells have valid region assignments
+	for (int32 i = 0; i < GridData.Grid.Num(); ++i)
+	{
+		if (GridData.Grid[i])
+		{
+			TestTrue(FString::Printf(TEXT("Floor cell %d has valid RegionId"), i), GridData.RegionIds[i] >= 0);
+		}
+	}
+
+	// Rebuild diagram and verify
+	Generator->RebuildDiagram(GridData);
+	TestTrue("Rebuilt diagram has cells", GridData.Diagram.Cells.Num() > 0);
+
+	return true;
+}
+
+// Test 11: CarveCorridors with probability 0 is a no-op
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FCellularAutomataCarveCorridorsNoOpTest, "ProceduralGeometry.CellularAutomata.CarveCorridorsProbabilityZeroNoOp", DefaultTestFlags)
+
+bool FCellularAutomataCarveCorridorsNoOpTest::RunTest(const FString& Parameters)
+{
+	UCellularAutomataGenerator2D* Generator = NewObject<UCellularAutomataGenerator2D>();
+	Generator->SetBounds(FBox2D(FVector2D(-500, -500), FVector2D(500, 500)))->SetGridSize(20)->SetSeed(TEXT("corridor_test_disconnect"));
+	Generator->SetFillProbability(0.45f);
+	Generator->SetIterations(5);
+	Generator->SetBirthRule({ 6, 7, 8 });
+	Generator->SetSurvivalRule({ 3, 4, 5 });
+	Generator->SetMinRegionSize(5);
+	Generator->SetKeepCenterRegion(true);
+
+	FCellularAutomataGridData GridData = Generator->GenerateWithGridData();
+
+	// Deep copy grid
+	TArray<bool> GridCopy = GridData.Grid;
+
+	// Carve with probability 0 — should be a no-op
+	FRandomStream CorridorStream(42);
+	UCellularAutomataGenerator2D::CarveCorridors(GridData, 0.0f, 2, CorridorStream);
+
+	TestTrue("Grid unchanged with probability 0", GridData.Grid == GridCopy);
+
+	return true;
+}
+
+// Test 12: CarveCorridors with no disconnected regions is a no-op
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FCellularAutomataCarveCorridorsAllConnectedTest, "ProceduralGeometry.CellularAutomata.CarveCorridorsAllConnectedNoOp", DefaultTestFlags)
+
+bool FCellularAutomataCarveCorridorsAllConnectedTest::RunTest(const FString& Parameters)
+{
+	// OpenChambers style with large cells — tends to produce one large connected region
+	UCellularAutomataGenerator2D* Generator = NewObject<UCellularAutomataGenerator2D>();
+	Generator->SetBounds(FBox2D(FVector2D(-500, -500), FVector2D(500, 500)))->SetGridSize(50)->SetSeed(TEXT("corridor_test_connected"));
+	Generator->SetFillProbability(0.40f);
+	Generator->SetIterations(10);
+	Generator->SetBirthRule({ 5, 6, 7, 8 });
+	Generator->SetSurvivalRule({ 4, 5, 6, 7, 8 });
+	Generator->SetMinRegionSize(1);
+	Generator->SetKeepCenterRegion(true);
+
+	FCellularAutomataGridData GridData = Generator->GenerateWithGridData();
+
+	// Deep copy grid
+	TArray<bool> GridCopy = GridData.Grid;
+
+	// Check if all surviving regions are connected
+	TSet<TPair<int32, int32>> ConnectedPairs;
+	for (int32 CellIdx = 0; CellIdx < GridData.Diagram.Cells.Num(); ++CellIdx)
+	{
+		for (int32 NeighborIdx : GridData.Diagram.Cells[CellIdx].Neighbors)
+		{
+			int32 MinIdx = FMath::Min(CellIdx, NeighborIdx);
+			int32 MaxIdx = FMath::Max(CellIdx, NeighborIdx);
+			ConnectedPairs.Add(TPair<int32, int32>(MinIdx, MaxIdx));
+		}
+	}
+
+	const int32 TotalPossiblePairs = GridData.Diagram.Cells.Num() * (GridData.Diagram.Cells.Num() - 1) / 2;
+	const bool	bAllConnected = (ConnectedPairs.Num() >= TotalPossiblePairs) || (GridData.Diagram.Cells.Num() <= 1);
+
+	// Carve with probability 1.0 — if all connected, should be a no-op
+	FRandomStream CorridorStream(42);
+	UCellularAutomataGenerator2D::CarveCorridors(GridData, 1.0f, 2, CorridorStream);
+
+	if (bAllConnected)
+	{
+		TestTrue("Grid unchanged when all regions already connected", GridData.Grid == GridCopy);
+	}
+	else
+	{
+		// Edge case: this config still produced disconnected regions — carving is valid
+		AddWarning(TEXT("Config produced disconnected regions — grid may have changed, which is acceptable"));
+	}
 
 	return true;
 }

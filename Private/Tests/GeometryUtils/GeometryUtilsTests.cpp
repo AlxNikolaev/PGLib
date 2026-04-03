@@ -32,8 +32,7 @@ namespace
 // ============================================================
 
 // Test 1: All-inside — polygon entirely on kept side → unchanged
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FClipAllInsideTest, "ProceduralGeometry.GeometryUtils.Clip.AllInside", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FClipAllInsideTest, "ProceduralGeometry.GeometryUtils.Clip.AllInside", DefaultTestFlags)
 
 bool FClipAllInsideTest::RunTest(const FString& Parameters)
 {
@@ -50,8 +49,7 @@ bool FClipAllInsideTest::RunTest(const FString& Parameters)
 }
 
 // Test 2: All-outside — polygon entirely on clipped side → empty, returns false
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FClipAllOutsideTest, "ProceduralGeometry.GeometryUtils.Clip.AllOutside", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FClipAllOutsideTest, "ProceduralGeometry.GeometryUtils.Clip.AllOutside", DefaultTestFlags)
 
 bool FClipAllOutsideTest::RunTest(const FString& Parameters)
 {
@@ -68,8 +66,7 @@ bool FClipAllOutsideTest::RunTest(const FString& Parameters)
 }
 
 // Test 3: Clip square by horizontal plane → bottom rectangle
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FClipSquareHorizontalTest, "ProceduralGeometry.GeometryUtils.Clip.HorizontalClip", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FClipSquareHorizontalTest, "ProceduralGeometry.GeometryUtils.Clip.HorizontalClip", DefaultTestFlags)
 
 bool FClipSquareHorizontalTest::RunTest(const FString& Parameters)
 {
@@ -84,16 +81,14 @@ bool FClipSquareHorizontalTest::RunTest(const FString& Parameters)
 	// All resulting Y values should be ≤ 50
 	for (int32 i = 0; i < Polygon.Num(); ++i)
 	{
-		TestTrue(FString::Printf(TEXT("Vertex %d Y should be <= 50"), i),
-			Polygon[i].Y <= 50.0f + UE_KINDA_SMALL_NUMBER);
+		TestTrue(FString::Printf(TEXT("Vertex %d Y should be <= 50"), i), Polygon[i].Y <= 50.0f + UE_KINDA_SMALL_NUMBER);
 	}
 
 	return true;
 }
 
 // Test 4: Vertex exactly on boundary → handled without NaN
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FClipVertexOnBoundaryTest, "ProceduralGeometry.GeometryUtils.Clip.VertexOnBoundary", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FClipVertexOnBoundaryTest, "ProceduralGeometry.GeometryUtils.Clip.VertexOnBoundary", DefaultTestFlags)
 
 bool FClipVertexOnBoundaryTest::RunTest(const FString& Parameters)
 {
@@ -111,16 +106,14 @@ bool FClipVertexOnBoundaryTest::RunTest(const FString& Parameters)
 	// All X values should be ≤ 50
 	for (int32 i = 0; i < Polygon.Num(); ++i)
 	{
-		TestTrue(FString::Printf(TEXT("Vertex %d X should be <= 50"), i),
-			Polygon[i].X <= 50.0f + UE_KINDA_SMALL_NUMBER);
+		TestTrue(FString::Printf(TEXT("Vertex %d X should be <= 50"), i), Polygon[i].X <= 50.0f + UE_KINDA_SMALL_NUMBER);
 	}
 
 	return true;
 }
 
 // Test 5: Near-tangential clip — SafeAlpha fires, no Inf/NaN
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FClipNearTangentialTest, "ProceduralGeometry.GeometryUtils.Clip.NearTangential", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FClipNearTangentialTest, "ProceduralGeometry.GeometryUtils.Clip.NearTangential", DefaultTestFlags)
 
 bool FClipNearTangentialTest::RunTest(const FString& Parameters)
 {
@@ -144,8 +137,7 @@ bool FClipNearTangentialTest::RunTest(const FString& Parameters)
 // ============================================================
 
 // Test 6: Known shuffled vertices → CCW order
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FSortVerticesCCWTest, "ProceduralGeometry.GeometryUtils.Sort.ShuffledToCCW", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSortVerticesCCWTest, "ProceduralGeometry.GeometryUtils.Sort.ShuffledToCCW", DefaultTestFlags)
 
 bool FSortVerticesCCWTest::RunTest(const FString& Parameters)
 {
@@ -171,8 +163,7 @@ bool FSortVerticesCCWTest::RunTest(const FString& Parameters)
 }
 
 // Test 7: Already-sorted input → unchanged
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FSortVerticesAlreadySortedTest, "ProceduralGeometry.GeometryUtils.Sort.AlreadySorted", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSortVerticesAlreadySortedTest, "ProceduralGeometry.GeometryUtils.Sort.AlreadySorted", DefaultTestFlags)
 
 bool FSortVerticesAlreadySortedTest::RunTest(const FString& Parameters)
 {
@@ -185,18 +176,15 @@ bool FSortVerticesAlreadySortedTest::RunTest(const FString& Parameters)
 	TestEqual("Should have 4 vertices", Output.Num(), 4);
 	for (int32 i = 0; i < 4; ++i)
 	{
-		TestEqual(FString::Printf(TEXT("Vertex %d X unchanged"), i),
-			static_cast<float>(Output[i].X), static_cast<float>(Input[i].X), 0.01f);
-		TestEqual(FString::Printf(TEXT("Vertex %d Y unchanged"), i),
-			static_cast<float>(Output[i].Y), static_cast<float>(Input[i].Y), 0.01f);
+		TestEqual(FString::Printf(TEXT("Vertex %d X unchanged"), i), static_cast<float>(Output[i].X), static_cast<float>(Input[i].X), 0.01f);
+		TestEqual(FString::Printf(TEXT("Vertex %d Y unchanged"), i), static_cast<float>(Output[i].Y), static_cast<float>(Input[i].Y), 0.01f);
 	}
 
 	return true;
 }
 
 // Test 8: Single and two points → returned as-is, returns false
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FSortVerticesDegenerateTest, "ProceduralGeometry.GeometryUtils.Sort.Degenerate", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSortVerticesDegenerateTest, "ProceduralGeometry.GeometryUtils.Sort.Degenerate", DefaultTestFlags)
 
 bool FSortVerticesDegenerateTest::RunTest(const FString& Parameters)
 {
@@ -205,7 +193,7 @@ bool FSortVerticesDegenerateTest::RunTest(const FString& Parameters)
 	// Single point
 	{
 		TArray<FVector2D> Single = { FVector2D(42, 42) };
-		bool bResult = FGeometryUtils::SortPlaneVerticesByAngle(Single, Output);
+		bool			  bResult = FGeometryUtils::SortPlaneVerticesByAngle(Single, Output);
 		TestFalse("Single point should return false", bResult);
 		TestEqual("Single point should be returned as-is", Output.Num(), 1);
 	}
@@ -213,7 +201,7 @@ bool FSortVerticesDegenerateTest::RunTest(const FString& Parameters)
 	// Two points
 	{
 		TArray<FVector2D> Two = { FVector2D(0, 0), FVector2D(100, 100) };
-		bool bResult = FGeometryUtils::SortPlaneVerticesByAngle(Two, Output);
+		bool			  bResult = FGeometryUtils::SortPlaneVerticesByAngle(Two, Output);
 		TestFalse("Two points should return false", bResult);
 		TestEqual("Two points should be returned as-is", Output.Num(), 2);
 	}
@@ -226,8 +214,7 @@ bool FSortVerticesDegenerateTest::RunTest(const FString& Parameters)
 // ============================================================
 
 // Test 9: Center of square → inside
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FPointInPolygonCenterTest, "ProceduralGeometry.GeometryUtils.PointInPolygon.CenterInside", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPointInPolygonCenterTest, "ProceduralGeometry.GeometryUtils.PointInPolygon.CenterInside", DefaultTestFlags)
 
 bool FPointInPolygonCenterTest::RunTest(const FString& Parameters)
 {
@@ -240,8 +227,7 @@ bool FPointInPolygonCenterTest::RunTest(const FString& Parameters)
 }
 
 // Test 10: Far outside → not inside
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FPointInPolygonOutsideTest, "ProceduralGeometry.GeometryUtils.PointInPolygon.FarOutside", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPointInPolygonOutsideTest, "ProceduralGeometry.GeometryUtils.PointInPolygon.FarOutside", DefaultTestFlags)
 
 bool FPointInPolygonOutsideTest::RunTest(const FString& Parameters)
 {
@@ -255,8 +241,7 @@ bool FPointInPolygonOutsideTest::RunTest(const FString& Parameters)
 }
 
 // Test 11: Point on edge → document behavior (winding number may vary)
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FPointInPolygonEdgeTest, "ProceduralGeometry.GeometryUtils.PointInPolygon.OnEdge", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPointInPolygonEdgeTest, "ProceduralGeometry.GeometryUtils.PointInPolygon.OnEdge", DefaultTestFlags)
 
 bool FPointInPolygonEdgeTest::RunTest(const FString& Parameters)
 {
@@ -268,10 +253,8 @@ bool FPointInPolygonEdgeTest::RunTest(const FString& Parameters)
 	bool bOnLeftEdge = FGeometryUtils::PointInPolygon(Square, FVector2D(0, 50));
 
 	// Verify consistency: same point returns same result
-	TestEqual("On-edge result should be consistent",
-		bOnBottomEdge, FGeometryUtils::PointInPolygon(Square, FVector2D(50, 0)));
-	TestEqual("On-edge result should be consistent",
-		bOnLeftEdge, FGeometryUtils::PointInPolygon(Square, FVector2D(0, 50)));
+	TestEqual("On-edge result should be consistent", bOnBottomEdge, FGeometryUtils::PointInPolygon(Square, FVector2D(50, 0)));
+	TestEqual("On-edge result should be consistent", bOnLeftEdge, FGeometryUtils::PointInPolygon(Square, FVector2D(0, 50)));
 
 	// Degenerate polygon
 	TArray<FVector2D> Line = { FVector2D(0, 0), FVector2D(100, 0) };
@@ -285,8 +268,7 @@ bool FPointInPolygonEdgeTest::RunTest(const FString& Parameters)
 // ============================================================
 
 // Test 12: Regular square → center (50,50)
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FCentroidSquareTest, "ProceduralGeometry.GeometryUtils.Centroid.RegularSquare", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCentroidSquareTest, "ProceduralGeometry.GeometryUtils.Centroid.RegularSquare", DefaultTestFlags)
 
 bool FCentroidSquareTest::RunTest(const FString& Parameters)
 {
@@ -299,15 +281,13 @@ bool FCentroidSquareTest::RunTest(const FString& Parameters)
 }
 
 // Test 13: L-shaped polygon → centroid differs from vertex average
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FCentroidLShapeTest, "ProceduralGeometry.GeometryUtils.Centroid.LShape", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCentroidLShapeTest, "ProceduralGeometry.GeometryUtils.Centroid.LShape", DefaultTestFlags)
 
 bool FCentroidLShapeTest::RunTest(const FString& Parameters)
 {
 	// L-shaped polygon
 	TArray<FVector2D> LShape = {
-		FVector2D(0, 0), FVector2D(200, 0), FVector2D(200, 100),
-		FVector2D(100, 100), FVector2D(100, 200), FVector2D(0, 200)
+		FVector2D(0, 0), FVector2D(200, 0), FVector2D(200, 100), FVector2D(100, 100), FVector2D(100, 200), FVector2D(0, 200)
 	};
 
 	FVector2D Centroid = FGeometryUtils::GetPolygonCentroid(LShape);
@@ -319,15 +299,14 @@ bool FCentroidLShapeTest::RunTest(const FString& Parameters)
 
 	// Should differ from vertex average
 	FVector2D VertexAvg(100, 100);
-	float Difference = FVector2D::Distance(Centroid, VertexAvg);
+	float	  Difference = FVector2D::Distance(Centroid, VertexAvg);
 	TestTrue("Centroid should differ from vertex average", Difference > 10.0f);
 
 	return true;
 }
 
 // Test 14: Degenerate (< 3 vertices) → fallback to average
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FCentroidDegenerateTest, "ProceduralGeometry.GeometryUtils.Centroid.Degenerate", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCentroidDegenerateTest, "ProceduralGeometry.GeometryUtils.Centroid.Degenerate", DefaultTestFlags)
 
 bool FCentroidDegenerateTest::RunTest(const FString& Parameters)
 {
@@ -360,13 +339,12 @@ bool FCentroidDegenerateTest::RunTest(const FString& Parameters)
 // ============================================================
 
 // Test 15: All output points inside polygon
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FPoissonInsidePolygonTest, "ProceduralGeometry.GeometryUtils.Poisson.AllPointsInside", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPoissonInsidePolygonTest, "ProceduralGeometry.GeometryUtils.Poisson.AllPointsInside", DefaultTestFlags)
 
 bool FPoissonInsidePolygonTest::RunTest(const FString& Parameters)
 {
 	TArray<FVector2D> Square = { FVector2D(0, 0), FVector2D(1000, 0), FVector2D(1000, 1000), FVector2D(0, 1000) };
-	FRandomStream Stream(12345);
+	FRandomStream	  Stream(12345);
 	TArray<FVector2D> Points;
 
 	FGeometryUtils::PoissonDiskSampling(Square, 50.0f, 100, Stream, Points);
@@ -375,23 +353,21 @@ bool FPoissonInsidePolygonTest::RunTest(const FString& Parameters)
 
 	for (int32 i = 0; i < Points.Num(); ++i)
 	{
-		TestTrue(FString::Printf(TEXT("Point %d should be inside polygon"), i),
-			FGeometryUtils::PointInPolygon(Square, Points[i]));
+		TestTrue(FString::Printf(TEXT("Point %d should be inside polygon"), i), FGeometryUtils::PointInPolygon(Square, Points[i]));
 	}
 
 	return true;
 }
 
 // Test 16: All pairwise distances >= Radius
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FPoissonMinDistanceTest, "ProceduralGeometry.GeometryUtils.Poisson.MinDistance", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPoissonMinDistanceTest, "ProceduralGeometry.GeometryUtils.Poisson.MinDistance", DefaultTestFlags)
 
 bool FPoissonMinDistanceTest::RunTest(const FString& Parameters)
 {
 	TArray<FVector2D> Square = { FVector2D(0, 0), FVector2D(1000, 0), FVector2D(1000, 1000), FVector2D(0, 1000) };
-	FRandomStream Stream(42);
+	FRandomStream	  Stream(42);
 	TArray<FVector2D> Points;
-	const float Radius = 80.0f;
+	const float		  Radius = 80.0f;
 
 	FGeometryUtils::PoissonDiskSampling(Square, Radius, 50, Stream, Points);
 
@@ -402,8 +378,7 @@ bool FPoissonMinDistanceTest::RunTest(const FString& Parameters)
 		for (int32 j = i + 1; j < Points.Num(); ++j)
 		{
 			float Dist = FVector2D::Distance(Points[i], Points[j]);
-			TestTrue(FString::Printf(TEXT("Points %d and %d distance (%.2f) >= Radius (%.2f)"), i, j, Dist, Radius),
-				Dist >= Radius - 0.01f);
+			TestTrue(FString::Printf(TEXT("Points %d and %d distance (%.2f) >= Radius (%.2f)"), i, j, Dist, Radius), Dist >= Radius - 0.01f);
 		}
 	}
 
@@ -411,18 +386,17 @@ bool FPoissonMinDistanceTest::RunTest(const FString& Parameters)
 }
 
 // Test 17: Deterministic with seeded stream
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FPoissonDeterminismTest, "ProceduralGeometry.GeometryUtils.Poisson.Determinism", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPoissonDeterminismTest, "ProceduralGeometry.GeometryUtils.Poisson.Determinism", DefaultTestFlags)
 
 bool FPoissonDeterminismTest::RunTest(const FString& Parameters)
 {
 	TArray<FVector2D> Square = { FVector2D(0, 0), FVector2D(500, 0), FVector2D(500, 500), FVector2D(0, 500) };
 
-	FRandomStream Stream1(99999);
+	FRandomStream	  Stream1(99999);
 	TArray<FVector2D> Points1;
 	FGeometryUtils::PoissonDiskSampling(Square, 40.0f, 50, Stream1, Points1);
 
-	FRandomStream Stream2(99999);
+	FRandomStream	  Stream2(99999);
 	TArray<FVector2D> Points2;
 	FGeometryUtils::PoissonDiskSampling(Square, 40.0f, 50, Stream2, Points2);
 
@@ -430,22 +404,19 @@ bool FPoissonDeterminismTest::RunTest(const FString& Parameters)
 
 	for (int32 i = 0; i < FMath::Min(Points1.Num(), Points2.Num()); ++i)
 	{
-		TestEqual(FString::Printf(TEXT("Point %d X match"), i),
-			static_cast<float>(Points1[i].X), static_cast<float>(Points2[i].X), 0.01f);
-		TestEqual(FString::Printf(TEXT("Point %d Y match"), i),
-			static_cast<float>(Points1[i].Y), static_cast<float>(Points2[i].Y), 0.01f);
+		TestEqual(FString::Printf(TEXT("Point %d X match"), i), static_cast<float>(Points1[i].X), static_cast<float>(Points2[i].X), 0.01f);
+		TestEqual(FString::Printf(TEXT("Point %d Y match"), i), static_cast<float>(Points1[i].Y), static_cast<float>(Points2[i].Y), 0.01f);
 	}
 
 	return true;
 }
 
 // Test 18: Empty polygon (< 3 verts) → empty result
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FPoissonEmptyPolygonTest, "ProceduralGeometry.GeometryUtils.Poisson.EmptyPolygon", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPoissonEmptyPolygonTest, "ProceduralGeometry.GeometryUtils.Poisson.EmptyPolygon", DefaultTestFlags)
 
 bool FPoissonEmptyPolygonTest::RunTest(const FString& Parameters)
 {
-	FRandomStream Stream(1);
+	FRandomStream	  Stream(1);
 	TArray<FVector2D> Points;
 
 	// Empty polygon
@@ -465,15 +436,14 @@ bool FPoissonEmptyPolygonTest::RunTest(const FString& Parameters)
 // ============================================================
 
 // Test 19: Unit square → center near half-side, radius near half-side
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FMaxInscribedCircleSquareTest, "ProceduralGeometry.GeometryUtils.MaxInscribedCircle.Square", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMaxInscribedCircleSquareTest, "ProceduralGeometry.GeometryUtils.MaxInscribedCircle.Square", DefaultTestFlags)
 
 bool FMaxInscribedCircleSquareTest::RunTest(const FString& Parameters)
 {
 	// Use 1000x1000 square for better precision (default Epsilon=10)
 	TArray<FVector2D> Square = { FVector2D(0, 0), FVector2D(1000, 0), FVector2D(1000, 1000), FVector2D(0, 1000) };
-	FVector2D Center;
-	float Radius;
+	FVector2D		  Center;
+	float			  Radius;
 
 	bool bResult = FGeometryUtils::MaxInscribedCircle(Square, Center, Radius);
 
@@ -492,11 +462,11 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FMaxInscribedCircleDegenerateTest::RunTest(const FString& Parameters)
 {
 	FVector2D Center;
-	float Radius;
+	float	  Radius;
 
 	// Two vertices (not a polygon)
 	TArray<FVector2D> Line = { FVector2D(0, 0), FVector2D(100, 0) };
-	bool bResult = FGeometryUtils::MaxInscribedCircle(Line, Center, Radius);
+	bool			  bResult = FGeometryUtils::MaxInscribedCircle(Line, Center, Radius);
 	TestFalse("< 3 vertices should return false", bResult);
 
 	// Empty
@@ -511,8 +481,7 @@ bool FMaxInscribedCircleDegenerateTest::RunTest(const FString& Parameters)
 // ============================================================
 
 // Test 21: Center of square → distance = half side
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FDistanceToBoundaryCenterTest, "ProceduralGeometry.GeometryUtils.DistanceToBoundary.Center", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDistanceToBoundaryCenterTest, "ProceduralGeometry.GeometryUtils.DistanceToBoundary.Center", DefaultTestFlags)
 
 bool FDistanceToBoundaryCenterTest::RunTest(const FString& Parameters)
 {
@@ -529,8 +498,7 @@ bool FDistanceToBoundaryCenterTest::RunTest(const FString& Parameters)
 }
 
 // Test 22: Point on edge → distance ≈ 0
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FDistanceToBoundaryEdgeTest, "ProceduralGeometry.GeometryUtils.DistanceToBoundary.OnEdge", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDistanceToBoundaryEdgeTest, "ProceduralGeometry.GeometryUtils.DistanceToBoundary.OnEdge", DefaultTestFlags)
 
 bool FDistanceToBoundaryEdgeTest::RunTest(const FString& Parameters)
 {

@@ -87,7 +87,7 @@ public:
 	virtual FLayoutDiagram2D Generate() PURE_VIRTUAL(ULayoutGenerator::Generate, return FLayoutDiagram2D(););
 
 protected:
-	void	  InitializeRandomStream();
-	FVector2D ClampToBounds(const FVector2D& Point) const;
+	void			 InitializeRandomStream();
+	FVector2D		 ClampToBounds(const FVector2D& Point) const;
 	FLayoutDiagram2D ConvertGridToDiagram(const TArray<bool>& Grid, int32 GridWidth, int32 GridHeight) const;
 };
