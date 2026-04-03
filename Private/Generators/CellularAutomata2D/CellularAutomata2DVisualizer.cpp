@@ -91,11 +91,11 @@ void ACellularAutomata2DVisualizer::OnConstruction(const FTransform& Transform)
 
 	if (!DebugMaterial)
 	{
-		DebugMaterial = LoadObject<UMaterialInterface>(
-			nullptr, TEXT("/Engine/EngineDebugMaterials/VertexColorMaterial.VertexColorMaterial"));
+		DebugMaterial = LoadObject<UMaterialInterface>(nullptr, TEXT("/Engine/EngineDebugMaterials/VertexColorMaterial.VertexColorMaterial"));
 		if (!DebugMaterial)
 		{
-			UE_LOG(LogCAVisualizer, Warning,
+			UE_LOG(LogCAVisualizer,
+				Warning,
 				TEXT("OnConstruction: Could not load vertex color material. Assign one manually in the Visualization category."));
 		}
 	}
@@ -124,7 +124,9 @@ void ACellularAutomata2DVisualizer::OnConstruction(const FTransform& Transform)
 		CS,
 		GridData.Regions.Num());
 
-	UE_LOG(LogCAVisualizer, Log, TEXT("OnConstruction: bShowGridCells=%s, SurvivingRegions=%d, GridMeshComponent=%s"),
+	UE_LOG(LogCAVisualizer,
+		Log,
+		TEXT("OnConstruction: bShowGridCells=%s, SurvivingRegions=%d, GridMeshComponent=%s"),
 		bShowGridCells ? TEXT("true") : TEXT("false"),
 		GridData.SurvivingRegions.Num(),
 		GridMeshComponent ? TEXT("valid") : TEXT("NULL"));
@@ -153,7 +155,10 @@ void ACellularAutomata2DVisualizer::OnConstruction(const FTransform& Transform)
 			{
 				GridMeshComponent->SetMaterial(SectionIndex, DebugMaterial);
 			}
-			UE_LOG(LogCAVisualizer, Log, TEXT("  Section %d: wall quad created, material=%s"), SectionIndex,
+			UE_LOG(LogCAVisualizer,
+				Log,
+				TEXT("  Section %d: wall quad created, material=%s"),
+				SectionIndex,
 				DebugMaterial ? *DebugMaterial->GetName() : TEXT("NULL"));
 			++SectionIndex;
 		}
@@ -176,8 +181,15 @@ void ACellularAutomata2DVisualizer::OnConstruction(const FTransform& Transform)
 				RegionColor = DefaultFloorLinearColor;
 			}
 
-			UE_LOG(LogCAVisualizer, Log, TEXT("  Section %d: Region %d, %d cells, color=(%.2f,%.2f,%.2f)"),
-				SectionIndex, RegionId, GridData.Regions[RegionId].Num(), RegionColor.R, RegionColor.G, RegionColor.B);
+			UE_LOG(LogCAVisualizer,
+				Log,
+				TEXT("  Section %d: Region %d, %d cells, color=(%.2f,%.2f,%.2f)"),
+				SectionIndex,
+				RegionId,
+				GridData.Regions[RegionId].Num(),
+				RegionColor.R,
+				RegionColor.G,
+				RegionColor.B);
 			BuildCellMeshSection(SectionIndex, GridData.Regions[RegionId], CS, LocalBounds, RegionColor, 1.0f);
 			++SectionIndex;
 		}
@@ -425,8 +437,13 @@ void ACellularAutomata2DVisualizer::BuildCellMeshSection(
 		Colors.Add(Color);
 	}
 
-	UE_LOG(LogCAVisualizer, Log, TEXT("  BuildCellMeshSection: section=%d, verts=%d, tris=%d, cells=%d"),
-		SectionIndex, Vertices.Num(), Triangles.Num(), CellCount);
+	UE_LOG(LogCAVisualizer,
+		Log,
+		TEXT("  BuildCellMeshSection: section=%d, verts=%d, tris=%d, cells=%d"),
+		SectionIndex,
+		Vertices.Num(),
+		Triangles.Num(),
+		CellCount);
 
 	GridMeshComponent->CreateMeshSection_LinearColor(SectionIndex, Vertices, Triangles, Normals, UVs, Colors, Tangents, false);
 	if (DebugMaterial)
@@ -435,6 +452,9 @@ void ACellularAutomata2DVisualizer::BuildCellMeshSection(
 	}
 
 	const int32 NumSections = GridMeshComponent->GetNumSections();
-	UE_LOG(LogCAVisualizer, Log, TEXT("  BuildCellMeshSection: after create, component has %d sections, visible=%s"),
-		NumSections, GridMeshComponent->IsVisible() ? TEXT("true") : TEXT("false"));
+	UE_LOG(LogCAVisualizer,
+		Log,
+		TEXT("  BuildCellMeshSection: after create, component has %d sections, visible=%s"),
+		NumSections,
+		GridMeshComponent->IsVisible() ? TEXT("true") : TEXT("false"));
 }
