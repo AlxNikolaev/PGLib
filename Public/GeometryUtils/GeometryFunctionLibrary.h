@@ -16,6 +16,11 @@ public:
 		 const TArray<FVector2D>& PolygonVertices, float Radius, int32 MaxPoints, FRandomStream& RandomStream, TArray<FVector2D>& OutPoints);
 	static FVector2D GetPolygonCentroid(const TArray<FVector2D>& PolygonVertices);
 
+	/** Chaikin's corner-cutting subdivision. Smooths a closed polygon in place. Each iteration ~doubles vertex count.
+	 *  No-op if Vertices has fewer than 3 elements or Iterations <= 0.
+	 */
+	static void ChaikinSubdivide(TArray<FVector2D>& Vertices, int32 Iterations = 2);
+
 private:
 	// Helper functions for polygon operations
 	static float DistanceToLineSegment(const FVector2D& Point, const FVector2D& LineStart, const FVector2D& LineEnd);

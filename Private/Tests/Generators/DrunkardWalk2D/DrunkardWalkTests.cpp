@@ -9,8 +9,7 @@ namespace
 } // namespace
 
 // Test 1: Default Generate() produces non-empty diagram with valid cells
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FDrunkardWalkDefaultGenerateTest, "ProceduralGeometry.DrunkardWalk.DefaultGenerate", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDrunkardWalkDefaultGenerateTest, "ProceduralGeometry.DrunkardWalk.DefaultGenerate", DefaultTestFlags)
 
 bool FDrunkardWalkDefaultGenerateTest::RunTest(const FString& Parameters)
 {
@@ -48,12 +47,11 @@ bool FDrunkardWalkDefaultGenerateTest::RunTest(const FString& Parameters)
 }
 
 // Test 2: Determinism - same seed produces identical diagram
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FDrunkardWalkDeterminismTest, "ProceduralGeometry.DrunkardWalk.Determinism", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDrunkardWalkDeterminismTest, "ProceduralGeometry.DrunkardWalk.Determinism", DefaultTestFlags)
 
 bool FDrunkardWalkDeterminismTest::RunTest(const FString& Parameters)
 {
-	const FBox2D TestBounds(FVector2D(-500, -500), FVector2D(500, 500));
+	const FBox2D  TestBounds(FVector2D(-500, -500), FVector2D(500, 500));
 	const FString TestSeed = TEXT("DeterminismTest");
 
 	UDrunkardWalkGenerator2D* Gen1 = NewObject<UDrunkardWalkGenerator2D>();
@@ -73,18 +71,19 @@ bool FDrunkardWalkDeterminismTest::RunTest(const FString& Parameters)
 
 		TestEqual(FString::Printf(TEXT("Cell %d center X"), i),
 			static_cast<float>(Diagram1.Cells[i].Center.X),
-			static_cast<float>(Diagram2.Cells[i].Center.X), 0.01f);
+			static_cast<float>(Diagram2.Cells[i].Center.X),
+			0.01f);
 		TestEqual(FString::Printf(TEXT("Cell %d center Y"), i),
 			static_cast<float>(Diagram1.Cells[i].Center.Y),
-			static_cast<float>(Diagram2.Cells[i].Center.Y), 0.01f);
+			static_cast<float>(Diagram2.Cells[i].Center.Y),
+			0.01f);
 	}
 
 	return true;
 }
 
 // Test 3: Neighbor symmetry - if A neighbors B, B neighbors A
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FDrunkardWalkNeighborSymmetryTest, "ProceduralGeometry.DrunkardWalk.NeighborSymmetry", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDrunkardWalkNeighborSymmetryTest, "ProceduralGeometry.DrunkardWalk.NeighborSymmetry", DefaultTestFlags)
 
 bool FDrunkardWalkNeighborSymmetryTest::RunTest(const FString& Parameters)
 {
@@ -115,8 +114,7 @@ bool FDrunkardWalkNeighborSymmetryTest::RunTest(const FString& Parameters)
 }
 
 // Test 4: WalkLength=1 produces at least 1 cell
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FDrunkardWalkMinimalWalkTest, "ProceduralGeometry.DrunkardWalk.MinimalWalk", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDrunkardWalkMinimalWalkTest, "ProceduralGeometry.DrunkardWalk.MinimalWalk", DefaultTestFlags)
 
 bool FDrunkardWalkMinimalWalkTest::RunTest(const FString& Parameters)
 {
@@ -132,12 +130,11 @@ bool FDrunkardWalkMinimalWalkTest::RunTest(const FString& Parameters)
 }
 
 // Test 5: CorridorWidth>1 produces more cells than CorridorWidth=1
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FDrunkardWalkCorridorWidthTest, "ProceduralGeometry.DrunkardWalk.CorridorWidth", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDrunkardWalkCorridorWidthTest, "ProceduralGeometry.DrunkardWalk.CorridorWidth", DefaultTestFlags)
 
 bool FDrunkardWalkCorridorWidthTest::RunTest(const FString& Parameters)
 {
-	const FBox2D TestBounds(FVector2D(-500, -500), FVector2D(500, 500));
+	const FBox2D  TestBounds(FVector2D(-500, -500), FVector2D(500, 500));
 	const FString TestSeed = TEXT("CorridorTest");
 
 	UDrunkardWalkGenerator2D* GenNarrow = NewObject<UDrunkardWalkGenerator2D>();
@@ -154,15 +151,13 @@ bool FDrunkardWalkCorridorWidthTest::RunTest(const FString& Parameters)
 
 	TestTrue("Narrow corridor should have cells", DiagramNarrow.Cells.Num() > 0);
 	TestTrue("Wide corridor should have cells", DiagramWide.Cells.Num() > 0);
-	TestTrue("CorridorWidth=3 should produce more cells than CorridorWidth=1",
-		DiagramWide.Cells.Num() > DiagramNarrow.Cells.Num());
+	TestTrue("CorridorWidth=3 should produce more cells than CorridorWidth=1", DiagramWide.Cells.Num() > DiagramNarrow.Cells.Num());
 
 	return true;
 }
 
 // Test 6: CenterCellIndex is valid
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FDrunkardWalkCenterCellTest, "ProceduralGeometry.DrunkardWalk.CenterCellIndex", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDrunkardWalkCenterCellTest, "ProceduralGeometry.DrunkardWalk.CenterCellIndex", DefaultTestFlags)
 
 bool FDrunkardWalkCenterCellTest::RunTest(const FString& Parameters)
 {
@@ -172,15 +167,13 @@ bool FDrunkardWalkCenterCellTest::RunTest(const FString& Parameters)
 	FLayoutDiagram2D Diagram = Generator->Generate();
 
 	TestTrue("Diagram should have cells", Diagram.Cells.Num() > 0);
-	TestTrue("CenterCellIndex should be valid",
-		Diagram.CenterCellIndex >= 0 && Diagram.CenterCellIndex < Diagram.Cells.Num());
+	TestTrue("CenterCellIndex should be valid", Diagram.CenterCellIndex >= 0 && Diagram.CenterCellIndex < Diagram.Cells.Num());
 
 	return true;
 }
 
 // Test 7: OOM guard - huge bounds + small GridSize returns empty diagram
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FDrunkardWalkOOMGuardTest, "ProceduralGeometry.DrunkardWalk.OOMGuard", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDrunkardWalkOOMGuardTest, "ProceduralGeometry.DrunkardWalk.OOMGuard", DefaultTestFlags)
 
 bool FDrunkardWalkOOMGuardTest::RunTest(const FString& Parameters)
 {
