@@ -1,7 +1,7 @@
 ﻿#include "Voro2DTests.h"
 #include "Generators/Voronoi2D/VoronoiGenerator2D.h"
 
-DEFINE_LOG_CATEGORY_STATIC(LogRoguelikeGeometry, Log, All);
+#include "ProceduralGeometry.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
 

@@ -26,6 +26,7 @@ struct PROCEDURALGEOMETRY_API FDrunkardWalkGridData
 	TArray<TArray<FIntPoint>> Regions;		  // Cell coordinates per region
 	int32					  CenterRegionId; // Region containing grid center (-1 if none)
 	TArray<TArray<FIntPoint>> WalkerPaths;	  // Position history per walker (index = walker ID)
+	TArray<FIntPoint>		  RoomCenters;	  // Grid positions where rooms were placed
 	int32					  GridWidth;
 	int32					  GridHeight;
 	float					  CellSize;
@@ -42,7 +43,12 @@ class PROCEDURALGEOMETRY_API UDrunkardWalkGenerator2D final : public ULayoutGene
 	float BranchProbability;
 	int32 CorridorWidth;
 	float RoomChance;
-	int32 RoomRadius;
+	int32 RoomRadiusMin;
+	int32 RoomRadiusMax;
+	int32 MinRoomSpacing;
+	int32 MaxRoomCount;
+	float DirectionalMomentum;
+	float ExplorationBias;
 
 public:
 	UDrunkardWalkGenerator2D();
@@ -61,6 +67,21 @@ public:
 	UDrunkardWalkGenerator2D* SetRoomChance(float InChance);
 	UDrunkardWalkGenerator2D* SetRoomRadius(int32 InRadius);
 
+	/** Sets the minimum and maximum room carve radius. Each room picks a random radius in [InMin, InMax]. */
+	UDrunkardWalkGenerator2D* SetRoomRadiusRange(int32 InMin, int32 InMax);
+
+	/** Sets the minimum Manhattan distance between room centers. 0 = disabled. */
+	UDrunkardWalkGenerator2D* SetMinRoomSpacing(int32 InSpacing);
+
+	/** Sets the maximum number of rooms. 0 = unlimited. */
+	UDrunkardWalkGenerator2D* SetMaxRoomCount(int32 InCount);
+
+	/** Sets the probability [0,1] that a walker continues in its last direction each step. */
+	UDrunkardWalkGenerator2D* SetDirectionalMomentum(float InMomentum);
+
+	/** Sets the preference [0,1] for directions leading to uncarved cells. */
+	UDrunkardWalkGenerator2D* SetExplorationBias(float InBias);
+
 	// Generation
 	virtual FLayoutDiagram2D Generate() override;
 
@@ -72,5 +93,5 @@ private:
 	FDrunkardWalkGridData GenerateInternal();
 
 	void CarveCell(TArray<bool>& Grid, TArray<uint8>& CellType, int32 X, int32 Y, int32 GridWidth, int32 GridHeight) const;
-	void CarveRoom(TArray<bool>& Grid, TArray<uint8>& CellType, int32 CenterX, int32 CenterY, int32 GridWidth, int32 GridHeight) const;
+	void CarveRoom(TArray<bool>& Grid, TArray<uint8>& CellType, int32 CenterX, int32 CenterY, int32 Radius, int32 GridWidth, int32 GridHeight) const;
 };
