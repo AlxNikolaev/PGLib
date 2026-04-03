@@ -1,6 +1,6 @@
 #include "Generators/CellularAutomata2D/CellularAutomataGenerator2D.h"
 
-DEFINE_LOG_CATEGORY_STATIC(LogRoguelikeGeometry, Log, All);
+#include "ProceduralGeometry.h"
 
 UCellularAutomataGenerator2D::UCellularAutomataGenerator2D()
 {

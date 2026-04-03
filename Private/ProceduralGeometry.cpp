@@ -1,5 +1,7 @@
 ﻿#include "ProceduralGeometry.h"
 
+DEFINE_LOG_CATEGORY(LogRoguelikeGeometry);
+
 #define LOCTEXT_NAMESPACE "FProceduralGeometryModule"
 
 void FProceduralGeometryModule::StartupModule() {}

@@ -150,7 +150,7 @@ void ACellularAutomata2DVisualizer::OnConstruction(const FTransform& Transform)
 			TArray<FLinearColor>	 Colors = { WallLinearColor, WallLinearColor, WallLinearColor, WallLinearColor };
 			TArray<FProcMeshTangent> Tangents;
 
-			GridMeshComponent->CreateMeshSection_LinearColor(SectionIndex, Vertices, Triangles, Normals, UVs, Colors, Tangents, false);
+			GridMeshComponent->CreateMeshSection_LinearColor(SectionIndex, Vertices, Triangles, Normals, UVs, Colors, Tangents, true);
 			if (DebugMaterial)
 			{
 				GridMeshComponent->SetMaterial(SectionIndex, DebugMaterial);
@@ -297,7 +297,7 @@ void ACellularAutomata2DVisualizer::OnConstruction(const FTransform& Transform)
 	// Layer 7: Metrics overlay
 	if (bShowMetrics)
 	{
-		const float LineSpacing = CS * 2.0f;
+		const float LineSpacing = CS * 1.5f;
 		FVector		Anchor(B.Min.X, B.Min.Y - LineSpacing, 15.0f);
 		int32		LineIndex = 0;
 
@@ -373,7 +373,7 @@ void ACellularAutomata2DVisualizer::OnConstruction(const FTransform& Transform)
 		// Seed
 		DrawLine(FString::Printf(TEXT("Seed: \"%s\""), *Seed));
 
-		UE_LOG(LogCAVisualizer, Verbose, TEXT("OnConstruction: Metrics overlay drawn with %d lines."), LineIndex);
+		UE_LOG(LogCAVisualizer, Log, TEXT("Metrics: drew %d lines at (%.1f, %.1f, %.1f)"), LineIndex, Anchor.X, Anchor.Y, Anchor.Z);
 	}
 }
 
@@ -445,7 +445,7 @@ void ACellularAutomata2DVisualizer::BuildCellMeshSection(
 		Triangles.Num(),
 		CellCount);
 
-	GridMeshComponent->CreateMeshSection_LinearColor(SectionIndex, Vertices, Triangles, Normals, UVs, Colors, Tangents, false);
+	GridMeshComponent->CreateMeshSection_LinearColor(SectionIndex, Vertices, Triangles, Normals, UVs, Colors, Tangents, true);
 	if (DebugMaterial)
 	{
 		GridMeshComponent->SetMaterial(SectionIndex, DebugMaterial);

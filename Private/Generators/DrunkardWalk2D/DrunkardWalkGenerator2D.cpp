@@ -1,6 +1,6 @@
 #include "Generators/DrunkardWalk2D/DrunkardWalkGenerator2D.h"
 
-DEFINE_LOG_CATEGORY_STATIC(LogRoguelikeGeometry, Log, All);
+#include "ProceduralGeometry.h"
 
 UDrunkardWalkGenerator2D::UDrunkardWalkGenerator2D()
 {
@@ -10,7 +10,12 @@ UDrunkardWalkGenerator2D::UDrunkardWalkGenerator2D()
 	BranchProbability = 0.0f;
 	CorridorWidth = 1;
 	RoomChance = 0.0f;
-	RoomRadius = 1;
+	RoomRadiusMin = 1;
+	RoomRadiusMax = 1;
+	MinRoomSpacing = 0;
+	MaxRoomCount = 0;
+	DirectionalMomentum = 0.0f;
+	ExplorationBias = 0.0f;
 	InitializeRandomStream();
 }
 
@@ -70,7 +75,39 @@ UDrunkardWalkGenerator2D* UDrunkardWalkGenerator2D::SetRoomChance(float InChance
 
 UDrunkardWalkGenerator2D* UDrunkardWalkGenerator2D::SetRoomRadius(int32 InRadius)
 {
-	RoomRadius = FMath::Max(1, InRadius);
+	RoomRadiusMin = FMath::Max(1, InRadius);
+	RoomRadiusMax = RoomRadiusMin;
+	return this;
+}
+
+UDrunkardWalkGenerator2D* UDrunkardWalkGenerator2D::SetRoomRadiusRange(int32 InMin, int32 InMax)
+{
+	RoomRadiusMin = FMath::Max(1, InMin);
+	RoomRadiusMax = FMath::Max(RoomRadiusMin, InMax);
+	return this;
+}
+
+UDrunkardWalkGenerator2D* UDrunkardWalkGenerator2D::SetMinRoomSpacing(int32 InSpacing)
+{
+	MinRoomSpacing = FMath::Max(0, InSpacing);
+	return this;
+}
+
+UDrunkardWalkGenerator2D* UDrunkardWalkGenerator2D::SetMaxRoomCount(int32 InCount)
+{
+	MaxRoomCount = FMath::Max(0, InCount);
+	return this;
+}
+
+UDrunkardWalkGenerator2D* UDrunkardWalkGenerator2D::SetDirectionalMomentum(float InMomentum)
+{
+	DirectionalMomentum = FMath::Clamp(InMomentum, 0.0f, 1.0f);
+	return this;
+}
+
+UDrunkardWalkGenerator2D* UDrunkardWalkGenerator2D::SetExplorationBias(float InBias)
+{
+	ExplorationBias = FMath::Clamp(InBias, 0.0f, 1.0f);
 	return this;
 }
 
@@ -90,8 +127,8 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 
 	UE_LOG(LogRoguelikeGeometry,
 		Log,
-		TEXT(
-			"[DW] Generate() — Bounds=(%.1f,%.1f)-(%.1f,%.1f) GridSize=%d Seed='%s' WalkLength=%d Walkers=%d BranchProb=%.2f CorridorWidth=%d RoomChance=%.2f RoomRadius=%d"),
+		TEXT("[DW] Generate() — Bounds=(%.1f,%.1f)-(%.1f,%.1f) GridSize=%d Seed='%s' WalkLength=%d Walkers=%d BranchProb=%.2f "
+			 "CorridorWidth=%d RoomChance=%.2f RoomRadius=[%d,%d] MinRoomSpacing=%d MaxRoomCount=%d Momentum=%.2f ExplorationBias=%.2f"),
 		Bounds.Min.X,
 		Bounds.Min.Y,
 		Bounds.Max.X,
@@ -103,7 +140,12 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 		BranchProbability,
 		CorridorWidth,
 		RoomChance,
-		RoomRadius);
+		RoomRadiusMin,
+		RoomRadiusMax,
+		MinRoomSpacing,
+		MaxRoomCount,
+		DirectionalMomentum,
+		ExplorationBias);
 
 	const float CellSizeVal = static_cast<float>(GridSize);
 	const float BoundsWidth = Bounds.Max.X - Bounds.Min.X;
@@ -143,6 +185,7 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 	{
 		int32			  X;
 		int32			  Y;
+		int32			  LastDirection = -1; // -1 = no previous direction (first step or branched)
 		TArray<FIntPoint> Path;
 	};
 
@@ -166,30 +209,133 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 	const int32 DY[] = { 0, 0, 1, -1 };
 
 	// Walk loop
-	int32 CarvedCount = 0;
+	int32			  CarvedCount = 0;
+	TArray<FIntPoint> PlacedRoomCenters;
 	for (int32 Step = 0; Step < WalkLength && Walkers.Num() > 0; ++Step)
 	{
 		// Pick one random active walker
 		const int32 WalkerIndex = RandomStream.RandRange(0, Walkers.Num() - 1);
 		FWalker&	Walker = Walkers[WalkerIndex];
 
-		// Pick random cardinal direction and move (reject out-of-bounds, retry up to 4 times)
+		// Direction selection — either original retry loop (at defaults) or weighted selection
 		bool bValidMove = false;
-		for (int32 Retry = 0; Retry < 4; ++Retry)
+
+		const bool bUseWeightedSelection = (DirectionalMomentum > 0.0f || ExplorationBias > 0.0f);
+
+		if (!bUseWeightedSelection)
 		{
-			const int32 Dir = RandomStream.RandRange(0, 3);
-			const int32 NewX = Walker.X + DX[Dir];
-			const int32 NewY = Walker.Y + DY[Dir];
-			if (NewX >= 1 && NewX <= GWidth - 2 && NewY >= 1 && NewY <= GHeight - 2)
+			// Original retry loop: preserves exact seed-to-layout mapping at defaults
+			for (int32 Retry = 0; Retry < 4; ++Retry)
 			{
-				Walker.X = NewX;
-				Walker.Y = NewY;
-				bValidMove = true;
-				break;
+				const int32 Dir = RandomStream.RandRange(0, 3);
+				const int32 NewX = Walker.X + DX[Dir];
+				const int32 NewY = Walker.Y + DY[Dir];
+				if (NewX >= 1 && NewX <= GWidth - 2 && NewY >= 1 && NewY <= GHeight - 2)
+				{
+					Walker.X = NewX;
+					Walker.Y = NewY;
+					Walker.LastDirection = Dir;
+					bValidMove = true;
+					break;
+				}
+			}
+		}
+		else
+		{
+			// Step 1: Momentum check — attempt to continue in last direction
+			if (DirectionalMomentum > 0.0f && Walker.LastDirection >= 0)
+			{
+				const float Roll = RandomStream.FRand();
+				if (Roll < DirectionalMomentum)
+				{
+					const int32 NewX = Walker.X + DX[Walker.LastDirection];
+					const int32 NewY = Walker.Y + DY[Walker.LastDirection];
+					if (NewX >= 1 && NewX <= GWidth - 2 && NewY >= 1 && NewY <= GHeight - 2)
+					{
+						Walker.X = NewX;
+						Walker.Y = NewY;
+						// LastDirection stays the same
+						bValidMove = true;
+					}
+					// else: momentum direction blocked by boundary, fall through to weighted selection
+				}
+			}
+
+			// Step 2: Weighted direction selection (if momentum didn't resolve)
+			if (!bValidMove)
+			{
+				float Weights[4];
+				float TotalWeight = 0.0f;
+
+				for (int32 Dir = 0; Dir < 4; ++Dir)
+				{
+					const int32 NewX = Walker.X + DX[Dir];
+					const int32 NewY = Walker.Y + DY[Dir];
+
+					if (NewX < 1 || NewX > GWidth - 2 || NewY < 1 || NewY > GHeight - 2)
+					{
+						Weights[Dir] = 0.0f;
+					}
+					else if (!Grid[NewY * GWidth + NewX])
+					{
+						// Uncarved cell — full weight
+						Weights[Dir] = 1.0f;
+					}
+					else
+					{
+						// Already carved — reduced weight based on exploration bias
+						Weights[Dir] = 1.0f - ExplorationBias;
+					}
+
+					TotalWeight += Weights[Dir];
+				}
+
+				if (TotalWeight <= 0.0f)
+				{
+					// Degenerate case: all directions blocked or all carved at max bias
+					// Fall back to uniform random among in-bounds directions
+					int32 InBoundsDirs[4];
+					int32 NumInBounds = 0;
+					for (int32 Dir = 0; Dir < 4; ++Dir)
+					{
+						const int32 NewX = Walker.X + DX[Dir];
+						const int32 NewY = Walker.Y + DY[Dir];
+						if (NewX >= 1 && NewX <= GWidth - 2 && NewY >= 1 && NewY <= GHeight - 2)
+						{
+							InBoundsDirs[NumInBounds++] = Dir;
+						}
+					}
+
+					if (NumInBounds > 0)
+					{
+						const int32 PickedDir = InBoundsDirs[RandomStream.RandRange(0, NumInBounds - 1)];
+						Walker.X += DX[PickedDir];
+						Walker.Y += DY[PickedDir];
+						Walker.LastDirection = PickedDir;
+						bValidMove = true;
+					}
+				}
+				else
+				{
+					// Weighted random pick
+					float Pick = RandomStream.FRandRange(0.0f, TotalWeight);
+					for (int32 Dir = 0; Dir < 4; ++Dir)
+					{
+						Pick -= Weights[Dir];
+						if (Pick <= 0.0f)
+						{
+							Walker.X += DX[Dir];
+							Walker.Y += DY[Dir];
+							Walker.LastDirection = Dir;
+							bValidMove = true;
+							break;
+						}
+					}
+				}
 			}
 		}
 
-		// If all 4 directions were rejected (walker cornered on tiny grid), skip this step
+		// If no valid direction found (walker cornered on tiny grid), skip this step
 		if (!bValidMove)
 		{
 			UE_LOG(LogRoguelikeGeometry,
@@ -208,8 +354,64 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 		// Carve corridor or room
 		if (RoomChance > 0.0f && RandomStream.FRand() < RoomChance)
 		{
-			CarveRoom(Grid, CellType, Walker.X, Walker.Y, GWidth, GHeight);
-			UE_LOG(LogRoguelikeGeometry, VeryVerbose, TEXT("[DW] Step %d: carved room at (%d,%d)"), Step, Walker.X, Walker.Y);
+			bool bCanPlace = true;
+
+			// Count gate
+			if (MaxRoomCount > 0 && PlacedRoomCenters.Num() >= MaxRoomCount)
+			{
+				bCanPlace = false;
+				UE_LOG(LogRoguelikeGeometry,
+					Verbose,
+					TEXT("[DW] Step %d: room skipped at (%d,%d) — count cap reached (%d/%d)"),
+					Step,
+					Walker.X,
+					Walker.Y,
+					PlacedRoomCenters.Num(),
+					MaxRoomCount);
+			}
+
+			// Spacing gate
+			if (bCanPlace && MinRoomSpacing > 0)
+			{
+				for (const FIntPoint& Existing : PlacedRoomCenters)
+				{
+					const int32 Dist = FMath::Abs(Walker.X - Existing.X) + FMath::Abs(Walker.Y - Existing.Y);
+					if (Dist < MinRoomSpacing)
+					{
+						bCanPlace = false;
+						UE_LOG(LogRoguelikeGeometry,
+							Verbose,
+							TEXT("[DW] Step %d: room skipped at (%d,%d) — too close to existing room at (%d,%d), dist=%d < spacing=%d"),
+							Step,
+							Walker.X,
+							Walker.Y,
+							Existing.X,
+							Existing.Y,
+							Dist,
+							MinRoomSpacing);
+						break;
+					}
+				}
+			}
+
+			if (bCanPlace)
+			{
+				const int32 Radius = RandomStream.RandRange(RoomRadiusMin, RoomRadiusMax);
+				CarveRoom(Grid, CellType, Walker.X, Walker.Y, Radius, GWidth, GHeight);
+				PlacedRoomCenters.Add(FIntPoint(Walker.X, Walker.Y));
+				UE_LOG(LogRoguelikeGeometry,
+					Verbose,
+					TEXT("[DW] Step %d: carved room at (%d,%d) radius=%d (total rooms=%d)"),
+					Step,
+					Walker.X,
+					Walker.Y,
+					Radius,
+					PlacedRoomCenters.Num());
+			}
+			else
+			{
+				CarveCell(Grid, CellType, Walker.X, Walker.Y, GWidth, GHeight);
+			}
 		}
 		else
 		{
@@ -246,7 +448,12 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 		}
 	}
 
-	UE_LOG(LogRoguelikeGeometry, Log, TEXT("[DW] Walk complete: %d steps, %d floor cells carved"), CarvedCount, FloorCells);
+	UE_LOG(LogRoguelikeGeometry,
+		Log,
+		TEXT("[DW] Walk complete: %d steps, %d floor cells carved, %d rooms placed"),
+		CarvedCount,
+		FloorCells,
+		PlacedRoomCenters.Num());
 
 	// Collect walker paths before walkers go out of scope
 	TArray<TArray<FIntPoint>> WalkerPaths;
@@ -330,6 +537,7 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 	Result.Regions = MoveTemp(Regions);
 	Result.CenterRegionId = CenterRegionId;
 	Result.WalkerPaths = MoveTemp(WalkerPaths);
+	Result.RoomCenters = MoveTemp(PlacedRoomCenters);
 	Result.GridWidth = GWidth;
 	Result.GridHeight = GHeight;
 	Result.CellSize = CellSizeVal;
@@ -364,11 +572,11 @@ void UDrunkardWalkGenerator2D::CarveCell(TArray<bool>& Grid, TArray<uint8>& InCe
 }
 
 void UDrunkardWalkGenerator2D::CarveRoom(
-	TArray<bool>& Grid, TArray<uint8>& InCellType, int32 CenterX, int32 CenterY, int32 GridWidth, int32 GridHeight) const
+	TArray<bool>& Grid, TArray<uint8>& InCellType, int32 CenterX, int32 CenterY, int32 Radius, int32 GridWidth, int32 GridHeight) const
 {
-	for (int32 dy = -RoomRadius; dy <= RoomRadius; ++dy)
+	for (int32 dy = -Radius; dy <= Radius; ++dy)
 	{
-		for (int32 dx = -RoomRadius; dx <= RoomRadius; ++dx)
+		for (int32 dx = -Radius; dx <= Radius; ++dx)
 		{
 			const int32 CX = CenterX + dx;
 			const int32 CY = CenterY + dy;

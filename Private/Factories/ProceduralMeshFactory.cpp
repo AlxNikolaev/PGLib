@@ -3,7 +3,7 @@
 #include "Factories/ProceduralMeshFactory.h"
 #include "ProceduralMeshComponent.h"
 
-DEFINE_LOG_CATEGORY_STATIC(LogRoguelikeGeometry, Log, All);
+#include "ProceduralGeometry.h"
 
 bool UProceduralMeshFactory::CreatePrismMesh(const FMeshGenerationParams& Params, FMeshData& OutMeshData)
 {
