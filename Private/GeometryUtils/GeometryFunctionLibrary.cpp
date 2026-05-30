@@ -173,6 +173,14 @@ bool FGeometryUtils::MaxInscribedCircle(const TArray<FVector2D>& PolygonVertices
 	// Initial grid size
 	const float GridSize = FMath::Min(MaxBounds.X - MinBounds.X, MaxBounds.Y - MinBounds.Y) / 4.0f;
 
+	// Degenerate (collinear / zero-area) polygon: one axis has zero extent, so CellSize would be 0 and the
+	// grid loop below (x += CellSize) would never advance — an infinite hang on the game thread. There is no
+	// inscribed circle of positive radius for such a polygon, so bail.
+	if (!(GridSize > UE_KINDA_SMALL_NUMBER))
+	{
+		return false;
+	}
+
 	// Start with bounding box center
 	FCell BestCell(GetPolygonCentroid(PolygonVertices), 0, PolygonVertices);
 

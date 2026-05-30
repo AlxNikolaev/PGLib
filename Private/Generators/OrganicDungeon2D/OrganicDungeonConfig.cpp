@@ -9,43 +9,76 @@ namespace
 {
 	constexpr float GDefaultFootprint = 600.0f;
 
-	/** Loads a level asset and measures its XY footprint (size + center offset) from its actors' bounds. */
+	// Measuring a footprint loads the whole prefab UWorld synchronously, so cache the result per level path.
+	// Resolve() runs on the game thread (sync pipeline + async Prepare), but guard the cache anyway.
+	struct FCachedFootprint
+	{
+		float	  W = 0.0f;
+		float	  H = 0.0f;
+		FVector2D Center = FVector2D::ZeroVector;
+		bool	  bValid = false;
+	};
+	FCriticalSection						GFootprintCacheLock;
+	TMap<FSoftObjectPath, FCachedFootprint> GFootprintCache;
+
+	/** Loads a level asset and measures its XY footprint (size + center offset) from its actors' bounds. Cached. */
 	bool MeasureLevelFootprintXY(const TSoftObjectPtr<UWorld>& LevelRef, float& OutW, float& OutH, FVector2D& OutCenter)
 	{
 		if (LevelRef.IsNull())
 		{
 			return false;
 		}
-		UWorld* World = LevelRef.LoadSynchronous();
-		if (!World || !World->PersistentLevel)
+
+		const FSoftObjectPath Key = LevelRef.ToSoftObjectPath();
 		{
-			return false;
-		}
-		FBox Box(ForceInit);
-		bool bAny = false;
-		for (AActor* Actor : World->PersistentLevel->Actors)
-		{
-			if (!Actor)
+			FScopeLock Lock(&GFootprintCacheLock);
+			if (const FCachedFootprint* Cached = GFootprintCache.Find(Key))
 			{
-				continue;
-			}
-			const FBox ActorBox = Actor->GetComponentsBoundingBox(true);
-			if (ActorBox.IsValid)
-			{
-				Box += ActorBox;
-				bAny = true;
+				OutW = Cached->W;
+				OutH = Cached->H;
+				OutCenter = Cached->Center;
+				return Cached->bValid;
 			}
 		}
-		if (!bAny)
+
+		FCachedFootprint Result;
+		if (UWorld* World = LevelRef.LoadSynchronous(); World && World->PersistentLevel)
 		{
-			return false;
+			FBox Box(ForceInit);
+			bool bAny = false;
+			for (AActor* Actor : World->PersistentLevel->Actors)
+			{
+				if (!Actor)
+				{
+					continue;
+				}
+				const FBox ActorBox = Actor->GetComponentsBoundingBox(true);
+				if (ActorBox.IsValid)
+				{
+					Box += ActorBox;
+					bAny = true;
+				}
+			}
+			if (bAny)
+			{
+				const FVector Size = Box.GetSize();
+				const FVector Center = Box.GetCenter();
+				Result.W = static_cast<float>(Size.X);
+				Result.H = static_cast<float>(Size.Y);
+				Result.Center = FVector2D(Center.X, Center.Y);
+				Result.bValid = Result.W > 1.0f && Result.H > 1.0f;
+			}
 		}
-		const FVector Size = Box.GetSize();
-		const FVector Center = Box.GetCenter();
-		OutW = static_cast<float>(Size.X);
-		OutH = static_cast<float>(Size.Y);
-		OutCenter = FVector2D(Center.X, Center.Y);
-		return OutW > 1.0f && OutH > 1.0f;
+
+		{
+			FScopeLock Lock(&GFootprintCacheLock);
+			GFootprintCache.Add(Key, Result);
+		}
+
+		OutW = Result.W;
+		OutH = Result.H;
+		OutCenter = Result.Center;
+		return Result.bValid;
 	}
 
 	/** Resolves a room type's level ref, doorways, display name, and footprint (override → measured → fallback). */

@@ -90,6 +90,10 @@ struct PROCEDURALGEOMETRY_API FOrganicDungeonGridData
 	FVector2D ExitAnchorPos;	// world position of the end room's outward doorway (next-part hand-off)
 	FVector2D ExitAnchorNormal; // outward direction at the exit
 
+	// Per-location (chained-segment) start-room global index, in cluster location order. Used to seed each
+	// location's zone allocation / debug label inside its own start room instead of the shared cluster center.
+	TArray<int32> LocationStartRoomIndex;
+
 	FLayoutDiagram2D Diagram; // full floor (rooms + corridors)
 };
 
@@ -104,6 +108,7 @@ struct PROCEDURALGEOMETRY_API FOrganicLayout
 	FVector2D				 ExitAnchorNormal = FVector2D(1.0f, 0.0f);
 	int32					 RequestedRoomCount = 0;
 	int32					 PlacedCount = 0;
+	TArray<int32>			 LocationStartRoomIndex; // per chained segment: global index of its start room
 };
 
 UCLASS()

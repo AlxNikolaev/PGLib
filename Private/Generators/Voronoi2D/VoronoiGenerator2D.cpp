@@ -101,8 +101,33 @@ bool FVoronoiDiagram2D::GetSharedEdge(const int32 CellA, const int32 CellB, FVec
 
 	if (SharedVertices.Num() >= 2)
 	{
-		OutStart = SharedVertices[0];
-		OutEnd = SharedVertices[1];
+		// Pick the two farthest-apart shared vertices — the true edge endpoints. With 3+ near-coincident
+		// shared vertices, [0]/[1] could be an arbitrary, near-degenerate pair.
+		int32 BestI = 0;
+		int32 BestJ = 1;
+		float BestDistSq = -1.0f;
+		for (int32 i = 0; i < SharedVertices.Num(); ++i)
+		{
+			for (int32 j = i + 1; j < SharedVertices.Num(); ++j)
+			{
+				const float DistSq = FVector2D::DistSquared(SharedVertices[i], SharedVertices[j]);
+				if (DistSq > BestDistSq)
+				{
+					BestDistSq = DistSq;
+					BestI = i;
+					BestJ = j;
+				}
+			}
+		}
+
+		// Corner-only contact collapses to a (near) point — not a real shared edge.
+		if (BestDistSq <= Tolerance * Tolerance)
+		{
+			return false;
+		}
+
+		OutStart = SharedVertices[BestI];
+		OutEnd = SharedVertices[BestJ];
 		return true;
 	}
 

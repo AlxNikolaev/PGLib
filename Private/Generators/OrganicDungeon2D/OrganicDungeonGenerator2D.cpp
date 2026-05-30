@@ -178,6 +178,9 @@ FOrganicDungeonGridData UOrganicDungeonGenerator2D::GenerateInternal()
 	FVector2D	   LastExitNormal = FVector2D(1.0f, 0.0f);
 	bool		   bHavePrev = false;
 
+	// Per-segment start-room index (kept aligned with cluster location order; -1 for an empty segment).
+	Merged.LocationStartRoomIndex.Init(INDEX_NONE, Segs.Num());
+
 	for (int32 s = 0; s < Segs.Num(); ++s)
 	{
 		const FOrganicDungeonResolvedParams& SegParams = Segs[s];
@@ -217,6 +220,8 @@ FOrganicDungeonGridData UOrganicDungeonGenerator2D::GenerateInternal()
 
 		const int32 ThisStartGlobal = (Sub.StartRoomIdx >= 0) ? RoomBase + Sub.StartRoomIdx : RoomBase;
 		const int32 ThisEndGlobal = (Sub.EndRoomIdx >= 0) ? RoomBase + Sub.EndRoomIdx : RoomBase + Sub.Rooms.Num() - 1;
+
+		Merged.LocationStartRoomIndex[s] = ThisStartGlobal;
 
 		if (OverallStartIdx == INDEX_NONE)
 		{
@@ -376,16 +381,83 @@ FOrganicLayout UOrganicDungeonGenerator2D::GenerateLocationSubgraph(
 {
 	const float CellSizeVal = static_cast<float>(GridSize);
 
-	// Build the room queue (type indices expanded by Count).
-	TArray<int32> Queue;
-	for (int32 TypeIdx = 0; TypeIdx < Params.RoomTypes.Num(); ++TypeIdx)
+	// Build the room queue, interleaving types so a high-count type doesn't form one long single-type chain.
+	// Greedy: at each step place the type with the most rooms remaining that DIFFERS from the previously
+	// placed type (when an alternative exists); ties break by a seeded type order. This spreads scarce types
+	// out and only repeats a type once it is the only one left — more variety / a more natural layout.
+	const int32	  NumTypes = Params.RoomTypes.Num();
+	TArray<int32> Remaining;
+	Remaining.Reserve(NumTypes);
+	int32 RequestedRoomCount = 0;
+	for (const FOrganicResolvedRoomType& RT : Params.RoomTypes)
 	{
-		for (int32 i = 0; i < Params.RoomTypes[TypeIdx].Count; ++i)
-		{
-			Queue.Add(TypeIdx);
-		}
+		const int32 Count = FMath::Max(0, RT.Count);
+		Remaining.Add(Count);
+		RequestedRoomCount += Count;
 	}
-	const int32 RequestedRoomCount = Queue.Num();
+
+	TArray<int32> Queue;
+	Queue.Reserve(RequestedRoomCount);
+	int32 PrevType = INDEX_NONE;
+	for (int32 Placed = 0; Placed < RequestedRoomCount; ++Placed)
+	{
+		// Eligible = types with rooms left, excluding the previous type whenever any OTHER type still has
+		// rooms (so two of the same type never sit adjacent until that type is genuinely the only one left).
+		int32 EligibleWeight = 0; // sum of remaining over eligible (non-prev) types
+		bool  bHasNonPrev = false;
+		for (int32 t = 0; t < NumTypes; ++t)
+		{
+			if (Remaining[t] > 0 && t != PrevType)
+			{
+				EligibleWeight += Remaining[t];
+				bHasNonPrev = true;
+			}
+		}
+
+		int32 Chosen = INDEX_NONE;
+		if (!bHasNonPrev)
+		{
+			Chosen = PrevType; // only the previous type remains — it has to repeat
+		}
+		else if (Params.bShuffleRoomOrder)
+		{
+			// Weighted-random by remaining count: a high-count type is picked more often (never starves the
+			// scarce ones) but the exact sequence is random, so there is no fixed repeating pattern.
+			int32 Roll = RandomStream.RandRange(0, EligibleWeight - 1);
+			for (int32 t = 0; t < NumTypes; ++t)
+			{
+				if (Remaining[t] <= 0 || t == PrevType)
+				{
+					continue;
+				}
+				Roll -= Remaining[t];
+				if (Roll < 0)
+				{
+					Chosen = t;
+					break;
+				}
+			}
+		}
+		else
+		{
+			// Deterministic spread: most-remaining non-prev type (ties go to the lowest declared index).
+			for (int32 t = 0; t < NumTypes; ++t)
+			{
+				if (Remaining[t] <= 0 || t == PrevType)
+				{
+					continue;
+				}
+				if (Chosen == INDEX_NONE || Remaining[t] > Remaining[Chosen])
+				{
+					Chosen = t;
+				}
+			}
+		}
+
+		Queue.Add(Chosen);
+		--Remaining[Chosen];
+		PrevType = Chosen;
+	}
 
 	UE_LOG(LogRoguelikeGeometry,
 		Log,
@@ -450,14 +522,6 @@ FOrganicLayout UOrganicDungeonGenerator2D::GenerateLocationSubgraph(
 				 "Lower MinRoomGap or raise CorridorLength for shorter corridors."),
 			Params.MinRoomGap,
 			Params.CorridorLengthMax);
-	}
-
-	if (Params.bShuffleRoomOrder)
-	{
-		for (int32 i = Queue.Num() - 1; i > 0; --i)
-		{
-			Queue.Swap(i, RandomStream.RandRange(0, i));
-		}
 	}
 
 	// --- Helpers bound to this generation ---
@@ -1402,11 +1466,12 @@ FOrganicDungeonGridData UOrganicDungeonGenerator2D::RasterizeLayout(const FOrgan
 	// Optional cave smoothing on corridor cells.
 	if (Params.bSmoothCorridors)
 	{
-		const int32 DXf[] = { 1, -1, 0, 0, 1, 1, -1, -1 };
-		const int32 DYf[] = { 0, 0, 1, -1, 1, -1, 1, -1 };
+		const int32	  DXf[] = { 1, -1, 0, 0, 1, 1, -1, -1 };
+		const int32	  DYf[] = { 0, 0, 1, -1, 1, -1, 1, -1 };
+		TArray<uint8> Next; // hoisted: copy-assign below reuses the allocation instead of allocating per pass
 		for (int32 Pass = 0; Pass < Params.SmoothIterations; ++Pass)
 		{
-			TArray<uint8> Next = CellType;
+			Next = CellType;
 			for (int32 Y = 1; Y < GHeight - 1; ++Y)
 			{
 				for (int32 X = 1; X < GWidth - 1; ++X)
@@ -1448,7 +1513,9 @@ FOrganicDungeonGridData UOrganicDungeonGenerator2D::RasterizeLayout(const FOrgan
 	}
 
 	// Wall classification: non-floor within WallThickness of floor -> Wall, else Empty.
-	const int32 WT = FMath::Max(1, Params.WallThickness);
+	// Clamp the band width: the inner loop scans a (2*WT+1)^2 neighbourhood per cell, so an unbounded
+	// WallThickness would make this quadratic in WT on top of the full-grid scan.
+	const int32 WT = FMath::Clamp(Params.WallThickness, 1, 16);
 	for (int32 Y = 0; Y < GHeight; ++Y)
 	{
 		for (int32 X = 0; X < GWidth; ++X)
@@ -1568,6 +1635,7 @@ FOrganicDungeonGridData UOrganicDungeonGenerator2D::RasterizeLayout(const FOrgan
 	Result.EndRoomIndex = EndRoomIdx;
 	Result.ExitAnchorPos = ExitAnchorPos;
 	Result.ExitAnchorNormal = ExitAnchorNormal;
+	Result.LocationStartRoomIndex = Layout.LocationStartRoomIndex;
 	Result.Diagram = MoveTemp(Diagram);
 	return Result;
 }

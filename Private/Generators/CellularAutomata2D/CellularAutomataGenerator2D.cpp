@@ -685,8 +685,10 @@ FLayoutDiagram2D UCellularAutomataGenerator2D::BuildDiagramFromRegions(const TAr
 TArray<FVector2D> UCellularAutomataGenerator2D::TraceBoundaryPolygon(
 	const TArray<FIntPoint>& Region, const TArray<int32>& RegionIds, int32 RegionId, int32 InGridWidth, int32 InGridHeight, float InCellSize) const
 {
-	// Collect directed boundary edges in grid corner coordinates (CCW, interior on left)
-	TMap<FIntPoint, FIntPoint> EdgeMap;
+	// Collect directed boundary edges in grid corner coordinates (CCW, interior on left).
+	// A region can pinch to a single corner, emitting two outgoing edges from it, so allow multiple
+	// outgoing edges per start corner (multimap) and disambiguate during chaining.
+	TMultiMap<FIntPoint, FIntPoint> EdgeMap;
 
 	auto IsOutsideRegion = [&](int32 NX, int32 NY) -> bool {
 		if (NX < 0 || NX >= InGridWidth || NY < 0 || NY >= InGridHeight)
@@ -697,7 +699,10 @@ TArray<FVector2D> UCellularAutomataGenerator2D::TraceBoundaryPolygon(
 	};
 
 	auto TryAddEdge = [&](const FIntPoint& Start, const FIntPoint& End) {
-		if (ensure(!EdgeMap.Contains(Start)))
+		// Keep both edges from a pinched corner; only skip an exact duplicate of the same directed edge.
+		TArray<FIntPoint> Existing;
+		EdgeMap.MultiFind(Start, Existing);
+		if (!Existing.Contains(End))
 		{
 			EdgeMap.Add(Start, End);
 		}
@@ -731,32 +736,51 @@ TArray<FVector2D> UCellularAutomataGenerator2D::TraceBoundaryPolygon(
 		return TArray<FVector2D>();
 	}
 
-	// Chain edges into closed loops
-	TArray<TArray<FIntPoint>> Loops;
-	TSet<FIntPoint>			  Visited;
+	// Chain edges into closed loops. Track consumed *edges* (not just corners) so a corner shared by two
+	// loops (a pinch) is traversed correctly instead of dropping the second loop.
+	TArray<TArray<FIntPoint>>		  Loops;
+	TSet<TPair<FIntPoint, FIntPoint>> UsedEdges;
 
 	for (const auto& Edge : EdgeMap)
 	{
-		const FIntPoint& Start = Edge.Key;
-		if (Visited.Contains(Start))
+		if (UsedEdges.Contains(TPair<FIntPoint, FIntPoint>(Edge.Key, Edge.Value)))
 		{
 			continue;
 		}
 
+		const FIntPoint	  Start = Edge.Key;
 		TArray<FIntPoint> Loop;
 		FIntPoint		  Current = Start;
 
-		while (!Visited.Contains(Current))
+		while (true)
 		{
-			Visited.Add(Current);
 			Loop.Add(Current);
 
-			const FIntPoint* Next = EdgeMap.Find(Current);
-			if (!Next)
+			// Pick the first not-yet-consumed outgoing edge from Current.
+			TArray<FIntPoint> Outgoing;
+			EdgeMap.MultiFind(Current, Outgoing);
+			FIntPoint Next;
+			bool	  bFound = false;
+			for (const FIntPoint& Candidate : Outgoing)
+			{
+				if (!UsedEdges.Contains(TPair<FIntPoint, FIntPoint>(Current, Candidate)))
+				{
+					Next = Candidate;
+					bFound = true;
+					break;
+				}
+			}
+			if (!bFound)
 			{
 				break;
 			}
-			Current = *Next;
+
+			UsedEdges.Add(TPair<FIntPoint, FIntPoint>(Current, Next));
+			Current = Next;
+			if (Current == Start)
+			{
+				break; // closed the loop
+			}
 		}
 
 		if (Loop.Num() >= 3 && Current == Start)
