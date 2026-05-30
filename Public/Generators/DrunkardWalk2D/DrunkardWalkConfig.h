@@ -3,24 +3,36 @@
 #include "CoreMinimal.h"
 #include "DrunkardWalkConfig.generated.h"
 
-/** Visual style preset for drunkard walk dungeon generation. Each style maps to a known-good parameter combination. */
-UENUM(BlueprintType)
-enum class EDungeonStyle : uint8
+/**
+ * A single room type for room-and-corridor generation.
+ * Each type contributes Count room instances to the placement queue.
+ * Footprint is expressed in grid cells; in the future this will be derived from a
+ * prefab room's bounds via ceil(prefabBounds / cellSize) and carry a prefab reference.
+ */
+USTRUCT(BlueprintType)
+struct PROCEDURALGEOMETRY_API FRoomTypeConfig
 {
-	OpenRuins UMETA(DisplayName = "Open Ruins", ToolTip = "Wide corridors with scattered rooms. Good for hub areas or early floors."),
-	TightMaze UMETA(DisplayName = "Tight Maze", ToolTip = "Single narrow winding path with no rooms. High tactical density."),
-	RoomHeavy UMETA(DisplayName = "Room Heavy", ToolTip = "Many large rooms connected by corridors. Best for encounter-based layouts."),
-	Labyrinth UMETA(DisplayName = "Labyrinth", ToolTip = "Many branching narrow paths. Complex navigation with few rooms."),
-	Caverns	  UMETA(DisplayName = "Caverns", ToolTip = "Wide open carved areas with few rooms. Natural underground feel."),
-};
+	GENERATED_BODY()
 
-/** Controls corridor width and room radius together. */
-UENUM(BlueprintType)
-enum class EDungeonScale : uint8
-{
-	Small  UMETA(DisplayName = "Small", ToolTip = "Narrow corridors (1 cell), small rooms (2 cell radius)."),
-	Medium UMETA(DisplayName = "Medium", ToolTip = "Standard corridors (2 cells), medium rooms (3 cell radius)."),
-	Large  UMETA(DisplayName = "Large", ToolTip = "Wide corridors (4 cells), large rooms (5 cell radius)."),
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Room Type", meta = (ToolTip = "Identifier for this room type (e.g. 'Small', 'Boss')."))
+	FName Tag = NAME_None;
+
+	UPROPERTY(EditAnywhere,
+		BlueprintReadWrite,
+		Category = "Room Type",
+		meta = (ClampMin = 1, ToolTip = "Room footprint width in grid cells. Later derived from prefab bounds."))
+	int32 FootprintWidthCells = 4;
+
+	UPROPERTY(EditAnywhere,
+		BlueprintReadWrite,
+		Category = "Room Type",
+		meta = (ClampMin = 1, ToolTip = "Room footprint height in grid cells. Later derived from prefab bounds."))
+	int32 FootprintHeightCells = 4;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Room Type", meta = (ClampMin = 0, ToolTip = "How many rooms of this type to place."))
+	int32 Count = 1;
+
+	// Future: TSoftClassPtr<AActor> / TSoftObjectPtr<UWorld> RoomPrefab — the actual room instance.
 };
 
 /**
@@ -29,44 +41,104 @@ enum class EDungeonScale : uint8
  */
 struct PROCEDURALGEOMETRY_API FDrunkardWalkResolvedParams
 {
-	int32 WalkLength = 500;
-	int32 NumWalkers = 1;
-	float BranchProbability = 0.0f;
-	int32 CorridorWidth = 1;
-	float RoomChance = 0.0f;
-	int32 RoomRadiusMin = 1;
-	int32 RoomRadiusMax = 1;
-	int32 MinRoomSpacing = 0;
-	int32 MaxRoomCount = 0;
-	float DirectionalMomentum = 0.0f;
-	float ExplorationBias = 0.0f;
+	TArray<FRoomTypeConfig> RoomTypes;
+	int32					CorridorLengthMin = 3;
+	int32					CorridorLengthMax = 8;
+	int32					CorridorWidthMin = 1;
+	int32					CorridorWidthMax = 1;
+	float					CorridorTurnProbability = 0.0f;
+	float					CorridorBranchProbability = 0.0f;
+	int32					RoomBorderMargin = 1;
+	int32					WallThickness = 1;
+	int32					MaxPlacementAttemptsPerExit = 8;
+	bool					bShuffleRoomOrder = true;
+	float					BranchProbability = 0.0f;
 };
 
 /**
- * Encapsulates all drunkard walk dungeon generation parameters behind designer-friendly semantic controls.
- * Designers select a style preset (EDungeonStyle) and adjust sliders for density, complexity, and room frequency.
- * An advanced override mode allows direct parameter specification for power users.
+ * Room-and-corridor dungeon generation parameters.
  *
- * Call Resolve() to convert semantic parameters into raw DW parameters for the generator.
+ * The generator starts in a room, walks a self-avoiding corridor of randomized length, then places
+ * the next room from the queue (built from RoomTypes x Count), picks a fresh exit side, and repeats.
+ * It ignores any input bounds — the walk's own geometry defines the extents. Two primary knobs are
+ * the grid cell size (set on the generator) and the room queue described here.
+ *
+ * Call Resolve() to validate/clamp into raw DW parameters for the generator.
  */
 USTRUCT(BlueprintType)
 struct PROCEDURALGEOMETRY_API FDrunkardWalkConfig
 {
 	GENERATED_BODY()
 
-	// --- Core semantic parameters (designer-facing) ---
+	UPROPERTY(EditAnywhere,
+		BlueprintReadWrite,
+		Category = "Dungeon Generation",
+		meta = (ToolTip = "Room types to place. Each type contributes Count rooms to the generation queue."))
+	TArray<FRoomTypeConfig> RoomTypes;
+
+	UPROPERTY(EditAnywhere,
+		BlueprintReadWrite,
+		Category = "Dungeon Generation",
+		meta = (ClampMin = 1, ToolTip = "Minimum corridor length (cells) between consecutive rooms."))
+	int32 CorridorLengthMin = 3;
+
+	UPROPERTY(EditAnywhere,
+		BlueprintReadWrite,
+		Category = "Dungeon Generation",
+		meta = (ClampMin = 1, ToolTip = "Maximum corridor length (cells) between consecutive rooms."))
+	int32 CorridorLengthMax = 8;
 
 	UPROPERTY(
-		EditAnywhere, BlueprintReadWrite, Category = "Dungeon Generation", meta = (ToolTip = "Visual style preset. Determines base walk parameters."))
-	EDungeonStyle DungeonStyle = EDungeonStyle::OpenRuins;
+		EditAnywhere, BlueprintReadWrite, Category = "Dungeon Generation", meta = (ClampMin = 1, ToolTip = "Minimum corridor carve width in cells."))
+	int32 CorridorWidthMin = 1;
+
+	UPROPERTY(EditAnywhere,
+		BlueprintReadWrite,
+		Category = "Dungeon Generation",
+		meta = (ClampMin = 1, ToolTip = "Maximum corridor carve width in cells. Width drifts between min and max along the corridor."))
+	int32 CorridorWidthMax = 1;
 
 	UPROPERTY(EditAnywhere,
 		BlueprintReadWrite,
 		Category = "Dungeon Generation",
 		meta = (ClampMin = 0.0,
 			ClampMax = 1.0,
-			ToolTip = "0 = sparse (less carved floor), 1 = dense (more carved floor). Scales WalkLength +/- 50% from style base."))
-	float Density = 0.5f;
+			ToolTip = "Per-step probability that a corridor turns 90 degrees while being traced. 0 = straight corridors."))
+	float CorridorTurnProbability = 0.0f;
+
+	UPROPERTY(EditAnywhere,
+		BlueprintReadWrite,
+		Category = "Dungeon Generation",
+		meta = (ClampMin = 0.0,
+			ClampMax = 1.0,
+			ToolTip = "Per-step probability that a corridor forks off a side branch to an additional room. 0 = no forking."))
+	float CorridorBranchProbability = 0.0f;
+
+	UPROPERTY(EditAnywhere,
+		BlueprintReadWrite,
+		Category = "Dungeon Generation",
+		meta = (ClampMin = 0,
+			ToolTip = "Wall gap (cells) reserved around each room and corridor. 1 = removable border ring where a passage is punched."))
+	int32 RoomBorderMargin = 1;
+
+	UPROPERTY(EditAnywhere,
+		BlueprintReadWrite,
+		Category = "Dungeon Generation",
+		meta = (ClampMin = 1,
+			ToolTip = "Thickness (cells) of wall kept around floor. Cells farther than this from any floor become empty (no wall)."))
+	int32 WallThickness = 1;
+
+	UPROPERTY(EditAnywhere,
+		BlueprintReadWrite,
+		Category = "Dungeon Generation",
+		meta = (ClampMin = 1, ToolTip = "Placement retries per room exit before backtracking to the previous room."))
+	int32 MaxPlacementAttemptsPerExit = 8;
+
+	UPROPERTY(EditAnywhere,
+		BlueprintReadWrite,
+		Category = "Dungeon Generation",
+		meta = (ToolTip = "Shuffle the room placement queue (seeded). When false, rooms are placed in declared order."))
+	bool bShuffleRoomOrder = true;
 
 	UPROPERTY(EditAnywhere,
 		BlueprintReadWrite,
@@ -74,116 +146,9 @@ struct PROCEDURALGEOMETRY_API FDrunkardWalkConfig
 		meta = (ClampMin = 0.0,
 			ClampMax = 1.0,
 			ToolTip =
-				"0 = simple (fewer walkers, no branching), 1 = complex (more walkers, more branching). Scales NumWalkers and BranchProbability."))
-	float Complexity = 0.5f;
+				"Probability that the next room grows from a random earlier room instead of the most recent one. 0 = a single winding path, 1 = a highly branching tree."))
+	float BranchProbability = 0.0f;
 
-	UPROPERTY(EditAnywhere,
-		BlueprintReadWrite,
-		Category = "Dungeon Generation",
-		meta = (ClampMin = 0.0, ClampMax = 1.0, ToolTip = "0 = no rooms, 1 = maximum room placement. Scales RoomChance."))
-	float RoomFrequency = 0.5f;
-
-	UPROPERTY(
-		EditAnywhere, BlueprintReadWrite, Category = "Dungeon Generation", meta = (ToolTip = "Controls corridor width and room radius together."))
-	EDungeonScale Scale = EDungeonScale::Medium;
-
-	UPROPERTY(EditAnywhere,
-		BlueprintReadWrite,
-		Category = "Dungeon Generation",
-		meta = (ClampMin = 0.0,
-			ClampMax = 1.0,
-			ToolTip = "Probability that a walker continues in its last direction each step. 0 = fully random, 1 = always straight."))
-	float DirectionalMomentum = 0.0f;
-
-	UPROPERTY(EditAnywhere,
-		BlueprintReadWrite,
-		Category = "Dungeon Generation",
-		meta = (ClampMin = 0.0,
-			ClampMax = 1.0,
-			ToolTip = "Preference for directions leading to uncarved cells. 0 = no preference, 1 = always prefer unvisited."))
-	float ExplorationBias = 0.0f;
-
-	// --- Advanced override (power-user mode) ---
-
-	UPROPERTY(EditAnywhere,
-		BlueprintReadWrite,
-		Category = "Dungeon Generation|Advanced",
-		meta = (ToolTip = "When enabled, ignores all semantic controls and uses raw values below."))
-	bool bUseAdvancedOverride = false;
-
-	UPROPERTY(EditAnywhere,
-		BlueprintReadWrite,
-		Category = "Dungeon Generation|Advanced",
-		meta = (EditCondition = "bUseAdvancedOverride", ClampMin = 1, ToolTip = "Raw walk step count."))
-	int32 AdvancedWalkLength = 500;
-
-	UPROPERTY(EditAnywhere,
-		BlueprintReadWrite,
-		Category = "Dungeon Generation|Advanced",
-		meta = (EditCondition = "bUseAdvancedOverride", ClampMin = 1, ToolTip = "Raw number of initial walkers."))
-	int32 AdvancedNumWalkers = 1;
-
-	UPROPERTY(EditAnywhere,
-		BlueprintReadWrite,
-		Category = "Dungeon Generation|Advanced",
-		meta =
-			(EditCondition = "bUseAdvancedOverride", ClampMin = 0.0, ClampMax = 1.0, ToolTip = "Raw probability of spawning a new walker per step."))
-	float AdvancedBranchProbability = 0.0f;
-
-	UPROPERTY(EditAnywhere,
-		BlueprintReadWrite,
-		Category = "Dungeon Generation|Advanced",
-		meta = (EditCondition = "bUseAdvancedOverride", ClampMin = 1, ToolTip = "Raw corridor carve width in cells."))
-	int32 AdvancedCorridorWidth = 1;
-
-	UPROPERTY(EditAnywhere,
-		BlueprintReadWrite,
-		Category = "Dungeon Generation|Advanced",
-		meta = (EditCondition = "bUseAdvancedOverride", ClampMin = 0.0, ClampMax = 1.0, ToolTip = "Raw probability of placing a room per step."))
-	float AdvancedRoomChance = 0.0f;
-
-	UPROPERTY(EditAnywhere,
-		BlueprintReadWrite,
-		Category = "Dungeon Generation|Advanced",
-		meta = (EditCondition = "bUseAdvancedOverride", ClampMin = 1, ToolTip = "Raw maximum room carve radius in cells."))
-	int32 AdvancedRoomRadius = 1;
-
-	UPROPERTY(EditAnywhere,
-		BlueprintReadWrite,
-		Category = "Dungeon Generation|Advanced",
-		meta = (EditCondition = "bUseAdvancedOverride", ClampMin = 1, ToolTip = "Raw minimum room carve radius in cells."))
-	int32 AdvancedRoomRadiusMin = 1;
-
-	UPROPERTY(EditAnywhere,
-		BlueprintReadWrite,
-		Category = "Dungeon Generation|Advanced",
-		meta = (EditCondition = "bUseAdvancedOverride", ClampMin = 0, ToolTip = "Raw minimum Manhattan distance between room centers. 0 = disabled."))
-	int32 AdvancedMinRoomSpacing = 0;
-
-	UPROPERTY(EditAnywhere,
-		BlueprintReadWrite,
-		Category = "Dungeon Generation|Advanced",
-		meta = (EditCondition = "bUseAdvancedOverride", ClampMin = 0, ToolTip = "Raw maximum number of rooms. 0 = unlimited."))
-	int32 AdvancedMaxRoomCount = 0;
-
-	UPROPERTY(EditAnywhere,
-		BlueprintReadWrite,
-		Category = "Dungeon Generation|Advanced",
-		meta = (EditCondition = "bUseAdvancedOverride",
-			ClampMin = 0.0,
-			ClampMax = 1.0,
-			ToolTip = "Raw directional momentum. Probability that a walker continues in its last direction."))
-	float AdvancedDirectionalMomentum = 0.0f;
-
-	UPROPERTY(EditAnywhere,
-		BlueprintReadWrite,
-		Category = "Dungeon Generation|Advanced",
-		meta = (EditCondition = "bUseAdvancedOverride",
-			ClampMin = 0.0,
-			ClampMax = 1.0,
-			ToolTip = "Raw exploration bias. Preference for directions leading to uncarved cells."))
-	float AdvancedExplorationBias = 0.0f;
-
-	/** Resolves semantic parameters into raw DW parameters for the generator. Pure function, no side effects. */
+	/** Validates and clamps semantic parameters into raw DW parameters for the generator. Pure function, no side effects. */
 	FDrunkardWalkResolvedParams Resolve() const;
 };

@@ -1,16 +1,27 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Generators/DrunkardWalk2D/DrunkardWalkConfig.h"
 #include "Generators/LayoutGenerator.h"
 #include "DrunkardWalkGenerator2D.generated.h"
 
 /** Cell type constants for DrunkardWalk grid cells. */
 namespace EDrunkardWalkCellType
 {
-	constexpr uint8 Wall = 0;
-	constexpr uint8 Corridor = 1;
-	constexpr uint8 Room = 2;
+	constexpr uint8 Wall = 0;	  // non-floor cell within WallThickness of floor (a real wall)
+	constexpr uint8 Corridor = 1; // floor
+	constexpr uint8 Room = 2;	  // floor
+	constexpr uint8 Empty = 3;	  // non-floor cell beyond WallThickness — not a wall, carved away
 } // namespace EDrunkardWalkCellType
+
+/** A room placed during generation, expressed in final grid-array coordinates (after extent offset). */
+struct PROCEDURALGEOMETRY_API FDrunkardWalkPlacedRoom
+{
+	FIntPoint Min;		 // footprint min corner (inclusive), grid-array coords
+	int32	  Width = 0; // footprint width in cells
+	int32	  Height = 0;
+	int32	  TypeIndex = -1; // index into the resolved RoomTypes array (-1 = unknown)
+};
 
 /**
  * Debug/visualization data from the drunkard walk generation pipeline.
@@ -20,17 +31,21 @@ namespace EDrunkardWalkCellType
  */
 struct PROCEDURALGEOMETRY_API FDrunkardWalkGridData
 {
-	TArray<bool>			  Grid;			  // true = floor, false = wall
-	TArray<uint8>			  CellType;		  // EDrunkardWalkCellType per cell
-	TArray<int32>			  RegionIds;	  // Per-cell region ID (-1 = wall)
-	TArray<TArray<FIntPoint>> Regions;		  // Cell coordinates per region
-	int32					  CenterRegionId; // Region containing grid center (-1 if none)
-	TArray<TArray<FIntPoint>> WalkerPaths;	  // Position history per walker (index = walker ID)
-	TArray<FIntPoint>		  RoomCenters;	  // Grid positions where rooms were placed
-	int32					  GridWidth;
-	int32					  GridHeight;
-	float					  CellSize;
-	FLayoutDiagram2D		  Diagram; // Final output (existing)
+	TArray<bool>					Grid;					// true = floor, false = wall
+	TArray<uint8>					CellType;				// EDrunkardWalkCellType per cell
+	TArray<int32>					RegionIds;				// Per-cell region ID (-1 = wall)
+	TArray<TArray<FIntPoint>>		Regions;				// Cell coordinates per region
+	int32							CenterRegionId;			// Region containing grid center (-1 if none)
+	TArray<TArray<FIntPoint>>		WalkerPaths;			// One corridor polyline per placed segment (grid-array coords)
+	TArray<int32>					CorridorSourceRoom;		// PlacedRooms index the corridor starts from (parallel to WalkerPaths)
+	TArray<int32>					CorridorTargetRoom;		// PlacedRooms index the corridor leads to   (parallel to WalkerPaths)
+	TArray<FIntPoint>				RoomCenters;			// Grid positions of placed room centers
+	TArray<FDrunkardWalkPlacedRoom> PlacedRooms;			// Full placed-room records
+	int32							RequestedRoomCount = 0; // Total rooms requested (sum of type counts)
+	int32							GridWidth;
+	int32							GridHeight;
+	float							CellSize;
+	FLayoutDiagram2D				Diagram; // Final output (existing)
 };
 
 UCLASS()
@@ -38,17 +53,18 @@ class PROCEDURALGEOMETRY_API UDrunkardWalkGenerator2D final : public ULayoutGene
 {
 	GENERATED_BODY()
 
-	int32 WalkLength;
-	int32 NumWalkers;
-	float BranchProbability;
-	int32 CorridorWidth;
-	float RoomChance;
-	int32 RoomRadiusMin;
-	int32 RoomRadiusMax;
-	int32 MinRoomSpacing;
-	int32 MaxRoomCount;
-	float DirectionalMomentum;
-	float ExplorationBias;
+	TArray<FRoomTypeConfig> RoomTypes;
+	int32					CorridorLengthMin;
+	int32					CorridorLengthMax;
+	int32					CorridorWidthMin;
+	int32					CorridorWidthMax;
+	float					CorridorTurnProbability;
+	float					CorridorBranchProbability;
+	int32					RoomBorderMargin;
+	int32					WallThickness;
+	int32					MaxPlacementAttemptsPerExit;
+	bool					bShuffleRoomOrder;
+	float					BranchProbability;
 
 public:
 	UDrunkardWalkGenerator2D();
@@ -60,38 +76,41 @@ public:
 	virtual UDrunkardWalkGenerator2D* SetCenter(const FVector2D& InCenter) override;
 
 	// Generator-specific config
-	UDrunkardWalkGenerator2D* SetWalkLength(int32 InWalkLength);
-	UDrunkardWalkGenerator2D* SetNumWalkers(int32 InNumWalkers);
-	UDrunkardWalkGenerator2D* SetBranchProbability(float InProbability);
+	UDrunkardWalkGenerator2D* SetRoomTypes(const TArray<FRoomTypeConfig>& InRoomTypes);
+	UDrunkardWalkGenerator2D* SetCorridorLengthRange(int32 InMin, int32 InMax);
+
+	/** Sets a fixed corridor width (min == max == InWidth). */
 	UDrunkardWalkGenerator2D* SetCorridorWidth(int32 InWidth);
-	UDrunkardWalkGenerator2D* SetRoomChance(float InChance);
-	UDrunkardWalkGenerator2D* SetRoomRadius(int32 InRadius);
 
-	/** Sets the minimum and maximum room carve radius. Each room picks a random radius in [InMin, InMax]. */
-	UDrunkardWalkGenerator2D* SetRoomRadiusRange(int32 InMin, int32 InMax);
+	/** Sets the corridor width range; width drifts within [InMin, InMax] along the corridor (bounded random walk). */
+	UDrunkardWalkGenerator2D* SetCorridorWidthRange(int32 InMin, int32 InMax);
 
-	/** Sets the minimum Manhattan distance between room centers. 0 = disabled. */
-	UDrunkardWalkGenerator2D* SetMinRoomSpacing(int32 InSpacing);
+	/** Sets the per-step probability [0,1] that a corridor turns 90 degrees. */
+	UDrunkardWalkGenerator2D* SetCorridorTurnProbability(float InProbability);
 
-	/** Sets the maximum number of rooms. 0 = unlimited. */
-	UDrunkardWalkGenerator2D* SetMaxRoomCount(int32 InCount);
+	/** Sets the per-step probability [0,1] that a corridor forks a side branch to an additional room. */
+	UDrunkardWalkGenerator2D* SetCorridorBranchProbability(float InProbability);
 
-	/** Sets the probability [0,1] that a walker continues in its last direction each step. */
-	UDrunkardWalkGenerator2D* SetDirectionalMomentum(float InMomentum);
+	UDrunkardWalkGenerator2D* SetRoomBorderMargin(int32 InMargin);
 
-	/** Sets the preference [0,1] for directions leading to uncarved cells. */
-	UDrunkardWalkGenerator2D* SetExplorationBias(float InBias);
+	/** Sets wall thickness in cells; non-floor cells farther than this from any floor become Empty (no wall). */
+	UDrunkardWalkGenerator2D* SetWallThickness(int32 InThickness);
+	UDrunkardWalkGenerator2D* SetMaxPlacementAttemptsPerExit(int32 InAttempts);
+	UDrunkardWalkGenerator2D* SetShuffleRoomOrder(bool bInShuffle);
+
+	/** Sets the probability [0,1] that a room grows from a random earlier room instead of the most recent (branching). */
+	UDrunkardWalkGenerator2D* SetBranchProbability(float InProbability);
+
+	/** Applies a fully resolved parameter set in one call. */
+	UDrunkardWalkGenerator2D* ApplyResolvedParams(const FDrunkardWalkResolvedParams& Params);
 
 	// Generation
 	virtual FLayoutDiagram2D Generate() override;
 
-	/** Returns full intermediate grid data including walker paths and regions. For visualization/testing only. */
+	/** Returns full intermediate grid data including placed rooms and regions. For visualization/testing only. */
 	FDrunkardWalkGridData GenerateWithGridData();
 
 private:
 	/** Core generation pipeline shared by Generate() and GenerateWithGridData(). */
 	FDrunkardWalkGridData GenerateInternal();
-
-	void CarveCell(TArray<bool>& Grid, TArray<uint8>& CellType, int32 X, int32 Y, int32 GridWidth, int32 GridHeight) const;
-	void CarveRoom(TArray<bool>& Grid, TArray<uint8>& CellType, int32 CenterX, int32 CenterY, int32 Radius, int32 GridWidth, int32 GridHeight) const;
 };

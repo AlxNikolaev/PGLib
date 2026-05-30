@@ -15,14 +15,14 @@ namespace
 	// Grid line color
 	const FColor GridLineColor(20, 20, 25);
 
-	// Default floor color when region coloring is off
-	const FLinearColor DefaultFloorLinearColor(0.7f, 0.7f, 0.7f);
+	// Corridor color: muted blue-gray, distinct from the saturated room colors
+	const FLinearColor CorridorLinearColor(0.28f, 0.30f, 0.38f);
 
-	/** Golden ratio hue cycling for maximally distant region colors. HSVToLinearRGB expects H in [0,360]. */
-	FLinearColor GetRegionLinearColor(int32 RegionIndex)
+	/** Distinct, saturated color per placed room (offset hue so rooms differ strongly from corridors). */
+	FLinearColor GetRoomDistinctColor(int32 RoomIndex)
 	{
-		const float Hue = FMath::Fmod(RegionIndex * 0.618033988749895f, 1.0f) * 360.0f;
-		return FLinearColor(Hue, 0.7f, 0.85f).HSVToLinearRGB();
+		const float Hue = FMath::Fmod(RoomIndex * 0.618033988749895f + 0.15f, 1.0f) * 360.0f;
+		return FLinearColor(Hue, 0.85f, 1.0f).HSVToLinearRGB();
 	}
 
 	/** Walker path color: higher saturation and full brightness for distinction from region colors. */
@@ -30,15 +30,6 @@ namespace
 	{
 		const float Hue = FMath::Fmod(WalkerIndex * 0.618033988749895f, 1.0f) * 360.0f;
 		return FLinearColor(Hue, 0.9f, 1.0f).HSVToLinearRGB();
-	}
-
-	/** Warm tint for room highlight overlay. Shifts the region color toward orange. */
-	FLinearColor GetRoomHighlightLinearColor(int32 RegionIndex)
-	{
-		const float RegionHue = FMath::Fmod(RegionIndex * 0.618033988749895f, 1.0f);
-		// Blend toward warm (0.08 = orange) by averaging
-		const float WarmHue = FMath::Fmod((RegionHue + 0.08f) * 0.5f + 0.04f, 1.0f) * 360.0f;
-		return FLinearColor(WarmHue, 0.8f, 0.95f).HSVToLinearRGB();
 	}
 } // namespace
 
@@ -63,17 +54,7 @@ void ADrunkardWalk2DVisualizer::OnConstruction(const FTransform& Transform)
 	FDrunkardWalkResolvedParams Params = Config.Resolve();
 
 	UDrunkardWalkGenerator2D* Generator = NewObject<UDrunkardWalkGenerator2D>();
-	Generator->SetBounds(Bounds)
-		->SetSeed(Seed)
-		->SetGridSize(GridSize)
-		->SetWalkLength(Params.WalkLength)
-		->SetNumWalkers(Params.NumWalkers)
-		->SetBranchProbability(Params.BranchProbability)
-		->SetCorridorWidth(Params.CorridorWidth)
-		->SetRoomChance(Params.RoomChance)
-		->SetRoomRadiusRange(Params.RoomRadiusMin, Params.RoomRadiusMax)
-		->SetMinRoomSpacing(Params.MinRoomSpacing)
-		->SetMaxRoomCount(Params.MaxRoomCount);
+	Generator->SetBounds(Bounds)->SetSeed(Seed)->SetGridSize(GridSize)->SetCenter(Bounds.GetCenter())->ApplyResolvedParams(Params);
 
 	const double		  StartTime = FPlatformTime::Seconds();
 	FDrunkardWalkGridData GridData = Generator->GenerateWithGridData();
@@ -120,81 +101,65 @@ void ADrunkardWalk2DVisualizer::OnConstruction(const FTransform& Transform)
 		CS,
 		GridData.Regions.Num());
 
-	// Layer 1 (Z=0..1): Grid cells via ProceduralMesh
+	// Layer 1: Cells via ProceduralMesh — only real walls (pruned to WallThickness around floor) and floor.
+	// Empty cells are not drawn. Rooms get a distinct color each; corridors share a muted color.
 	if (bShowGridCells)
 	{
-		// Section 0: Wall background quad spanning full grid bounds at Z=0
+		// Walls (Z=0): only cells classified as Wall, drawn individually (no full background quad).
 		{
-			const float MinX = LocalBounds.Min.X;
-			const float MinY = LocalBounds.Min.Y;
-			const float MaxX = MinX + GridData.GridWidth * CS;
-			const float MaxY = MinY + GridData.GridHeight * CS;
-
-			TArray<FVector> Vertices = { FVector(MinX, MinY, 0.0f), FVector(MaxX, MinY, 0.0f), FVector(MaxX, MaxY, 0.0f), FVector(MinX, MaxY, 0.0f) };
-			TArray<int32>	Triangles = { 0, 2, 1, 0, 3, 2 };
-			TArray<FVector> Normals = { FVector::UpVector, FVector::UpVector, FVector::UpVector, FVector::UpVector };
-			TArray<FVector2D>		 UVs = { FVector2D(0, 0), FVector2D(1, 0), FVector2D(1, 1), FVector2D(0, 1) };
-			TArray<FLinearColor>	 Colors = { WallLinearColor, WallLinearColor, WallLinearColor, WallLinearColor };
-			TArray<FProcMeshTangent> Tangents;
-
-			GridMeshComponent->CreateMeshSection_LinearColor(SectionIndex, Vertices, Triangles, Normals, UVs, Colors, Tangents, true);
-			if (DebugMaterial)
+			TArray<FIntPoint> WallCells;
+			for (int32 i = 0; i < GridData.CellType.Num(); ++i)
 			{
-				GridMeshComponent->SetMaterial(SectionIndex, DebugMaterial);
-			}
-			++SectionIndex;
-		}
-
-		// One section per region at Z=1
-		for (int32 RegionId = 0; RegionId < GridData.Regions.Num(); ++RegionId)
-		{
-			if (GridData.Regions[RegionId].Num() == 0)
-			{
-				continue;
-			}
-
-			FLinearColor RegionColor;
-			if (bShowRegionColors)
-			{
-				RegionColor = GetRegionLinearColor(RegionId);
-			}
-			else
-			{
-				RegionColor = DefaultFloorLinearColor;
-			}
-
-			BuildCellMeshSection(SectionIndex, GridData.Regions[RegionId], CS, LocalBounds, RegionColor, 1.0f);
-			++SectionIndex;
-		}
-
-		UE_LOG(LogDWVisualizer, Log, TEXT("OnConstruction: Created %d mesh sections for grid cells."), SectionIndex);
-	}
-
-	// Layer 2 (Z=1.5): Room highlights via ProceduralMesh
-	if (bShowRoomHighlights)
-	{
-		for (int32 RegionId = 0; RegionId < GridData.Regions.Num(); ++RegionId)
-		{
-			// Collect only room-type cells for this region
-			TArray<FIntPoint> RoomCells;
-			for (const FIntPoint& Cell : GridData.Regions[RegionId])
-			{
-				const int32 Index = Cell.Y * GridData.GridWidth + Cell.X;
-				if (GridData.CellType[Index] == EDrunkardWalkCellType::Room)
+				if (GridData.CellType[i] == EDrunkardWalkCellType::Wall)
 				{
-					RoomCells.Add(Cell);
+					WallCells.Add(FIntPoint(i % GridData.GridWidth, i / GridData.GridWidth));
+				}
+			}
+			if (WallCells.Num() > 0)
+			{
+				BuildCellMeshSection(SectionIndex, WallCells, CS, LocalBounds, WallLinearColor, 0.0f);
+				++SectionIndex;
+			}
+		}
+
+		// Corridor cells (Z=1): one muted section.
+		{
+			TArray<FIntPoint> CorridorCells;
+			for (int32 i = 0; i < GridData.CellType.Num(); ++i)
+			{
+				if (GridData.CellType[i] == EDrunkardWalkCellType::Corridor)
+				{
+					CorridorCells.Add(FIntPoint(i % GridData.GridWidth, i / GridData.GridWidth));
+				}
+			}
+			if (CorridorCells.Num() > 0)
+			{
+				BuildCellMeshSection(SectionIndex, CorridorCells, CS, LocalBounds, CorridorLinearColor, 1.0f);
+				++SectionIndex;
+			}
+		}
+
+		// Rooms (Z=1.5): one section per placed room, each a distinct color.
+		for (int32 RoomId = 0; RoomId < GridData.PlacedRooms.Num(); ++RoomId)
+		{
+			const FDrunkardWalkPlacedRoom& Room = GridData.PlacedRooms[RoomId];
+			TArray<FIntPoint>			   RoomCells;
+			RoomCells.Reserve(Room.Width * Room.Height);
+			for (int32 dy = 0; dy < Room.Height; ++dy)
+			{
+				for (int32 dx = 0; dx < Room.Width; ++dx)
+				{
+					RoomCells.Add(FIntPoint(Room.Min.X + dx, Room.Min.Y + dy));
 				}
 			}
 
-			if (RoomCells.Num() == 0)
-			{
-				continue;
-			}
-
-			const FLinearColor HighlightColor = GetRoomHighlightLinearColor(RegionId);
-			BuildCellMeshSection(SectionIndex, RoomCells, CS, LocalBounds, HighlightColor, 1.5f);
+			// Always color rooms distinctly so adjacent rooms are visually separable.
+			const FLinearColor RoomColor = GetRoomDistinctColor(RoomId);
+			BuildCellMeshSection(SectionIndex, RoomCells, CS, LocalBounds, RoomColor, 1.5f);
 			++SectionIndex;
 		}
+
+		UE_LOG(LogDWVisualizer, Log, TEXT("OnConstruction: Created %d mesh sections (walls/corridors/rooms)."), SectionIndex);
 	}
 
 	// Layer 3 (Z=2): Grid lines (DrawDebugLine, world space)
@@ -282,8 +247,9 @@ void ADrunkardWalk2DVisualizer::OnConstruction(const FTransform& Transform)
 	// Layer 7 (Z=10): Center marker
 	if (bShowCenterMarker && GridData.CenterRegionId >= 0 && GridData.CenterRegionId < GridData.Regions.Num())
 	{
-		const int32 CenterX = GridData.GridWidth / 2;
-		const int32 CenterY = GridData.GridHeight / 2;
+		// First room center if available, else grid center.
+		const int32 CenterX = GridData.RoomCenters.Num() > 0 ? GridData.RoomCenters[0].X : GridData.GridWidth / 2;
+		const int32 CenterY = GridData.RoomCenters.Num() > 0 ? GridData.RoomCenters[0].Y : GridData.GridHeight / 2;
 
 		const FVector CenterPos(B.Min.X + (CenterX + 0.5f) * CS, B.Min.Y + (CenterY + 0.5f) * CS, 10.0f);
 		const FVector MarkerExtent(CS * 1.0f, CS * 1.0f, 1.0f);
@@ -329,8 +295,12 @@ void ADrunkardWalk2DVisualizer::OnConstruction(const FTransform& Transform)
 		DrawLine(FString::Printf(
 			TEXT("Floor: %d (%.1f%%) | Wall: %d (%.1f%%) | Room: %d (%.1f%%)"), FloorCount, FloorPct, WallCount, WallPct, RoomCount, RoomPct));
 
-		// Region and walker counts
-		DrawLine(FString::Printf(TEXT("Regions: %d | Walkers: %d"), GridData.Regions.Num(), GridData.WalkerPaths.Num()));
+		// Region, room, and corridor counts
+		DrawLine(FString::Printf(TEXT("Regions: %d | Rooms: %d/%d | Corridors: %d"),
+			GridData.Regions.Num(),
+			GridData.PlacedRooms.Num(),
+			GridData.RequestedRoomCount,
+			GridData.WalkerPaths.Num()));
 
 		// Generation time
 		DrawLine(FString::Printf(TEXT("Generation: %.2f ms"), GenerationTimeMs));
