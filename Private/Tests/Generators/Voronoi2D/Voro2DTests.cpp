@@ -617,4 +617,51 @@ bool FVoronoiMinSiteDistanceTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+// Test 16: RelaxSites graceful guard - verify no crash when GenerateRelaxed runs with 1 iteration
+// This exercises the ensureMsgf + early-return guard added to RelaxSites (the cell-count mismatch
+// check). RelaxSites is private and called via GenerateRelaxed; the guard is defensive because
+// ComputeVoronoiCells always produces Sites.Num() cells. We verify that a single relaxation
+// iteration with a minimal site count (including a config that can produce near-duplicate sites
+// after centroid movement) completes without crash and yields a valid, bounds-clamped diagram.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVoronoiRelaxSitesDuplicateGuardTest, "ProceduralGeometry.Voronoi.RelaxSites.DuplicateGuard", DefaultTestFlags)
+
+bool FVoronoiRelaxSitesDuplicateGuardTest::RunTest(const FString& Parameters)
+{
+	const FBox2D TestBounds(FVector2D(0, 0), FVector2D(100, 100));
+
+	// Use a large MinSiteDistance so Poisson disc yields very few sites (as few as 2-3),
+	// then apply 1 relaxation iteration. Centroid movement can push near-identical sites
+	// into positions where the duplicate-site clip path is exercised in ComputeCellForSite.
+	UVoronoiGenerator2D* Generator = NewObject<UVoronoiGenerator2D>();
+	Generator->SetBounds(TestBounds);
+	Generator->SetSeed(TEXT("DuplicateGuardTest"));
+	Generator->SetMinSiteDistance(40.0f);
+	Generator->SetRelaxationIterations(1);
+
+	// Should not crash. RelaxSites ensureMsgf guard must not fire (cell count always == site count).
+	FVoronoiDiagram2D Diagram = Generator->GenerateRelaxed(3);
+
+	// Cell count must equal site count after one relaxation pass.
+	TestEqual("Cell count equals site count after relaxation", Diagram.Cells.Num(), Diagram.Sites.Num());
+
+	// All sites must remain within bounds after the relaxation clamp.
+	for (int32 i = 0; i < Diagram.Sites.Num(); ++i)
+	{
+		const FVector2D& Site = Diagram.Sites[i];
+		TestTrue(FString::Printf(TEXT("Relaxed site %d X within bounds"), i), Site.X >= 0.0f && Site.X <= 100.0f);
+		TestTrue(FString::Printf(TEXT("Relaxed site %d Y within bounds"), i), Site.Y >= 0.0f && Site.Y <= 100.0f);
+	}
+
+	// All valid cells must remain convex.
+	for (const FVoronoiCell2D& Cell : Diagram.Cells)
+	{
+		if (Cell.bIsValid)
+		{
+			TestTrue("Relaxed cell should be convex", FVoronoiTestBase::IsConvexPolygon(Cell.Vertices));
+		}
+	}
+
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

@@ -1549,56 +1549,14 @@ FOrganicDungeonGridData UOrganicDungeonGenerator2D::RasterizeLayout(const FOrgan
 	}
 
 	// Flood-fill connected floor regions.
-	const int32	  DX[] = { 1, -1, 0, 0 };
-	const int32	  DY[] = { 0, 0, 1, -1 };
-	TArray<int32> RegionIds;
-	RegionIds.Init(-1, TotalCells);
+	TArray<int32>			  RegionIds;
 	TArray<TArray<FIntPoint>> Regions;
 	int32					  CenterRegionId = -1;
 
 	const int32 CenterX = FMath::Clamp(WorldToCellX(CenterPoint.X), 0, GWidth - 1);
 	const int32 CenterY = FMath::Clamp(WorldToCellY(CenterPoint.Y), 0, GHeight - 1);
 
-	for (int32 Y = 0; Y < GHeight; ++Y)
-	{
-		for (int32 X = 0; X < GWidth; ++X)
-		{
-			const int32 Index = Y * GWidth + X;
-			if (!Grid[Index] || RegionIds[Index] >= 0)
-			{
-				continue;
-			}
-			const int32		   RegionId = Regions.Num();
-			TArray<FIntPoint>& Region = Regions.AddDefaulted_GetRef();
-			TArray<FIntPoint>  Bfs;
-			Bfs.Add(FIntPoint(X, Y));
-			RegionIds[Index] = RegionId;
-			int32 Head = 0;
-			while (Head < Bfs.Num())
-			{
-				const FIntPoint Cell = Bfs[Head++];
-				Region.Add(Cell);
-				for (int32 d = 0; d < 4; ++d)
-				{
-					const int32 NX = Cell.X + DX[d];
-					const int32 NY = Cell.Y + DY[d];
-					if (NX >= 0 && NX < GWidth && NY >= 0 && NY < GHeight)
-					{
-						const int32 NIdx = NY * GWidth + NX;
-						if (Grid[NIdx] && RegionIds[NIdx] < 0)
-						{
-							RegionIds[NIdx] = RegionId;
-							Bfs.Add(FIntPoint(NX, NY));
-						}
-					}
-				}
-			}
-			if (CenterRegionId < 0 && RegionIds[CenterY * GWidth + CenterX] == RegionId)
-			{
-				CenterRegionId = RegionId;
-			}
-		}
-	}
+	FloodFillRegions(Grid, GWidth, GHeight, CenterX, CenterY, RegionIds, Regions, CenterRegionId);
 
 	UE_LOG(LogRoguelikeGeometry,
 		Log,

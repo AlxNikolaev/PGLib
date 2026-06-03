@@ -3,8 +3,7 @@
 	#include "DrawDebugHelpers.h"
 #endif
 #include "GeometryUtils/GeometryFunctionLibrary.h"
-
-static constexpr int32 VoroSiteGenMaxAttempts = 30;
+#include "ProceduralGeometry.h"
 
 float FVoronoiCell2D::GetArea() const
 {
@@ -201,13 +200,17 @@ FVoronoiDiagram2D UVoronoiGenerator2D::GenerateFromSites(const TArray<FVector2D>
 	return Diagram;
 }
 
-FVoronoiDiagram2D UVoronoiGenerator2D::GenerateRandomSites(const int32 NumSites, const bool bUsePoissonDisc) const
+FVoronoiDiagram2D UVoronoiGenerator2D::GenerateRandomSites(const int32 NumSites, const bool bUsePoissonDisc)
 {
 	TArray<FVector2D> Sites;
 
 	if (bUsePoissonDisc)
 	{
-		Sites = GeneratePoissonDiscSites(NumSites);
+		// Build a polygon from the bounding box and use the shared O(N) Poisson-disc sampler.
+		const TArray<FVector2D> BoundsPolygon = {
+			Bounds.Min, FVector2D(Bounds.Max.X, Bounds.Min.Y), Bounds.Max, FVector2D(Bounds.Min.X, Bounds.Max.Y)
+		};
+		FGeometryUtils::PoissonDiskSampling(BoundsPolygon, MinSiteDistance, NumSites, RandomStream, Sites);
 	}
 	else
 	{
@@ -226,7 +229,9 @@ FVoronoiDiagram2D UVoronoiGenerator2D::GenerateRandomSites(const int32 NumSites,
 
 FVoronoiDiagram2D UVoronoiGenerator2D::GenerateRelaxed(const int32 NumSites)
 {
-	TArray<FVector2D> Sites = GeneratePoissonDiscSites(NumSites);
+	const TArray<FVector2D> BoundsPolygon = { Bounds.Min, FVector2D(Bounds.Max.X, Bounds.Min.Y), Bounds.Max, FVector2D(Bounds.Min.X, Bounds.Max.Y) };
+	TArray<FVector2D>		Sites;
+	FGeometryUtils::PoissonDiskSampling(BoundsPolygon, MinSiteDistance, NumSites, RandomStream, Sites);
 
 	for (int32 Iter = 0; Iter < RelaxationIterations; ++Iter)
 	{
@@ -253,15 +258,62 @@ void UVoronoiGenerator2D::ComputeVoronoiCells(const TArray<FVector2D>& Sites, FV
 		OutDiagram.Cells.Add(Cell);
 	}
 
-	for (int32 i = 0; i < OutDiagram.Cells.Num(); ++i)
+	// Build a vertex→cell multimap from the already-computed clip results so neighbor
+	// detection is O(N·V) instead of the previous O(N²·V²) all-pairs scan.
+	//
+	// Two Voronoi cells share an edge iff they share exactly 2 distinct vertex positions
+	// (the two endpoints of that edge).  Corner contacts share only 1 vertex; we exclude
+	// those by requiring a shared-bucket count of at least 2.
 	{
-		for (int32 j = i + 1; j < OutDiagram.Cells.Num(); ++j)
+		const float MaxExtent = FMath::Max(Bounds.GetExtent().X, Bounds.GetExtent().Y);
+		const float Tolerance = FMath::Max(MaxExtent * 1e-4f, UE_KINDA_SMALL_NUMBER);
+		// Bucket granularity = Tolerance/2.  True floating-point coincidences from the
+		// Sutherland-Hodgman clip are << Tolerance apart and always collapse to the same
+		// bucket; corner contacts land in different buckets (>> Tolerance apart).
+		const double QuantStep = static_cast<double>(Tolerance) * 0.5;
+
+		using FVertKey = TPair<int64, int64>;
+		TMap<FVertKey, TArray<int32>> VertexToCells;
+		VertexToCells.Reserve(OutDiagram.Cells.Num() * 8);
+
+		for (int32 i = 0; i < OutDiagram.Cells.Num(); ++i)
 		{
-			FVector2D EdgeStart, EdgeEnd;
-			if (OutDiagram.GetSharedEdge(i, j, EdgeStart, EdgeEnd))
+			if (!OutDiagram.Cells[i].bIsValid)
+				continue;
+			for (const FVector2D& V : OutDiagram.Cells[i].Vertices)
 			{
-				OutDiagram.Cells[i].Neighbors.AddUnique(j);
-				OutDiagram.Cells[j].Neighbors.AddUnique(i);
+				const FVertKey Key(static_cast<int64>(FMath::RoundToDouble(static_cast<double>(V.X) / QuantStep)),
+					static_cast<int64>(FMath::RoundToDouble(static_cast<double>(V.Y) / QuantStep)));
+				VertexToCells.FindOrAdd(Key).Add(i);
+			}
+		}
+
+		// Tally shared-bucket count per ordered cell pair (Lo < Hi).
+		TMap<TPair<int32, int32>, int32> PairSharedCount;
+		for (auto& [VertKey, CellList] : VertexToCells)
+		{
+			for (int32 a = 0; a < CellList.Num(); ++a)
+			{
+				for (int32 b = a + 1; b < CellList.Num(); ++b)
+				{
+					const int32 CellA = CellList[a];
+					const int32 CellB = CellList[b];
+					if (CellA == CellB)
+						continue; // same cell appeared twice in this bucket (degenerate vertex)
+					const int32 Lo = FMath::Min(CellA, CellB);
+					const int32 Hi = FMath::Max(CellA, CellB);
+					PairSharedCount.FindOrAdd(TPair<int32, int32>(Lo, Hi))++;
+				}
+			}
+		}
+
+		// Pairs with 2+ shared vertex buckets share a Voronoi edge → register as neighbors.
+		for (auto& [PairKey, Count] : PairSharedCount)
+		{
+			if (Count >= 2)
+			{
+				OutDiagram.Cells[PairKey.Key].Neighbors.AddUnique(PairKey.Value);
+				OutDiagram.Cells[PairKey.Value].Neighbors.AddUnique(PairKey.Key);
 			}
 		}
 	}
@@ -300,63 +352,6 @@ void UVoronoiGenerator2D::ComputeCellForSite(FVoronoiCell2D& OutCell, int32 Site
 	OutCell.bIsValid = OutCell.Vertices.Num() >= 3;
 }
 
-TArray<FVector2D> UVoronoiGenerator2D::GeneratePoissonDiscSites(const int32 TargetCount) const
-{
-	TArray<FVector2D> Sites;
-	TArray<FVector2D> ActiveList;
-
-	FVector2D FirstSite;
-	FirstSite.X = RandomStream.FRandRange(Bounds.Min.X, Bounds.Max.X);
-	FirstSite.Y = RandomStream.FRandRange(Bounds.Min.Y, Bounds.Max.Y);
-	Sites.Add(FirstSite);
-	ActiveList.Add(FirstSite);
-
-	while (ActiveList.Num() > 0 && Sites.Num() < TargetCount)
-	{
-		const int32		RandomIndex = RandomStream.RandRange(0, ActiveList.Num() - 1);
-		const FVector2D CurrentSite = ActiveList[RandomIndex];
-		bool			bFoundNewSite = false;
-
-		for (int32 Attempt = 0; Attempt < VoroSiteGenMaxAttempts; ++Attempt)
-		{
-			const float Angle = RandomStream.FRand() * 2.0f * PI;
-			const float Distance = RandomStream.FRandRange(MinSiteDistance, MinSiteDistance * 2.0f);
-
-			FVector2D NewSite;
-			NewSite.X = CurrentSite.X + Distance * FMath::Cos(Angle);
-			NewSite.Y = CurrentSite.Y + Distance * FMath::Sin(Angle);
-
-			if (Bounds.IsInside(NewSite))
-			{
-				bool bFarEnough = true;
-				for (const FVector2D& Existing : Sites)
-				{
-					if (FVector2D::Distance(Existing, NewSite) < MinSiteDistance)
-					{
-						bFarEnough = false;
-						break;
-					}
-				}
-				if (!bFarEnough)
-				{
-					continue;
-				}
-				Sites.Add(NewSite);
-				ActiveList.Add(NewSite);
-				bFoundNewSite = true;
-				break;
-			}
-		}
-
-		if (!bFoundNewSite)
-		{
-			ActiveList.RemoveAt(RandomIndex);
-		}
-	}
-
-	return Sites;
-}
-
 void UVoronoiGenerator2D::RelaxSites(TArray<FVector2D>& Sites)
 {
 	FVoronoiDiagram2D TempDiagram;
@@ -365,7 +360,20 @@ void UVoronoiGenerator2D::RelaxSites(TArray<FVector2D>& Sites)
 
 	ComputeVoronoiCells(Sites, TempDiagram);
 
-	check(TempDiagram.Cells.Num() == Sites.Num());
+	if (!ensureMsgf(TempDiagram.Cells.Num() == Sites.Num(),
+			TEXT("[Voronoi] RelaxSites: cell count mismatch — expected %d, got %d; skipping relaxation step"),
+			Sites.Num(),
+			TempDiagram.Cells.Num()))
+	{
+		// UE_LOG is the shipping-build fallback: ensureMsgf is stripped in Shipping builds,
+		// so this log line ensures the error is always captured regardless of build config.
+		UE_LOG(LogRoguelikeGeometry,
+			Error,
+			TEXT("[Voronoi] RelaxSites: cell count mismatch — expected %d, got %d; skipping relaxation step"),
+			Sites.Num(),
+			TempDiagram.Cells.Num());
+		return;
+	}
 
 	for (int32 i = 0; i < TempDiagram.Cells.Num(); ++i)
 	{

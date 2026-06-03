@@ -90,4 +90,16 @@ protected:
 	void			 InitializeRandomStream();
 	FVector2D		 ClampToBounds(const FVector2D& Point) const;
 	FLayoutDiagram2D ConvertGridToDiagram(const TArray<bool>& Grid, int32 GridWidth, int32 GridHeight) const;
+
+	/** BFS flood-fill over a boolean grid. Populates OutRegionIds and OutRegions, and identifies which
+	 *  region contains the cell (CenterX, CenterY) via OutCenterRegionId (-1 if that cell is a wall).
+	 *  Used by CA, DrunkardWalk, and OrganicDungeon generators. */
+	static void FloodFillRegions(const TArray<bool>& Grid,
+		int32										 GridWidth,
+		int32										 GridHeight,
+		int32										 CenterX,
+		int32										 CenterY,
+		TArray<int32>&								 OutRegionIds,
+		TArray<TArray<FIntPoint>>&					 OutRegions,
+		int32&										 OutCenterRegionId);
 };

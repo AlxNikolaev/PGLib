@@ -148,3 +148,71 @@ FLayoutDiagram2D ULayoutGenerator::ConvertGridToDiagram(const TArray<bool>& Grid
 
 	return Diagram;
 }
+
+void ULayoutGenerator::FloodFillRegions(const TArray<bool>& Grid,
+	int32													GridWidth,
+	int32													GridHeight,
+	int32													CenterX,
+	int32													CenterY,
+	TArray<int32>&											OutRegionIds,
+	TArray<TArray<FIntPoint>>&								OutRegions,
+	int32&													OutCenterRegionId)
+{
+	const int32 TotalCells = GridWidth * GridHeight;
+	OutRegionIds.Init(-1, TotalCells);
+	OutRegions.Reset();
+	OutCenterRegionId = -1;
+
+	const int32 DX[] = { 1, -1, 0, 0 };
+	const int32 DY[] = { 0, 0, 1, -1 };
+
+	for (int32 Y = 0; Y < GridHeight; ++Y)
+	{
+		for (int32 X = 0; X < GridWidth; ++X)
+		{
+			const int32 Index = Y * GridWidth + X;
+			if (!Grid[Index] || OutRegionIds[Index] >= 0)
+			{
+				continue;
+			}
+
+			const int32		   RegionId = OutRegions.Num();
+			TArray<FIntPoint>& Region = OutRegions.AddDefaulted_GetRef();
+
+			TArray<FIntPoint> Queue;
+			Queue.Add(FIntPoint(X, Y));
+			OutRegionIds[Index] = RegionId;
+			int32 Head = 0;
+
+			while (Head < Queue.Num())
+			{
+				const FIntPoint Cell = Queue[Head++];
+				Region.Add(Cell);
+
+				for (int32 Dir = 0; Dir < 4; ++Dir)
+				{
+					const int32 NX = Cell.X + DX[Dir];
+					const int32 NY = Cell.Y + DY[Dir];
+					if (NX >= 0 && NX < GridWidth && NY >= 0 && NY < GridHeight)
+					{
+						const int32 NIndex = NY * GridWidth + NX;
+						if (Grid[NIndex] && OutRegionIds[NIndex] < 0)
+						{
+							OutRegionIds[NIndex] = RegionId;
+							Queue.Add(FIntPoint(NX, NY));
+						}
+					}
+				}
+			}
+
+			if (OutCenterRegionId < 0)
+			{
+				const int32 CenterIndex = CenterY * GridWidth + CenterX;
+				if (OutRegionIds[CenterIndex] == RegionId)
+				{
+					OutCenterRegionId = RegionId;
+				}
+			}
+		}
+	}
+}

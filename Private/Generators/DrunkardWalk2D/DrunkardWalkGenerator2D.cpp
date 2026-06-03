@@ -869,64 +869,12 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 	const int32 CenterX = (PlacedRoomsSigned.Num() > 0) ? RoomCenters[0].X : GWidth / 2;
 	const int32 CenterY = (PlacedRoomsSigned.Num() > 0) ? RoomCenters[0].Y : GHeight / 2;
 
-	// --- Flood-fill: identify connected floor regions (same algorithm as CA) ---
-	const int32 DX[] = { 1, -1, 0, 0 };
-	const int32 DY[] = { 0, 0, 1, -1 };
-
-	TArray<int32> RegionIds;
-	RegionIds.Init(-1, TotalCells);
+	// Flood-fill: identify connected floor regions
+	TArray<int32>			  RegionIds;
 	TArray<TArray<FIntPoint>> Regions;
 	int32					  CenterRegionId = -1;
 
-	for (int32 Y = 0; Y < GHeight; ++Y)
-	{
-		for (int32 X = 0; X < GWidth; ++X)
-		{
-			const int32 Index = Y * GWidth + X;
-			if (!Grid[Index] || RegionIds[Index] >= 0)
-			{
-				continue;
-			}
-
-			const int32		   RegionId = Regions.Num();
-			TArray<FIntPoint>& Region = Regions.AddDefaulted_GetRef();
-
-			TArray<FIntPoint> BfsQueue;
-			BfsQueue.Add(FIntPoint(X, Y));
-			RegionIds[Index] = RegionId;
-			int32 Head = 0;
-
-			while (Head < BfsQueue.Num())
-			{
-				const FIntPoint Cell = BfsQueue[Head++];
-				Region.Add(Cell);
-
-				for (int32 Dir = 0; Dir < 4; ++Dir)
-				{
-					const int32 NX = Cell.X + DX[Dir];
-					const int32 NY = Cell.Y + DY[Dir];
-					if (NX >= 0 && NX < GWidth && NY >= 0 && NY < GHeight)
-					{
-						const int32 NIndex = NY * GWidth + NX;
-						if (Grid[NIndex] && RegionIds[NIndex] < 0)
-						{
-							RegionIds[NIndex] = RegionId;
-							BfsQueue.Add(FIntPoint(NX, NY));
-						}
-					}
-				}
-			}
-
-			if (CenterRegionId < 0)
-			{
-				const int32 CenterIndex = CenterY * GWidth + CenterX;
-				if (RegionIds[CenterIndex] == RegionId)
-				{
-					CenterRegionId = RegionId;
-				}
-			}
-		}
-	}
+	FloodFillRegions(Grid, GWidth, GHeight, CenterX, CenterY, RegionIds, Regions, CenterRegionId);
 
 	UE_LOG(LogRoguelikeGeometry,
 		Log,

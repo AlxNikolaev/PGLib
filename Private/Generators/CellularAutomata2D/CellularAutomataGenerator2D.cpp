@@ -243,70 +243,14 @@ FCellularAutomataGridData UCellularAutomataGenerator2D::GenerateInternal()
 			100.0f * FloorCount / TotalCells);
 	}
 
-	// Flood-fill: iterative BFS to identify connected floor regions
-	TArray<int32> RegionIds;
-	RegionIds.Init(-1, TotalCells);
-
+	// Flood-fill: identify connected floor regions
+	TArray<int32>			  RegionIds;
 	TArray<TArray<FIntPoint>> Regions;
 	int32					  CenterRegionId = -1;
 	const int32				  CenterX = GWidth / 2;
 	const int32				  CenterY = GHeight / 2;
 
-	const int32 DX[] = { 1, -1, 0, 0 };
-	const int32 DY[] = { 0, 0, 1, -1 };
-
-	for (int32 Y = 0; Y < GHeight; ++Y)
-	{
-		for (int32 X = 0; X < GWidth; ++X)
-		{
-			const int32 Index = Y * GWidth + X;
-			if (!Grid[Index] || RegionIds[Index] >= 0)
-			{
-				continue;
-			}
-
-			// Start new region with BFS
-			const int32		   RegionId = Regions.Num();
-			TArray<FIntPoint>& Region = Regions.AddDefaulted_GetRef();
-
-			TArray<FIntPoint> Queue;
-			Queue.Add(FIntPoint(X, Y));
-			RegionIds[Index] = RegionId;
-			int32 Head = 0;
-
-			while (Head < Queue.Num())
-			{
-				const FIntPoint Cell = Queue[Head++];
-				Region.Add(Cell);
-
-				for (int32 Dir = 0; Dir < 4; ++Dir)
-				{
-					const int32 NX = Cell.X + DX[Dir];
-					const int32 NY = Cell.Y + DY[Dir];
-
-					if (NX >= 0 && NX < GWidth && NY >= 0 && NY < GHeight)
-					{
-						const int32 NIndex = NY * GWidth + NX;
-						if (Grid[NIndex] && RegionIds[NIndex] < 0)
-						{
-							RegionIds[NIndex] = RegionId;
-							Queue.Add(FIntPoint(NX, NY));
-						}
-					}
-				}
-			}
-
-			// Check if this region contains the center cell
-			if (CenterRegionId < 0)
-			{
-				const int32 CenterIndex = CenterY * GWidth + CenterX;
-				if (RegionIds[CenterIndex] == RegionId)
-				{
-					CenterRegionId = RegionId;
-				}
-			}
-		}
-	}
+	FloodFillRegions(Grid, GWidth, GHeight, CenterX, CenterY, RegionIds, Regions, CenterRegionId);
 
 	UE_LOG(LogRoguelikeGeometry, Log, TEXT("[CA] Flood-fill found %d regions, center region=%d"), Regions.Num(), CenterRegionId);
 

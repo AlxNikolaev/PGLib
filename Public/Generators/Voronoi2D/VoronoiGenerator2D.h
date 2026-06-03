@@ -93,7 +93,7 @@ public:
 
 	// Generation
 	FVoronoiDiagram2D GenerateFromSites(const TArray<FVector2D>& SiteLocations) const;
-	FVoronoiDiagram2D GenerateRandomSites(int32 NumSites, bool bUsePoissonDisc = false) const;
+	FVoronoiDiagram2D GenerateRandomSites(int32 NumSites, bool bUsePoissonDisc = false);
 	FVoronoiDiagram2D GenerateRelaxed(int32 NumSites);
 
 private:
@@ -101,6 +101,5 @@ private:
 	void ComputeCellForSite(FVoronoiCell2D& OutCell, int32 SiteIndex, const TArray<FVector2D>& AllSites) const;
 
 	// Helpers
-	TArray<FVector2D> GeneratePoissonDiscSites(int32 TargetCount) const;
-	void			  RelaxSites(TArray<FVector2D>& Sites);
+	void RelaxSites(TArray<FVector2D>& Sites);
 };
