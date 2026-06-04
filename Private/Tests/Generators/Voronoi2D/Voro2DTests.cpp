@@ -2,23 +2,9 @@
 #include "Generators/Voronoi2D/VoronoiGenerator2D.h"
 
 #include "ProceduralGeometry.h"
+#include "../../ProceduralGeometryTestFlags.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
-
-namespace
-{
-	// Run in editor and game contexts, product-level test with medium priority
-	constexpr EAutomationTestFlags DefaultTestFlags = EAutomationTestFlags::EditorContext | EAutomationTestFlags::ClientContext
-		| EAutomationTestFlags::ProductFilter | EAutomationTestFlags::MediumPriority;
-
-	// Quick smoke tests
-	constexpr EAutomationTestFlags SmokeTestFlags = EAutomationTestFlags::EditorContext | EAutomationTestFlags::ClientContext
-		| EAutomationTestFlags::SmokeFilter | EAutomationTestFlags::HighPriority;
-
-	// Performance tests
-	constexpr EAutomationTestFlags PerfTestFlags = EAutomationTestFlags::EditorContext | EAutomationTestFlags::ClientContext
-		| EAutomationTestFlags::PerfFilter | EAutomationTestFlags::LowPriority;
-} // namespace
 
 bool FVoronoiTestBase::AreVerticesClockwise(const TArray<FVector2D>& Vertices)
 {
@@ -81,7 +67,7 @@ float FVoronoiTestBase::CalculatePolygonArea(const TArray<FVector2D>& Vertices)
 }
 
 // Test 1: Basic Cell Properties
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVoronoiCellPropertiesTest, "Voronoi.Cell.Properties", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVoronoiCellPropertiesTest, "ProceduralGeometry.Voronoi.Cell.Properties", DefaultTestFlags)
 
 bool FVoronoiCellPropertiesTest::RunTest(const FString& Parameters)
 {
@@ -115,7 +101,7 @@ bool FVoronoiCellPropertiesTest::RunTest(const FString& Parameters)
 }
 
 // Test 2: Generator with Fixed Sites (Smoke Test)
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVoronoiFixedSitesTest, "Voronoi.Generator.FixedSites", SmokeTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVoronoiFixedSitesTest, "ProceduralGeometry.Voronoi.Generator.FixedSites", SmokeTestFlags)
 
 bool FVoronoiFixedSitesTest::RunTest(const FString& Parameters)
 {
@@ -158,7 +144,7 @@ bool FVoronoiFixedSitesTest::RunTest(const FString& Parameters)
 }
 
 // Test 3: Neighbor Detection
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVoronoiNeighborsTest, "Voronoi.Generator.Neighbors", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVoronoiNeighborsTest, "ProceduralGeometry.Voronoi.Generator.Neighbors", DefaultTestFlags)
 
 bool FVoronoiNeighborsTest::RunTest(const FString& Parameters)
 {
@@ -194,7 +180,7 @@ bool FVoronoiNeighborsTest::RunTest(const FString& Parameters)
 }
 
 // Test 4: Random Generation
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVoronoiRandomGenerationTest, "Voronoi.Generator.Random", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVoronoiRandomGenerationTest, "ProceduralGeometry.Voronoi.Generator.Random", DefaultTestFlags)
 
 bool FVoronoiRandomGenerationTest::RunTest(const FString& Parameters)
 {
@@ -233,7 +219,7 @@ bool FVoronoiRandomGenerationTest::RunTest(const FString& Parameters)
 }
 
 // Test 5: Performance Test
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVoronoiPerformanceTest, "Voronoi.Generator.Performance", PerfTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVoronoiPerformanceTest, "ProceduralGeometry.Voronoi.Generator.Performance", PerfTestFlags)
 
 bool FVoronoiPerformanceTest::RunTest(const FString& Parameters)
 {
@@ -268,8 +254,7 @@ bool FVoronoiPerformanceTest::RunTest(const FString& Parameters)
 }
 
 // Test 9: Point Location
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FVoronoiPointLocationTest, "Voronoi.Diagram.PointLocation", EAutomationTestFlags::ClientContext | EAutomationTestFlags::ProductFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVoronoiPointLocationTest, "ProceduralGeometry.Voronoi.Diagram.PointLocation", DefaultTestFlags)
 
 bool FVoronoiPointLocationTest::RunTest(const FString& Parameters)
 {

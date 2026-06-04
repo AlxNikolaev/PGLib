@@ -1,12 +1,7 @@
 #include "Generators/CellularAutomata2D/CellularAutomataConfig.h"
+#include "../../ProceduralGeometryTestFlags.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
-
-namespace
-{
-	constexpr EAutomationTestFlags DefaultTestFlags = EAutomationTestFlags::EditorContext | EAutomationTestFlags::ClientContext
-		| EAutomationTestFlags::ProductFilter | EAutomationTestFlags::MediumPriority;
-} // namespace
 
 // Test 1: Default-constructed config resolves to NaturalCaves preset values
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(

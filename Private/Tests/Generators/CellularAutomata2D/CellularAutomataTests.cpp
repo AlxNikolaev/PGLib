@@ -1,13 +1,8 @@
 #include "Generators/CellularAutomata2D/CellularAutomataGenerator2D.h"
 #include "Generators/CellularAutomata2D/CellularAutomataConfig.h"
+#include "../../ProceduralGeometryTestFlags.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
-
-namespace
-{
-	constexpr EAutomationTestFlags DefaultTestFlags = EAutomationTestFlags::EditorContext | EAutomationTestFlags::ClientContext
-		| EAutomationTestFlags::ProductFilter | EAutomationTestFlags::MediumPriority;
-} // namespace
 
 // Test 1: Default Generate() produces non-empty diagram
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCellularAutomataDefaultGenerateTest, "ProceduralGeometry.CellularAutomata.DefaultGenerate", DefaultTestFlags)

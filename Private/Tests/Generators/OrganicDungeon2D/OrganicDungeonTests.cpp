@@ -2,13 +2,9 @@
 
 #include "Generators/OrganicDungeon2D/OrganicDungeonGenerator2D.h"
 #include "Generators/OrganicDungeon2D/OrganicDungeonConfig.h"
+#include "../../ProceduralGeometryTestFlags.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
-
-	// Use per-file macro to avoid anonymous-namespace symbol collisions under Unity Build.
-	#define ORGANICDUNGEON_TEST_FLAGS                                                                                    \
-		(EAutomationTestFlags::EditorContext | EAutomationTestFlags::ClientContext | EAutomationTestFlags::ProductFilter \
-			| EAutomationTestFlags::MediumPriority)
 
 namespace
 {
@@ -41,7 +37,7 @@ namespace
 // ============================================================
 // Test 1: Default generation produces non-empty rooms and diagram.
 // ============================================================
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FOrganicDungeonDefaultGenerateTest, "ProceduralGeometry.OrganicDungeon.DefaultGenerate", ORGANICDUNGEON_TEST_FLAGS)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FOrganicDungeonDefaultGenerateTest, "ProceduralGeometry.OrganicDungeon.DefaultGenerate", DefaultTestFlags)
 
 bool FOrganicDungeonDefaultGenerateTest::RunTest(const FString& Parameters)
 {
@@ -57,7 +53,7 @@ bool FOrganicDungeonDefaultGenerateTest::RunTest(const FString& Parameters)
 // ============================================================
 // Test 2: Same seed produces identical room count and corridor count.
 // ============================================================
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FOrganicDungeonDeterminismTest, "ProceduralGeometry.OrganicDungeon.Determinism", ORGANICDUNGEON_TEST_FLAGS)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FOrganicDungeonDeterminismTest, "ProceduralGeometry.OrganicDungeon.Determinism", DefaultTestFlags)
 
 bool FOrganicDungeonDeterminismTest::RunTest(const FString& Parameters)
 {
@@ -88,8 +84,7 @@ bool FOrganicDungeonDeterminismTest::RunTest(const FString& Parameters)
 // ============================================================
 // Test 3: Parallel array size invariants.
 // ============================================================
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FOrganicDungeonParallelArraySizesTest, "ProceduralGeometry.OrganicDungeon.ParallelArraySizes", ORGANICDUNGEON_TEST_FLAGS)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FOrganicDungeonParallelArraySizesTest, "ProceduralGeometry.OrganicDungeon.ParallelArraySizes", DefaultTestFlags)
 
 bool FOrganicDungeonParallelArraySizesTest::RunTest(const FString& Parameters)
 {
@@ -124,7 +119,7 @@ bool FOrganicDungeonParallelArraySizesTest::RunTest(const FString& Parameters)
 // ============================================================
 // Test 4: Room count is within [1, RequestedRoomCount].
 // ============================================================
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FOrganicDungeonRoomCountBoundsTest, "ProceduralGeometry.OrganicDungeon.RoomCountBounds", ORGANICDUNGEON_TEST_FLAGS)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FOrganicDungeonRoomCountBoundsTest, "ProceduralGeometry.OrganicDungeon.RoomCountBounds", DefaultTestFlags)
 
 bool FOrganicDungeonRoomCountBoundsTest::RunTest(const FString& Parameters)
 {
@@ -152,7 +147,7 @@ bool FOrganicDungeonRoomCountBoundsTest::RunTest(const FString& Parameters)
 // The generator logs an Error when the guard fires; register it as expected so the
 // automation framework does not auto-fail the test on the Error-level log.
 // ============================================================
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FOrganicDungeonOOMGuardTest, "ProceduralGeometry.OrganicDungeon.OOMGuard", ORGANICDUNGEON_TEST_FLAGS)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FOrganicDungeonOOMGuardTest, "ProceduralGeometry.OrganicDungeon.OOMGuard", DefaultTestFlags)
 
 bool FOrganicDungeonOOMGuardTest::RunTest(const FString& Parameters)
 {
@@ -184,8 +179,7 @@ bool FOrganicDungeonOOMGuardTest::RunTest(const FString& Parameters)
 // ============================================================
 // Test 6: No room types → empty result, no crash.
 // ============================================================
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FOrganicDungeonNoRoomTypesTest, "ProceduralGeometry.OrganicDungeon.NoRoomTypes_EmptyResult", ORGANICDUNGEON_TEST_FLAGS)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FOrganicDungeonNoRoomTypesTest, "ProceduralGeometry.OrganicDungeon.NoRoomTypes_EmptyResult", DefaultTestFlags)
 
 bool FOrganicDungeonNoRoomTypesTest::RunTest(const FString& Parameters)
 {
@@ -208,8 +202,7 @@ bool FOrganicDungeonNoRoomTypesTest::RunTest(const FString& Parameters)
 // ============================================================
 // Test 7: StartRoomIndex and EndRoomIndex are valid when rooms exist.
 // ============================================================
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FOrganicDungeonStartEndRoomValidTest, "ProceduralGeometry.OrganicDungeon.StartEndRoomValid", ORGANICDUNGEON_TEST_FLAGS)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FOrganicDungeonStartEndRoomValidTest, "ProceduralGeometry.OrganicDungeon.StartEndRoomValid", DefaultTestFlags)
 
 bool FOrganicDungeonStartEndRoomValidTest::RunTest(const FString& Parameters)
 {
@@ -234,8 +227,7 @@ bool FOrganicDungeonStartEndRoomValidTest::RunTest(const FString& Parameters)
 // Test 8: Cell type consistency — floor cells are Room or Corridor;
 //         non-floor cells are Wall or Empty.
 // ============================================================
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FOrganicDungeonCellTypeConsistencyTest, "ProceduralGeometry.OrganicDungeon.CellTypeConsistency", ORGANICDUNGEON_TEST_FLAGS)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FOrganicDungeonCellTypeConsistencyTest, "ProceduralGeometry.OrganicDungeon.CellTypeConsistency", DefaultTestFlags)
 
 bool FOrganicDungeonCellTypeConsistencyTest::RunTest(const FString& Parameters)
 {
@@ -281,7 +273,7 @@ bool FOrganicDungeonCellTypeConsistencyTest::RunTest(const FString& Parameters)
 // Test 9: Every corridor's Radii array is parallel to its Centerline.
 // ============================================================
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FOrganicDungeonCorridorRadiiParallelTest, "ProceduralGeometry.OrganicDungeon.CorridorRadiiParallel", ORGANICDUNGEON_TEST_FLAGS)
+	FOrganicDungeonCorridorRadiiParallelTest, "ProceduralGeometry.OrganicDungeon.CorridorRadiiParallel", DefaultTestFlags)
 
 bool FOrganicDungeonCorridorRadiiParallelTest::RunTest(const FString& Parameters)
 {
@@ -333,8 +325,7 @@ namespace
 // ============================================================
 // Test 10: OD ResolveForTotal — TotalRooms == 0 clears all counts.
 // ============================================================
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FODConfigResolveForTotalZeroTest, "ProceduralGeometry.OrganicDungeon.Config.ResolveForTotal_Zero", ORGANICDUNGEON_TEST_FLAGS)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FODConfigResolveForTotalZeroTest, "ProceduralGeometry.OrganicDungeon.Config.ResolveForTotal_Zero", DefaultTestFlags)
 
 bool FODConfigResolveForTotalZeroTest::RunTest(const FString& Parameters)
 {
@@ -355,7 +346,7 @@ bool FODConfigResolveForTotalZeroTest::RunTest(const FString& Parameters)
 // Test 11: OD ResolveForTotal — single type receives all rooms.
 // ============================================================
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FODConfigResolveForTotalSingleTypeTest, "ProceduralGeometry.OrganicDungeon.Config.ResolveForTotal_SingleType", ORGANICDUNGEON_TEST_FLAGS)
+	FODConfigResolveForTotalSingleTypeTest, "ProceduralGeometry.OrganicDungeon.Config.ResolveForTotal_SingleType", DefaultTestFlags)
 
 bool FODConfigResolveForTotalSingleTypeTest::RunTest(const FString& Parameters)
 {
@@ -375,9 +366,8 @@ bool FODConfigResolveForTotalSingleTypeTest::RunTest(const FString& Parameters)
 // ============================================================
 // Test 12: OD ResolveForTotal — multiple equal-weight types sum exactly to TotalRooms.
 // ============================================================
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FODConfigResolveForTotalSumEqualWeightsTest,
-	"ProceduralGeometry.OrganicDungeon.Config.ResolveForTotal_SumEqualWeights",
-	ORGANICDUNGEON_TEST_FLAGS)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FODConfigResolveForTotalSumEqualWeightsTest, "ProceduralGeometry.OrganicDungeon.Config.ResolveForTotal_SumEqualWeights", DefaultTestFlags)
 
 bool FODConfigResolveForTotalSumEqualWeightsTest::RunTest(const FString& Parameters)
 {
@@ -403,7 +393,7 @@ bool FODConfigResolveForTotalSumEqualWeightsTest::RunTest(const FString& Paramet
 //          and the heavier type gets more rooms.
 // ============================================================
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FODConfigResolveForTotalWeightedTest, "ProceduralGeometry.OrganicDungeon.Config.ResolveForTotal_Weighted", ORGANICDUNGEON_TEST_FLAGS)
+	FODConfigResolveForTotalWeightedTest, "ProceduralGeometry.OrganicDungeon.Config.ResolveForTotal_Weighted", DefaultTestFlags)
 
 bool FODConfigResolveForTotalWeightedTest::RunTest(const FString& Parameters)
 {
@@ -428,7 +418,7 @@ bool FODConfigResolveForTotalWeightedTest::RunTest(const FString& Parameters)
 //          weights=[1,1,1], TotalRooms=2 → Round(2/3)=1, 1, last=Max(0,2-2)=0. Sum=2 ✓
 // ============================================================
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FODConfigResolveForTotalOvercountGuardTest, "ProceduralGeometry.OrganicDungeon.Config.ResolveForTotal_OvercountGuard", ORGANICDUNGEON_TEST_FLAGS)
+	FODConfigResolveForTotalOvercountGuardTest, "ProceduralGeometry.OrganicDungeon.Config.ResolveForTotal_OvercountGuard", DefaultTestFlags)
 
 bool FODConfigResolveForTotalOvercountGuardTest::RunTest(const FString& Parameters)
 {
@@ -452,9 +442,8 @@ bool FODConfigResolveForTotalOvercountGuardTest::RunTest(const FString& Paramete
 // Test 15: OD ResolveForTotal — start/end rooms are unaffected; only regular types
 //          are redistributed.
 // ============================================================
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FODConfigResolveForTotalStartEndUnaffectedTest,
-	"ProceduralGeometry.OrganicDungeon.Config.ResolveForTotal_StartEndUnaffected",
-	ORGANICDUNGEON_TEST_FLAGS)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FODConfigResolveForTotalStartEndUnaffectedTest, "ProceduralGeometry.OrganicDungeon.Config.ResolveForTotal_StartEndUnaffected", DefaultTestFlags)
 
 bool FODConfigResolveForTotalStartEndUnaffectedTest::RunTest(const FString& Parameters)
 {
@@ -481,7 +470,7 @@ bool FODConfigResolveForTotalStartEndUnaffectedTest::RunTest(const FString& Para
 //          generator and produce a non-empty result.
 // ============================================================
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FODConfigResolveForTotalEndToEndTest, "ProceduralGeometry.OrganicDungeon.Config.ResolveForTotal_EndToEnd", ORGANICDUNGEON_TEST_FLAGS)
+	FODConfigResolveForTotalEndToEndTest, "ProceduralGeometry.OrganicDungeon.Config.ResolveForTotal_EndToEnd", DefaultTestFlags)
 
 bool FODConfigResolveForTotalEndToEndTest::RunTest(const FString& Parameters)
 {
@@ -512,7 +501,7 @@ bool FODConfigResolveForTotalEndToEndTest::RunTest(const FString& Parameters)
 // Test 17: OD ResolveForTotal — Min is respected: each type receives at least Min rooms.
 // ============================================================
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FODConfigResolveForTotalMinRespectedTest, "ProceduralGeometry.OrganicDungeon.Config.ResolveForTotal_MinRespected", ORGANICDUNGEON_TEST_FLAGS)
+	FODConfigResolveForTotalMinRespectedTest, "ProceduralGeometry.OrganicDungeon.Config.ResolveForTotal_MinRespected", DefaultTestFlags)
 
 bool FODConfigResolveForTotalMinRespectedTest::RunTest(const FString& Parameters)
 {
@@ -541,7 +530,7 @@ bool FODConfigResolveForTotalMinRespectedTest::RunTest(const FString& Parameters
 // Test 18: OD ResolveForTotal — Max is respected: each type receives at most Max rooms.
 // ============================================================
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FODConfigResolveForTotalMaxRespectedTest, "ProceduralGeometry.OrganicDungeon.Config.ResolveForTotal_MaxRespected", ORGANICDUNGEON_TEST_FLAGS)
+	FODConfigResolveForTotalMaxRespectedTest, "ProceduralGeometry.OrganicDungeon.Config.ResolveForTotal_MaxRespected", DefaultTestFlags)
 
 bool FODConfigResolveForTotalMaxRespectedTest::RunTest(const FString& Parameters)
 {
@@ -572,7 +561,5 @@ bool FODConfigResolveForTotalMaxRespectedTest::RunTest(const FString& Parameters
 	}
 	return true;
 }
-
-	#undef ORGANICDUNGEON_TEST_FLAGS
 
 #endif // WITH_DEV_AUTOMATION_TESTS

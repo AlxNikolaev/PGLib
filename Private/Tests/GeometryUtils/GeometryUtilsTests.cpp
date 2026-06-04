@@ -1,12 +1,10 @@
 #include "GeometryUtils/GeometryFunctionLibrary.h"
+#include "../ProceduralGeometryTestFlags.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
 
 namespace
 {
-	constexpr EAutomationTestFlags DefaultTestFlags = EAutomationTestFlags::EditorContext | EAutomationTestFlags::ClientContext
-		| EAutomationTestFlags::ProductFilter | EAutomationTestFlags::MediumPriority;
-
 	/** Unit square [0,0]-[100,100] in CCW order */
 	TArray<FVector2D> MakeSquare100()
 	{

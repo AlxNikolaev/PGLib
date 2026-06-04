@@ -1,12 +1,7 @@
 #include "Generators/CellularAutomata2D/CellularAutomataGenerator2D.h"
+#include "../../ProceduralGeometryTestFlags.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
-
-namespace
-{
-	constexpr EAutomationTestFlags DefaultTestFlags = EAutomationTestFlags::EditorContext | EAutomationTestFlags::ClientContext
-		| EAutomationTestFlags::ProductFilter | EAutomationTestFlags::MediumPriority;
-} // namespace
 
 // Test 1: GridData structural consistency — parallel arrays, valid dimensions, valid CenterRegionId
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(

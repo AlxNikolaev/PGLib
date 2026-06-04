@@ -2,13 +2,9 @@
 
 #include "Generators/DrunkardWalk2D/DrunkardWalkGenerator2D.h"
 #include "Generators/DrunkardWalk2D/DrunkardWalkConfig.h"
+#include "../../ProceduralGeometryTestFlags.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
-
-	// Use per-file macro to avoid anonymous-namespace symbol collisions under Unity Build.
-	#define DRUNKARDWALK_TEST_FLAGS                                                                                      \
-		(EAutomationTestFlags::EditorContext | EAutomationTestFlags::ClientContext | EAutomationTestFlags::ProductFilter \
-			| EAutomationTestFlags::MediumPriority)
 
 namespace
 {
@@ -33,7 +29,7 @@ namespace
 // ============================================================
 // Test 1: Default generation produces a non-empty diagram.
 // ============================================================
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDrunkardWalkDefaultGenerateTest, "ProceduralGeometry.DrunkardWalk.DefaultGenerate", DRUNKARDWALK_TEST_FLAGS)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDrunkardWalkDefaultGenerateTest, "ProceduralGeometry.DrunkardWalk.DefaultGenerate", DefaultTestFlags)
 
 bool FDrunkardWalkDefaultGenerateTest::RunTest(const FString& Parameters)
 {
@@ -47,7 +43,7 @@ bool FDrunkardWalkDefaultGenerateTest::RunTest(const FString& Parameters)
 // ============================================================
 // Test 2: Same seed and config produce identical results.
 // ============================================================
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDrunkardWalkDeterminismTest, "ProceduralGeometry.DrunkardWalk.Determinism", DRUNKARDWALK_TEST_FLAGS)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDrunkardWalkDeterminismTest, "ProceduralGeometry.DrunkardWalk.Determinism", DefaultTestFlags)
 
 bool FDrunkardWalkDeterminismTest::RunTest(const FString& Parameters)
 {
@@ -74,7 +70,7 @@ bool FDrunkardWalkDeterminismTest::RunTest(const FString& Parameters)
 // ============================================================
 // Test 3: Parallel array size invariants.
 // ============================================================
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDrunkardWalkParallelArraySizesTest, "ProceduralGeometry.DrunkardWalk.ParallelArraySizes", DRUNKARDWALK_TEST_FLAGS)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDrunkardWalkParallelArraySizesTest, "ProceduralGeometry.DrunkardWalk.ParallelArraySizes", DefaultTestFlags)
 
 bool FDrunkardWalkParallelArraySizesTest::RunTest(const FString& Parameters)
 {
@@ -105,7 +101,7 @@ bool FDrunkardWalkParallelArraySizesTest::RunTest(const FString& Parameters)
 // Test 4: PlacedRooms count is within [1, RequestedRoomCount].
 // ============================================================
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FDrunkardWalkRoomCountMatchesPlacementTest, "ProceduralGeometry.DrunkardWalk.RoomCountMatchesPlacement", DRUNKARDWALK_TEST_FLAGS)
+	FDrunkardWalkRoomCountMatchesPlacementTest, "ProceduralGeometry.DrunkardWalk.RoomCountMatchesPlacement", DefaultTestFlags)
 
 bool FDrunkardWalkRoomCountMatchesPlacementTest::RunTest(const FString& Parameters)
 {
@@ -129,7 +125,7 @@ bool FDrunkardWalkRoomCountMatchesPlacementTest::RunTest(const FString& Paramete
 // A single room with 2500×2500 cell footprint produces a raster grid of
 // roughly 2502×2502 = 6.26M cells, which exceeds the 4,194,304-cell limit.
 // ============================================================
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDrunkardWalkOOMGuardTest, "ProceduralGeometry.DrunkardWalk.OOMGuard", DRUNKARDWALK_TEST_FLAGS)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDrunkardWalkOOMGuardTest, "ProceduralGeometry.DrunkardWalk.OOMGuard", DefaultTestFlags)
 
 bool FDrunkardWalkOOMGuardTest::RunTest(const FString& Parameters)
 {
@@ -152,7 +148,7 @@ bool FDrunkardWalkOOMGuardTest::RunTest(const FString& Parameters)
 // ============================================================
 // Test 6: No room types → empty result, no crash.
 // ============================================================
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDrunkardWalkNoRoomTypesTest, "ProceduralGeometry.DrunkardWalk.NoRoomTypes_EmptyResult", DRUNKARDWALK_TEST_FLAGS)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDrunkardWalkNoRoomTypesTest, "ProceduralGeometry.DrunkardWalk.NoRoomTypes_EmptyResult", DefaultTestFlags)
 
 bool FDrunkardWalkNoRoomTypesTest::RunTest(const FString& Parameters)
 {
@@ -173,7 +169,7 @@ bool FDrunkardWalkNoRoomTypesTest::RunTest(const FString& Parameters)
 // Test 7: Every floor cell has a valid (>= 0) RegionId.
 // ============================================================
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FDrunkardWalkAllFloorCellsHaveValidRegionTest, "ProceduralGeometry.DrunkardWalk.AllFloorCellsHaveValidRegion", DRUNKARDWALK_TEST_FLAGS)
+	FDrunkardWalkAllFloorCellsHaveValidRegionTest, "ProceduralGeometry.DrunkardWalk.AllFloorCellsHaveValidRegion", DefaultTestFlags)
 
 bool FDrunkardWalkAllFloorCellsHaveValidRegionTest::RunTest(const FString& Parameters)
 {
@@ -207,7 +203,7 @@ bool FDrunkardWalkAllFloorCellsHaveValidRegionTest::RunTest(const FString& Param
 // Test 8: Cell type consistency — floor cells are Corridor or Room;
 //         non-floor cells are Wall or Empty.
 // ============================================================
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDrunkardWalkCellTypeConsistencyTest, "ProceduralGeometry.DrunkardWalk.CellTypeConsistency", DRUNKARDWALK_TEST_FLAGS)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDrunkardWalkCellTypeConsistencyTest, "ProceduralGeometry.DrunkardWalk.CellTypeConsistency", DefaultTestFlags)
 
 bool FDrunkardWalkCellTypeConsistencyTest::RunTest(const FString& Parameters)
 {
@@ -253,7 +249,7 @@ bool FDrunkardWalkCellTypeConsistencyTest::RunTest(const FString& Parameters)
 // Test 9: Corridor graph indices are valid PlacedRooms indices.
 // ============================================================
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FDrunkardWalkCorridorGraphIndicesValidTest, "ProceduralGeometry.DrunkardWalk.CorridorGraphIndicesValid", DRUNKARDWALK_TEST_FLAGS)
+	FDrunkardWalkCorridorGraphIndicesValidTest, "ProceduralGeometry.DrunkardWalk.CorridorGraphIndicesValid", DefaultTestFlags)
 
 bool FDrunkardWalkCorridorGraphIndicesValidTest::RunTest(const FString& Parameters)
 {
@@ -314,8 +310,7 @@ namespace
 // ============================================================
 // Test 10: ResolveForTotal — TotalRooms == 0 clears all counts.
 // ============================================================
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FDWConfigResolveForTotalZeroTest, "ProceduralGeometry.DrunkardWalk.Config.ResolveForTotal_Zero", DRUNKARDWALK_TEST_FLAGS)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDWConfigResolveForTotalZeroTest, "ProceduralGeometry.DrunkardWalk.Config.ResolveForTotal_Zero", DefaultTestFlags)
 
 bool FDWConfigResolveForTotalZeroTest::RunTest(const FString& Parameters)
 {
@@ -333,7 +328,7 @@ bool FDWConfigResolveForTotalZeroTest::RunTest(const FString& Parameters)
 // Test 11: ResolveForTotal — single type receives all rooms.
 // ============================================================
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FDWConfigResolveForTotalSingleTypeTest, "ProceduralGeometry.DrunkardWalk.Config.ResolveForTotal_SingleType", DRUNKARDWALK_TEST_FLAGS)
+	FDWConfigResolveForTotalSingleTypeTest, "ProceduralGeometry.DrunkardWalk.Config.ResolveForTotal_SingleType", DefaultTestFlags)
 
 bool FDWConfigResolveForTotalSingleTypeTest::RunTest(const FString& Parameters)
 {
@@ -352,7 +347,7 @@ bool FDWConfigResolveForTotalSingleTypeTest::RunTest(const FString& Parameters)
 // Test 12: ResolveForTotal — multiple equal-weight types sum exactly to TotalRooms.
 // ============================================================
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FDWConfigResolveForTotalSumEqualWeightsTest, "ProceduralGeometry.DrunkardWalk.Config.ResolveForTotal_SumEqualWeights", DRUNKARDWALK_TEST_FLAGS)
+	FDWConfigResolveForTotalSumEqualWeightsTest, "ProceduralGeometry.DrunkardWalk.Config.ResolveForTotal_SumEqualWeights", DefaultTestFlags)
 
 bool FDWConfigResolveForTotalSumEqualWeightsTest::RunTest(const FString& Parameters)
 {
@@ -374,7 +369,7 @@ bool FDWConfigResolveForTotalSumEqualWeightsTest::RunTest(const FString& Paramet
 //          the heavier type receives more rooms than the lighter type.
 // ============================================================
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FDWConfigResolveForTotalWeightedTest, "ProceduralGeometry.DrunkardWalk.Config.ResolveForTotal_Weighted", DRUNKARDWALK_TEST_FLAGS)
+	FDWConfigResolveForTotalWeightedTest, "ProceduralGeometry.DrunkardWalk.Config.ResolveForTotal_Weighted", DefaultTestFlags)
 
 bool FDWConfigResolveForTotalWeightedTest::RunTest(const FString& Parameters)
 {
@@ -397,7 +392,7 @@ bool FDWConfigResolveForTotalWeightedTest::RunTest(const FString& Parameters)
 //          weights=[1,1,1], TotalRooms=2 → Round(2/3)=1, 1, last=Max(0,2-2)=0. Sum=2 ✓
 // ============================================================
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FDWConfigResolveForTotalOvercountGuardTest, "ProceduralGeometry.DrunkardWalk.Config.ResolveForTotal_OvercountGuard", DRUNKARDWALK_TEST_FLAGS)
+	FDWConfigResolveForTotalOvercountGuardTest, "ProceduralGeometry.DrunkardWalk.Config.ResolveForTotal_OvercountGuard", DefaultTestFlags)
 
 bool FDWConfigResolveForTotalOvercountGuardTest::RunTest(const FString& Parameters)
 {
@@ -418,7 +413,7 @@ bool FDWConfigResolveForTotalOvercountGuardTest::RunTest(const FString& Paramete
 //          generator and produce a non-empty result.
 // ============================================================
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FDWConfigResolveForTotalEndToEndTest, "ProceduralGeometry.DrunkardWalk.Config.ResolveForTotal_EndToEnd", DRUNKARDWALK_TEST_FLAGS)
+	FDWConfigResolveForTotalEndToEndTest, "ProceduralGeometry.DrunkardWalk.Config.ResolveForTotal_EndToEnd", DefaultTestFlags)
 
 bool FDWConfigResolveForTotalEndToEndTest::RunTest(const FString& Parameters)
 {
@@ -447,7 +442,7 @@ bool FDWConfigResolveForTotalEndToEndTest::RunTest(const FString& Parameters)
 // Test 16: ResolveForTotal — Min is respected: each type receives at least Min rooms.
 // ============================================================
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FDWConfigResolveForTotalMinRespectedTest, "ProceduralGeometry.DrunkardWalk.Config.ResolveForTotal_MinRespected", DRUNKARDWALK_TEST_FLAGS)
+	FDWConfigResolveForTotalMinRespectedTest, "ProceduralGeometry.DrunkardWalk.Config.ResolveForTotal_MinRespected", DefaultTestFlags)
 
 bool FDWConfigResolveForTotalMinRespectedTest::RunTest(const FString& Parameters)
 {
@@ -477,7 +472,7 @@ bool FDWConfigResolveForTotalMinRespectedTest::RunTest(const FString& Parameters
 // Test 17: ResolveForTotal — Max is respected: each type receives at most Max rooms.
 // ============================================================
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FDWConfigResolveForTotalMaxRespectedTest, "ProceduralGeometry.DrunkardWalk.Config.ResolveForTotal_MaxRespected", DRUNKARDWALK_TEST_FLAGS)
+	FDWConfigResolveForTotalMaxRespectedTest, "ProceduralGeometry.DrunkardWalk.Config.ResolveForTotal_MaxRespected", DefaultTestFlags)
 
 bool FDWConfigResolveForTotalMaxRespectedTest::RunTest(const FString& Parameters)
 {
@@ -510,7 +505,5 @@ bool FDWConfigResolveForTotalMaxRespectedTest::RunTest(const FString& Parameters
 	}
 	return true;
 }
-
-	#undef DRUNKARDWALK_TEST_FLAGS
 
 #endif // WITH_DEV_AUTOMATION_TESTS

@@ -1,12 +1,7 @@
 #include "GeometryUtils/GeometryFunctionLibrary.h"
+#include "../ProceduralGeometryTestFlags.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
-
-namespace
-{
-	constexpr EAutomationTestFlags DefaultTestFlags = EAutomationTestFlags::EditorContext | EAutomationTestFlags::ClientContext
-		| EAutomationTestFlags::ProductFilter | EAutomationTestFlags::MediumPriority;
-} // namespace
 
 // ============================================================
 // ChaikinSubdivide

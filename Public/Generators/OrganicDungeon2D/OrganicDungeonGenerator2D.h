@@ -155,6 +155,30 @@ private:
 	FOrganicCorridor BuildInterLocationCorridor(
 		FOrganicRoom& FromRoom, int32 FromIdx, FOrganicRoom& ToRoom, int32 ToIdx, const FOrganicDungeonResolvedParams& LinkParams);
 
+	/**
+	 * Shared Bezier corridor builder — called by both GenerateLocationSubgraph (via a thin BuildCorridor
+	 * wrapper lambda) and BuildInterLocationCorridor. Callers are responsible for pre-computing
+	 * MinRadius/MaxRadius from their own param context (e.g. inter-location links clamp MinRadius to
+	 * CellSize so the corridor is never narrower than one grid cell).
+	 *
+	 * @param AP/AN      Start doorway world position and outward normal.
+	 * @param BP/BN      End doorway world position and outward normal.
+	 * @param Waviness   Control-point lateral offset scale in [0, 1].
+	 * @param MinRadius  Minimum corridor half-width (world units).
+	 * @param MaxRadius  Maximum corridor half-width (world units).
+	 * @param Style      Clean (constant width) or Cave (variable noise width).
+	 * @param RadiusScale Uniform multiplier applied to every radius sample (used for spine widening).
+	 */
+	FOrganicCorridor BuildBezierCorridor(const FVector2D& AP,
+		const FVector2D&								  AN,
+		const FVector2D&								  BP,
+		const FVector2D&								  BN,
+		float											  Waviness,
+		float											  MinRadius,
+		float											  MaxRadius,
+		EOrganicCorridorStyle							  Style,
+		float											  RadiusScale = 1.0f);
+
 	/** Rasterizes the merged cluster layout into the final grid + diagram. */
 	FOrganicDungeonGridData RasterizeLayout(const FOrganicLayout& Layout);
 };
