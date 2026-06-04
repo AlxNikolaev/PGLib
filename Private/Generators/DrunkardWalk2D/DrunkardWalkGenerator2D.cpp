@@ -197,11 +197,12 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 {
 	const double StartTime = FPlatformTime::Seconds();
 
-	// Build the placement queue (type indices expanded by Count).
+	// Build the placement queue (type indices expanded by Weight, which holds the resolved
+	// absolute count after Resolve() / ResolveForTotal()).
 	TArray<int32> Queue;
 	for (int32 TypeIdx = 0; TypeIdx < RoomTypes.Num(); ++TypeIdx)
 	{
-		const int32 Count = FMath::Max(0, RoomTypes[TypeIdx].Count);
+		const int32 Count = FMath::Max(0, RoomTypes[TypeIdx].Weight);
 		for (int32 i = 0; i < Count; ++i)
 		{
 			Queue.Add(TypeIdx);

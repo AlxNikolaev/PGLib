@@ -1,5 +1,6 @@
 #include "Generators/OrganicDungeon2D/OrganicDungeonGenerator2D.h"
 
+#include "Generators/WeightedDistribute.h"
 #include "ProceduralGeometry.h"
 
 namespace
@@ -403,14 +404,13 @@ FOrganicLayout UOrganicDungeonGenerator2D::GenerateLocationSubgraph(
 	{
 		// Eligible = types with rooms left, excluding the previous type whenever any OTHER type still has
 		// rooms (so two of the same type never sit adjacent until that type is genuinely the only one left).
-		int32 EligibleWeight = 0; // sum of remaining over eligible (non-prev) types
-		bool  bHasNonPrev = false;
+		bool bHasNonPrev = false;
 		for (int32 t = 0; t < NumTypes; ++t)
 		{
 			if (Remaining[t] > 0 && t != PrevType)
 			{
-				EligibleWeight += Remaining[t];
 				bHasNonPrev = true;
+				break;
 			}
 		}
 
@@ -423,19 +423,12 @@ FOrganicLayout UOrganicDungeonGenerator2D::GenerateLocationSubgraph(
 		{
 			// Weighted-random by remaining count: a high-count type is picked more often (never starves the
 			// scarce ones) but the exact sequence is random, so there is no fixed repeating pattern.
-			int32 Roll = RandomStream.RandRange(0, EligibleWeight - 1);
-			for (int32 t = 0; t < NumTypes; ++t)
+			// Uses the shared ProceduralGeometry_PickWeightedType utility (extracted from this loop).
+			Chosen =
+				ProceduralGeometry_PickWeightedType(Remaining, PrevType, [&](int32 MaxInclusive) { return RandomStream.RandRange(0, MaxInclusive); });
+			if (Chosen == INDEX_NONE)
 			{
-				if (Remaining[t] <= 0 || t == PrevType)
-				{
-					continue;
-				}
-				Roll -= Remaining[t];
-				if (Roll < 0)
-				{
-					Chosen = t;
-					break;
-				}
+				Chosen = PrevType; // fallback: only prev type has rooms
 			}
 		}
 		else

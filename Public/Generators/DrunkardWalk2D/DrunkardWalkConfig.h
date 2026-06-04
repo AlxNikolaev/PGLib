@@ -29,8 +29,27 @@ struct PROCEDURALGEOMETRY_API FRoomTypeConfig
 		meta = (ClampMin = 1, ToolTip = "Room footprint height in grid cells. Later derived from prefab bounds."))
 	int32 FootprintHeightCells = 4;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Room Type", meta = (ClampMin = 0, ToolTip = "How many rooms of this type to place."))
-	int32 Count = 1;
+	UPROPERTY(EditAnywhere,
+		BlueprintReadWrite,
+		Category = "Room Type",
+		meta = (ClampMin = 1,
+			ToolTip =
+				"Relative weight for this type when distributing a total room budget across types (ResolveForTotal). Higher values mean proportionally more rooms. Equal weights give equal shares."))
+	int32 Weight = 1;
+
+	UPROPERTY(EditAnywhere,
+		BlueprintReadWrite,
+		Category = "Room Type",
+		meta = (ClampMin = 0,
+			ToolTip =
+				"Minimum rooms of this type guaranteed each time a total room budget is distributed (ResolveForTotal). Mandatory minimums are filled before weight-based distribution. 0 = no guarantee."))
+	int32 Min = 0;
+
+	UPROPERTY(EditAnywhere,
+		BlueprintReadWrite,
+		Category = "Room Type",
+		meta = (ClampMin = 0, ToolTip = "Maximum rooms of this type allowed when distributing a total room budget (ResolveForTotal). 0 = uncapped."))
+	int32 Max = 0;
 
 	// Future: TSoftClassPtr<AActor> / TSoftObjectPtr<UWorld> RoomPrefab — the actual room instance.
 };
@@ -151,4 +170,11 @@ struct PROCEDURALGEOMETRY_API FDrunkardWalkConfig
 
 	/** Validates and clamps semantic parameters into raw DW parameters for the generator. Pure function, no side effects. */
 	FDrunkardWalkResolvedParams Resolve() const;
+
+	/**
+	 * Like Resolve(), but distributes exactly TotalRooms rooms across types proportionally to their Count
+	 * (used as a relative weight). This is the preferred entry point when total room count is driven by
+	 * Location Size on the level graph node, removing the need to manually set per-type counts.
+	 */
+	FDrunkardWalkResolvedParams ResolveForTotal(int32 TotalRooms) const;
 };

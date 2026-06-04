@@ -3,6 +3,7 @@
 #include "Engine/Level.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
+#include "Generators/WeightedDistribute.h"
 #include "ProceduralGeometry.h"
 
 namespace
@@ -120,18 +121,22 @@ FOrganicDungeonResolvedParams FOrganicDungeonConfig::Resolve() const
 {
 	FOrganicDungeonResolvedParams Params;
 
-	// Rooms — drop zero-count; resolve footprint from level bounds (or override / fallback).
+	// Rooms — drop zero-weight; resolve footprint from level bounds (or override / fallback).
+	// Weight / Min / Max are copied into the resolved struct for later use by ResolveForTotal().
 	int32 TotalRooms = 0;
 	Params.RoomTypes.Reserve(RoomTypes.Num());
 	for (const FOrganicRoomType& Type : RoomTypes)
 	{
-		if (Type.Count <= 0)
+		if (Type.Weight <= 0)
 		{
 			continue;
 		}
 
 		FOrganicResolvedRoomType Resolved;
-		Resolved.Count = FMath::Max(0, Type.Count);
+		Resolved.Count = FMath::Max(0, Type.Weight); // Weight = absolute count in direct-resolve mode
+		Resolved.Weight = FMath::Max(0, Type.Weight);
+		Resolved.Min = FMath::Max(0, Type.Min);
+		Resolved.Max = FMath::Max(0, Type.Max);
 		ResolveRoomFootprint(Type, Resolved);
 
 		Params.RoomTypes.Add(Resolved);
@@ -196,6 +201,56 @@ FOrganicDungeonResolvedParams FOrganicDungeonConfig::Resolve() const
 		Params.CorridorLinkCount,
 		Params.WallThickness,
 		Params.bSmoothCorridors ? TEXT("true") : TEXT("false"));
+
+	return Params;
+}
+
+FOrganicDungeonResolvedParams FOrganicDungeonConfig::ResolveForTotal(const int32 TotalRooms) const
+{
+	// Resolve all params (including footprint measurement) first, then redistribute the regular room
+	// counts using the pool-aware distribution: mandatory minimums first, then proportionally by
+	// weight up to per-type maximums. Start/end special rooms are unaffected — always placed if set.
+	FOrganicDungeonResolvedParams Params = Resolve();
+
+	if (Params.RoomTypes.Num() == 0 || TotalRooms <= 0)
+	{
+		for (FOrganicResolvedRoomType& RT : Params.RoomTypes)
+		{
+			RT.Count = 0;
+		}
+		UE_LOG(LogRoguelikeGeometry, Verbose, TEXT("[ORG] ResolveForTotal(%d): no room types or zero total — empty queue"), TotalRooms);
+		return Params;
+	}
+
+	// Build Weight / Min / Max arrays from resolved types (copied in from Resolve()).
+	TArray<int32> Weights, Mins, Maxes;
+	Weights.Reserve(Params.RoomTypes.Num());
+	Mins.Reserve(Params.RoomTypes.Num());
+	Maxes.Reserve(Params.RoomTypes.Num());
+	int32 TotalWeight = 0;
+	for (const FOrganicResolvedRoomType& RT : Params.RoomTypes)
+	{
+		const int32 W = FMath::Max(0, RT.Weight);
+		Weights.Add(W);
+		Mins.Add(FMath::Max(0, RT.Min));
+		Maxes.Add(FMath::Max(0, RT.Max));
+		TotalWeight += W;
+	}
+
+	// Distribute TotalRooms: mandatory minimums first, then proportionally by weight up to Max.
+	TArray<int32> Counts;
+	ProceduralGeometry_DistributePoolByWeight(Counts, Weights, Mins, Maxes, TotalRooms);
+	for (int32 i = 0; i < Params.RoomTypes.Num(); ++i)
+	{
+		Params.RoomTypes[i].Count = Counts[i];
+	}
+
+	UE_LOG(LogRoguelikeGeometry,
+		Verbose,
+		TEXT("[ORG] ResolveForTotal(%d): %d room types, pool distribution applied (total weight was %d)"),
+		TotalRooms,
+		Params.RoomTypes.Num(),
+		TotalWeight);
 
 	return Params;
 }
