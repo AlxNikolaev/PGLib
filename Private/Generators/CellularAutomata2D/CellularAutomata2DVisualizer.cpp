@@ -1,9 +1,9 @@
-#include "Generators/CellularAutomata2D/CellularAutomata2DVisualizer.h"
+﻿#include "Generators/CellularAutomata2D/CellularAutomata2DVisualizer.h"
 
 #include "DrawDebugHelpers.h"
-#include "GeometryUtils/GeometryFunctionLibrary.h"
 #include "Generators/CellularAutomata2D/CellularAutomataGenerator2D.h"
-#include "ProceduralMeshComponent.h"
+#include "Generators/VisualizerCellMesh.h"
+#include "GeometryUtils/GeometryFunctionLibrary.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogCAVisualizer, Log, All);
 
@@ -117,7 +117,7 @@ void ACellularAutomata2DVisualizer::OnConstruction(const FTransform& Transform)
 	const FBox2D  LocalBounds(B.Min - FVector2D(ActorLoc.X, ActorLoc.Y), B.Max - FVector2D(ActorLoc.X, ActorLoc.Y));
 
 	UE_LOG(LogCAVisualizer,
-		Log,
+		Verbose,
 		TEXT("OnConstruction: Grid %d x %d, CellSize=%.2f, Regions=%d"),
 		GridData.GridWidth,
 		GridData.GridHeight,
@@ -125,7 +125,7 @@ void ACellularAutomata2DVisualizer::OnConstruction(const FTransform& Transform)
 		GridData.Regions.Num());
 
 	UE_LOG(LogCAVisualizer,
-		Log,
+		Verbose,
 		TEXT("OnConstruction: bShowGridCells=%s, SurvivingRegions=%d, GridMeshComponent=%s"),
 		bShowGridCells ? TEXT("true") : TEXT("false"),
 		GridData.SurvivingRegions.Num(),
@@ -141,7 +141,7 @@ void ACellularAutomata2DVisualizer::OnConstruction(const FTransform& Transform)
 			const float MaxX = MinX + GridData.GridWidth * CS;
 			const float MaxY = MinY + GridData.GridHeight * CS;
 
-			UE_LOG(LogCAVisualizer, Log, TEXT("  Wall quad: (%.1f,%.1f)-(%.1f,%.1f) Z=0 [local space]"), MinX, MinY, MaxX, MaxY);
+			UE_LOG(LogCAVisualizer, Verbose, TEXT("  Wall quad: (%.1f,%.1f)-(%.1f,%.1f) Z=0 [local space]"), MinX, MinY, MaxX, MaxY);
 
 			TArray<FVector> Vertices = { FVector(MinX, MinY, 0.0f), FVector(MaxX, MinY, 0.0f), FVector(MaxX, MaxY, 0.0f), FVector(MinX, MaxY, 0.0f) };
 			TArray<int32>	Triangles = { 0, 2, 1, 0, 3, 2 };
@@ -156,7 +156,7 @@ void ACellularAutomata2DVisualizer::OnConstruction(const FTransform& Transform)
 				GridMeshComponent->SetMaterial(SectionIndex, DebugMaterial);
 			}
 			UE_LOG(LogCAVisualizer,
-				Log,
+				Verbose,
 				TEXT("  Section %d: wall quad created, material=%s"),
 				SectionIndex,
 				DebugMaterial ? *DebugMaterial->GetName() : TEXT("NULL"));
@@ -182,7 +182,7 @@ void ACellularAutomata2DVisualizer::OnConstruction(const FTransform& Transform)
 			}
 
 			UE_LOG(LogCAVisualizer,
-				Log,
+				Verbose,
 				TEXT("  Section %d: Region %d, %d cells, color=(%.2f,%.2f,%.2f)"),
 				SectionIndex,
 				RegionId,
@@ -190,7 +190,8 @@ void ACellularAutomata2DVisualizer::OnConstruction(const FTransform& Transform)
 				RegionColor.R,
 				RegionColor.G,
 				RegionColor.B);
-			BuildCellMeshSection(SectionIndex, GridData.Regions[RegionId], CS, LocalBounds, RegionColor, 1.0f);
+			ProcGen_BuildCellMeshSection(
+				GridMeshComponent, DebugMaterial, SectionIndex, GridData.Regions[RegionId], CS, LocalBounds.Min, RegionColor, 1.0f);
 			++SectionIndex;
 		}
 
@@ -205,13 +206,14 @@ void ACellularAutomata2DVisualizer::OnConstruction(const FTransform& Transform)
 				}
 
 				const FLinearColor CulledColor = GetCulledRegionLinearColor(RegionId);
-				BuildCellMeshSection(SectionIndex, GridData.Regions[RegionId], CS, LocalBounds, CulledColor, 1.0f);
+				ProcGen_BuildCellMeshSection(
+					GridMeshComponent, DebugMaterial, SectionIndex, GridData.Regions[RegionId], CS, LocalBounds.Min, CulledColor, 1.0f);
 				++SectionIndex;
 			}
 		}
 
 		UE_LOG(LogCAVisualizer,
-			Log,
+			Verbose,
 			TEXT("OnConstruction: Created %d mesh sections for grid cells. DebugMaterial=%s"),
 			SectionIndex,
 			DebugMaterial ? *DebugMaterial->GetName() : TEXT("NULL"));
@@ -373,88 +375,6 @@ void ACellularAutomata2DVisualizer::OnConstruction(const FTransform& Transform)
 		// Seed
 		DrawLine(FString::Printf(TEXT("Seed: \"%s\""), *Seed));
 
-		UE_LOG(LogCAVisualizer, Log, TEXT("Metrics: drew %d lines at (%.1f, %.1f, %.1f)"), LineIndex, Anchor.X, Anchor.Y, Anchor.Z);
+		UE_LOG(LogCAVisualizer, Verbose, TEXT("Metrics: drew %d lines at (%.1f, %.1f, %.1f)"), LineIndex, Anchor.X, Anchor.Y, Anchor.Z);
 	}
-}
-
-void ACellularAutomata2DVisualizer::BuildCellMeshSection(
-	int32 SectionIndex, const TArray<FIntPoint>& CellPositions, float CellSize, const FBox2D& GridBounds, const FLinearColor& Color, float ZOffset)
-{
-	const int32 CellCount = CellPositions.Num();
-	if (CellCount == 0)
-	{
-		return;
-	}
-
-	const int32 VertexCount = CellCount * 4;
-	const int32 TriangleCount = CellCount * 6;
-
-	TArray<FVector>			 Vertices;
-	TArray<int32>			 Triangles;
-	TArray<FVector>			 Normals;
-	TArray<FVector2D>		 UVs;
-	TArray<FLinearColor>	 Colors;
-	TArray<FProcMeshTangent> Tangents;
-
-	Vertices.Reserve(VertexCount);
-	Triangles.Reserve(TriangleCount);
-	Normals.Reserve(VertexCount);
-	UVs.Reserve(VertexCount);
-	Colors.Reserve(VertexCount);
-
-	for (const FIntPoint& Cell : CellPositions)
-	{
-		const float WorldX = GridBounds.Min.X + Cell.X * CellSize;
-		const float WorldY = GridBounds.Min.Y + Cell.Y * CellSize;
-
-		const int32 Base = Vertices.Num();
-
-		Vertices.Add(FVector(WorldX, WorldY, ZOffset));
-		Vertices.Add(FVector(WorldX + CellSize, WorldY, ZOffset));
-		Vertices.Add(FVector(WorldX + CellSize, WorldY + CellSize, ZOffset));
-		Vertices.Add(FVector(WorldX, WorldY + CellSize, ZOffset));
-
-		Triangles.Add(Base);
-		Triangles.Add(Base + 2);
-		Triangles.Add(Base + 1);
-		Triangles.Add(Base);
-		Triangles.Add(Base + 3);
-		Triangles.Add(Base + 2);
-
-		Normals.Add(FVector::UpVector);
-		Normals.Add(FVector::UpVector);
-		Normals.Add(FVector::UpVector);
-		Normals.Add(FVector::UpVector);
-
-		UVs.Add(FVector2D(0, 0));
-		UVs.Add(FVector2D(1, 0));
-		UVs.Add(FVector2D(1, 1));
-		UVs.Add(FVector2D(0, 1));
-
-		Colors.Add(Color);
-		Colors.Add(Color);
-		Colors.Add(Color);
-		Colors.Add(Color);
-	}
-
-	UE_LOG(LogCAVisualizer,
-		Log,
-		TEXT("  BuildCellMeshSection: section=%d, verts=%d, tris=%d, cells=%d"),
-		SectionIndex,
-		Vertices.Num(),
-		Triangles.Num(),
-		CellCount);
-
-	GridMeshComponent->CreateMeshSection_LinearColor(SectionIndex, Vertices, Triangles, Normals, UVs, Colors, Tangents, true);
-	if (DebugMaterial)
-	{
-		GridMeshComponent->SetMaterial(SectionIndex, DebugMaterial);
-	}
-
-	const int32 NumSections = GridMeshComponent->GetNumSections();
-	UE_LOG(LogCAVisualizer,
-		Log,
-		TEXT("  BuildCellMeshSection: after create, component has %d sections, visible=%s"),
-		NumSections,
-		GridMeshComponent->IsVisible() ? TEXT("true") : TEXT("false"));
 }

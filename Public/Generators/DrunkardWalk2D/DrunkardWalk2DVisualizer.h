@@ -77,13 +77,4 @@ public:
 
 protected:
 	virtual void OnConstruction(const FTransform& Transform) override;
-
-private:
-	/** Builds a flat quad mesh section from a set of cell positions. */
-	void BuildCellMeshSection(int32 SectionIndex,
-		const TArray<FIntPoint>&	CellPositions,
-		float						CellSize,
-		const FBox2D&				GridBounds,
-		const FLinearColor&			Color,
-		float						ZOffset);
 };

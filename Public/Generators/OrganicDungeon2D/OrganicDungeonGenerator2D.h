@@ -181,4 +181,38 @@ private:
 
 	/** Rasterizes the merged cluster layout into the final grid + diagram. */
 	FOrganicDungeonGridData RasterizeLayout(const FOrganicLayout& Layout);
+
+	// --- Isolated algorithmic stages (stateless; can be called and tested independently) ---
+
+	/**
+	 * Builds the placement queue of room type indices, interleaving types to avoid long same-type runs.
+	 * When bShuffleRoomOrder is set, picks randomly weighted by remaining count; otherwise uses a
+	 * deterministic most-remaining-first spread.
+	 * @return Total number of rooms requested across all room types.
+	 */
+	static int32 BuildRoomQueue(const FOrganicDungeonResolvedParams& Params, FRandomStream& RandomStream, TArray<int32>& OutQueue);
+
+	/**
+	 * Prim's O(N^2) minimum spanning tree over room centers.
+	 * @param OutEdges  Parent→child pairs in tree-visit order (NumRooms-1 edges for N rooms).
+	 * @param OutAdj    Symmetric adjacency list (OutAdj[i] = neighbours of room i in the MST).
+	 */
+	static void BuildMST(const TArray<FOrganicRoom>& Rooms, TArray<TPair<int32, int32>>& OutEdges, TArray<TArray<int32>>& OutAdj);
+
+	/**
+	 * BFS-based graph-diameter search over the MST adjacency list.
+	 * Identifies the spine (critical path): the path between the two farthest rooms.
+	 * Start room = diameter endpoint closer to CenterPoint (the level entrance).
+	 * End room   = the farther endpoint (the exit / hand-off point for the next location).
+	 *
+	 * @param OutStartRoomIdx  Entrance room index.
+	 * @param OutEndRoomIdx    Exit room index.
+	 * @param OutSpineEdges    Packed edge keys (see EdgeKey in .cpp) for every edge on the path.
+	 */
+	static void FindSpine(const TArray<FOrganicRoom>& Rooms,
+		const TArray<TArray<int32>>&				  MstAdj,
+		const FVector2D&							  CenterPoint,
+		int32&										  OutStartRoomIdx,
+		int32&										  OutEndRoomIdx,
+		TSet<uint64>&								  OutSpineEdges);
 };

@@ -197,19 +197,9 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 {
 	const double StartTime = FPlatformTime::Seconds();
 
-	// Build the placement queue (type indices expanded by Weight, which holds the resolved
-	// absolute count after Resolve() / ResolveForTotal()).
-	TArray<int32> Queue;
-	for (int32 TypeIdx = 0; TypeIdx < RoomTypes.Num(); ++TypeIdx)
-	{
-		const int32 Count = FMath::Max(0, RoomTypes[TypeIdx].Weight);
-		for (int32 i = 0; i < Count; ++i)
-		{
-			Queue.Add(TypeIdx);
-		}
-	}
-
-	const int32 RequestedRoomCount = Queue.Num();
+	// Build the placement queue (type indices expanded by Weight). Optionally shuffled for variety.
+	TArray<int32> Queue = BuildRoomQueue(RoomTypes, bShuffleRoomOrder, RandomStream);
+	const int32	  RequestedRoomCount = Queue.Num();
 
 	UE_LOG(LogRoguelikeGeometry,
 		Log,
@@ -247,16 +237,6 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 	{
 		UE_LOG(LogRoguelikeGeometry, Warning, TEXT("[DW] No room types with positive count — nothing to generate."));
 		return MakeEmptyResult();
-	}
-
-	// Fisher-Yates shuffle of the queue (seeded) so room order varies.
-	if (bShuffleRoomOrder)
-	{
-		for (int32 i = Queue.Num() - 1; i > 0; --i)
-		{
-			const int32 j = RandomStream.RandRange(0, i);
-			Queue.Swap(i, j);
-		}
 	}
 
 	// --- Walk over an unbounded signed integer grid ---
@@ -915,4 +895,30 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 	Result.Diagram = MoveTemp(Diagram);
 
 	return Result;
+}
+
+TArray<int32> UDrunkardWalkGenerator2D::BuildRoomQueue(const TArray<FRoomTypeConfig>& RoomTypes, bool bShuffle, FRandomStream& RandomStream)
+{
+	// Expand each type by its Weight (resolved absolute count after Resolve()/ResolveForTotal()).
+	TArray<int32> Queue;
+	for (int32 TypeIdx = 0; TypeIdx < RoomTypes.Num(); ++TypeIdx)
+	{
+		const int32 Count = FMath::Max(0, RoomTypes[TypeIdx].Weight);
+		for (int32 i = 0; i < Count; ++i)
+		{
+			Queue.Add(TypeIdx);
+		}
+	}
+
+	// Fisher-Yates in-place shuffle (seeded) so room order varies per seed.
+	if (bShuffle)
+	{
+		for (int32 i = Queue.Num() - 1; i > 0; --i)
+		{
+			const int32 j = RandomStream.RandRange(0, i);
+			Queue.Swap(i, j);
+		}
+	}
+
+	return Queue;
 }

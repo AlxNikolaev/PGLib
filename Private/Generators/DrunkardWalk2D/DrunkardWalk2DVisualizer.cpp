@@ -1,9 +1,9 @@
-#include "Generators/DrunkardWalk2D/DrunkardWalk2DVisualizer.h"
+﻿#include "Generators/DrunkardWalk2D/DrunkardWalk2DVisualizer.h"
 
 #include "DrawDebugHelpers.h"
-#include "GeometryUtils/GeometryFunctionLibrary.h"
 #include "Generators/DrunkardWalk2D/DrunkardWalkGenerator2D.h"
-#include "ProceduralMeshComponent.h"
+#include "Generators/VisualizerCellMesh.h"
+#include "GeometryUtils/GeometryFunctionLibrary.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogDWVisualizer, Log, All);
 
@@ -94,7 +94,7 @@ void ADrunkardWalk2DVisualizer::OnConstruction(const FTransform& Transform)
 	const FBox2D  LocalBounds(B.Min - FVector2D(ActorLoc.X, ActorLoc.Y), B.Max - FVector2D(ActorLoc.X, ActorLoc.Y));
 
 	UE_LOG(LogDWVisualizer,
-		Log,
+		Verbose,
 		TEXT("OnConstruction: Grid %d x %d, CellSize=%.2f, Regions=%d"),
 		GridData.GridWidth,
 		GridData.GridHeight,
@@ -117,7 +117,7 @@ void ADrunkardWalk2DVisualizer::OnConstruction(const FTransform& Transform)
 			}
 			if (WallCells.Num() > 0)
 			{
-				BuildCellMeshSection(SectionIndex, WallCells, CS, LocalBounds, WallLinearColor, 0.0f);
+				ProcGen_BuildCellMeshSection(GridMeshComponent, DebugMaterial, SectionIndex, WallCells, CS, LocalBounds.Min, WallLinearColor, 0.0f);
 				++SectionIndex;
 			}
 		}
@@ -134,7 +134,8 @@ void ADrunkardWalk2DVisualizer::OnConstruction(const FTransform& Transform)
 			}
 			if (CorridorCells.Num() > 0)
 			{
-				BuildCellMeshSection(SectionIndex, CorridorCells, CS, LocalBounds, CorridorLinearColor, 1.0f);
+				ProcGen_BuildCellMeshSection(
+					GridMeshComponent, DebugMaterial, SectionIndex, CorridorCells, CS, LocalBounds.Min, CorridorLinearColor, 1.0f);
 				++SectionIndex;
 			}
 		}
@@ -155,11 +156,11 @@ void ADrunkardWalk2DVisualizer::OnConstruction(const FTransform& Transform)
 
 			// Always color rooms distinctly so adjacent rooms are visually separable.
 			const FLinearColor RoomColor = GetRoomDistinctColor(RoomId);
-			BuildCellMeshSection(SectionIndex, RoomCells, CS, LocalBounds, RoomColor, 1.5f);
+			ProcGen_BuildCellMeshSection(GridMeshComponent, DebugMaterial, SectionIndex, RoomCells, CS, LocalBounds.Min, RoomColor, 1.5f);
 			++SectionIndex;
 		}
 
-		UE_LOG(LogDWVisualizer, Log, TEXT("OnConstruction: Created %d mesh sections (walls/corridors/rooms)."), SectionIndex);
+		UE_LOG(LogDWVisualizer, Verbose, TEXT("OnConstruction: Created %d mesh sections (walls/corridors/rooms)."), SectionIndex);
 	}
 
 	// Layer 3 (Z=2): Grid lines (DrawDebugLine, world space)
@@ -308,74 +309,6 @@ void ADrunkardWalk2DVisualizer::OnConstruction(const FTransform& Transform)
 		// Seed
 		DrawLine(FString::Printf(TEXT("Seed: \"%s\""), *Seed));
 
-		UE_LOG(LogDWVisualizer, Log, TEXT("Metrics: drew %d lines at (%.1f, %.1f, %.1f)"), LineIndex, Anchor.X, Anchor.Y, Anchor.Z);
-	}
-}
-
-void ADrunkardWalk2DVisualizer::BuildCellMeshSection(
-	int32 SectionIndex, const TArray<FIntPoint>& CellPositions, float CellSize, const FBox2D& GridBounds, const FLinearColor& Color, float ZOffset)
-{
-	const int32 CellCount = CellPositions.Num();
-	if (CellCount == 0)
-	{
-		return;
-	}
-
-	const int32 VertexCount = CellCount * 4;
-	const int32 TriangleCount = CellCount * 6;
-
-	TArray<FVector>			 Vertices;
-	TArray<int32>			 Triangles;
-	TArray<FVector>			 Normals;
-	TArray<FVector2D>		 UVs;
-	TArray<FLinearColor>	 Colors;
-	TArray<FProcMeshTangent> Tangents;
-
-	Vertices.Reserve(VertexCount);
-	Triangles.Reserve(TriangleCount);
-	Normals.Reserve(VertexCount);
-	UVs.Reserve(VertexCount);
-	Colors.Reserve(VertexCount);
-
-	for (const FIntPoint& Cell : CellPositions)
-	{
-		const float WorldX = GridBounds.Min.X + Cell.X * CellSize;
-		const float WorldY = GridBounds.Min.Y + Cell.Y * CellSize;
-
-		const int32 Base = Vertices.Num();
-
-		Vertices.Add(FVector(WorldX, WorldY, ZOffset));
-		Vertices.Add(FVector(WorldX + CellSize, WorldY, ZOffset));
-		Vertices.Add(FVector(WorldX + CellSize, WorldY + CellSize, ZOffset));
-		Vertices.Add(FVector(WorldX, WorldY + CellSize, ZOffset));
-
-		// CCW winding from above
-		Triangles.Add(Base);
-		Triangles.Add(Base + 2);
-		Triangles.Add(Base + 1);
-		Triangles.Add(Base);
-		Triangles.Add(Base + 3);
-		Triangles.Add(Base + 2);
-
-		Normals.Add(FVector::UpVector);
-		Normals.Add(FVector::UpVector);
-		Normals.Add(FVector::UpVector);
-		Normals.Add(FVector::UpVector);
-
-		UVs.Add(FVector2D(0, 0));
-		UVs.Add(FVector2D(1, 0));
-		UVs.Add(FVector2D(1, 1));
-		UVs.Add(FVector2D(0, 1));
-
-		Colors.Add(Color);
-		Colors.Add(Color);
-		Colors.Add(Color);
-		Colors.Add(Color);
-	}
-
-	GridMeshComponent->CreateMeshSection_LinearColor(SectionIndex, Vertices, Triangles, Normals, UVs, Colors, Tangents, true);
-	if (DebugMaterial)
-	{
-		GridMeshComponent->SetMaterial(SectionIndex, DebugMaterial);
+		UE_LOG(LogDWVisualizer, Verbose, TEXT("Metrics: drew %d lines at (%.1f, %.1f, %.1f)"), LineIndex, Anchor.X, Anchor.Y, Anchor.Z);
 	}
 }

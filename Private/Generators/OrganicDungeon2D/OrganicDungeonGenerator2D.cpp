@@ -84,6 +84,14 @@ namespace
 		}
 		return Best;
 	}
+
+	/** Packs two room indices into a uint64 edge key (order-independent). Used by BuildMST and FindSpine. */
+	uint64 EdgeKey(int32 A, int32 B)
+	{
+		const int32 Lo = FMath::Min(A, B);
+		const int32 Hi = FMath::Max(A, B);
+		return (static_cast<uint64>(Lo) << 32) | static_cast<uint32>(Hi);
+	}
 } // namespace
 
 UOrganicDungeonGenerator2D::UOrganicDungeonGenerator2D()
@@ -401,75 +409,10 @@ FOrganicLayout UOrganicDungeonGenerator2D::GenerateLocationSubgraph(
 {
 	const float CellSizeVal = static_cast<float>(GridSize);
 
-	// Build the room queue, interleaving types so a high-count type doesn't form one long single-type chain.
-	// Greedy: at each step place the type with the most rooms remaining that DIFFERS from the previously
-	// placed type (when an alternative exists); ties break by a seeded type order. This spreads scarce types
-	// out and only repeats a type once it is the only one left — more variety / a more natural layout.
-	const int32	  NumTypes = Params.RoomTypes.Num();
-	TArray<int32> Remaining;
-	Remaining.Reserve(NumTypes);
-	int32 RequestedRoomCount = 0;
-	for (const FOrganicResolvedRoomType& RT : Params.RoomTypes)
-	{
-		const int32 Count = FMath::Max(0, RT.Count);
-		Remaining.Add(Count);
-		RequestedRoomCount += Count;
-	}
-
+	// Build the placement queue, interleaving types so a high-count type doesn't form one long single-type
+	// chain. See BuildRoomQueue for the full scheduling logic.
 	TArray<int32> Queue;
-	Queue.Reserve(RequestedRoomCount);
-	int32 PrevType = INDEX_NONE;
-	for (int32 Placed = 0; Placed < RequestedRoomCount; ++Placed)
-	{
-		// Eligible = types with rooms left, excluding the previous type whenever any OTHER type still has
-		// rooms (so two of the same type never sit adjacent until that type is genuinely the only one left).
-		bool bHasNonPrev = false;
-		for (int32 t = 0; t < NumTypes; ++t)
-		{
-			if (Remaining[t] > 0 && t != PrevType)
-			{
-				bHasNonPrev = true;
-				break;
-			}
-		}
-
-		int32 Chosen = INDEX_NONE;
-		if (!bHasNonPrev)
-		{
-			Chosen = PrevType; // only the previous type remains — it has to repeat
-		}
-		else if (Params.bShuffleRoomOrder)
-		{
-			// Weighted-random by remaining count: a high-count type is picked more often (never starves the
-			// scarce ones) but the exact sequence is random, so there is no fixed repeating pattern.
-			// Uses the shared ProceduralGeometry_PickWeightedType utility (extracted from this loop).
-			Chosen =
-				ProceduralGeometry_PickWeightedType(Remaining, PrevType, [&](int32 MaxInclusive) { return RandomStream.RandRange(0, MaxInclusive); });
-			if (Chosen == INDEX_NONE)
-			{
-				Chosen = PrevType; // fallback: only prev type has rooms
-			}
-		}
-		else
-		{
-			// Deterministic spread: most-remaining non-prev type (ties go to the lowest declared index).
-			for (int32 t = 0; t < NumTypes; ++t)
-			{
-				if (Remaining[t] <= 0 || t == PrevType)
-				{
-					continue;
-				}
-				if (Chosen == INDEX_NONE || Remaining[t] > Remaining[Chosen])
-				{
-					Chosen = t;
-				}
-			}
-		}
-
-		Queue.Add(Chosen);
-		--Remaining[Chosen];
-		PrevType = Chosen;
-	}
+	const int32	  RequestedRoomCount = BuildRoomQueue(Params, RandomStream, Queue);
 
 	UE_LOG(LogRoguelikeGeometry,
 		Log,
@@ -584,12 +527,6 @@ FOrganicLayout UOrganicDungeonGenerator2D::GenerateLocationSubgraph(
 	Rooms.Reserve(RequestedRoomCount);
 	TArray<FOrganicCorridor> Corridors;
 	TArray<int32>			 OpenList; // room indices still eligible to grow from
-
-	auto EdgeKey = [](int32 A, int32 B) -> uint64 {
-		const int32 Lo = FMath::Min(A, B);
-		const int32 Hi = FMath::Max(A, B);
-		return (static_cast<uint64>(Lo) << 32) | static_cast<uint32>(Hi);
-	};
 
 	auto RandomRotation = [&]() { return Params.bRandomRotation ? RandomStream.FRandRange(0.0f, 360.0f) : 0.0f; };
 
@@ -892,110 +829,13 @@ FOrganicLayout UOrganicDungeonGenerator2D::GenerateLocationSubgraph(
 
 	if (NumRooms >= 2)
 	{
-		// Prim's MST over the complete graph (weight = room-center distance) → the connecting backbone.
-		TArray<bool>  InTree;
-		TArray<float> MinD;
-		TArray<int32> Parent;
-		InTree.Init(false, NumRooms);
-		MinD.Init(FLT_MAX, NumRooms);
-		Parent.Init(INDEX_NONE, NumRooms);
-		MinD[0] = 0.0f;
-
-		TArray<TArray<int32>> MstAdj;
-		MstAdj.SetNum(NumRooms);
+		// Build MST (Prim's, O(N^2)) → backbone connectivity; find graph diameter → spine endpoints.
+		TArray<TArray<int32>>		MstAdj;
 		TArray<TPair<int32, int32>> MstEdges;
+		BuildMST(Rooms, MstEdges, MstAdj);
 
-		for (int32 It = 0; It < NumRooms; ++It)
-		{
-			int32 U = INDEX_NONE;
-			float Best = FLT_MAX;
-			for (int32 V = 0; V < NumRooms; ++V)
-			{
-				if (!InTree[V] && MinD[V] < Best)
-				{
-					Best = MinD[V];
-					U = V;
-				}
-			}
-			if (U == INDEX_NONE)
-			{
-				break;
-			}
-			InTree[U] = true;
-			if (Parent[U] != INDEX_NONE)
-			{
-				MstEdges.Add({ Parent[U], U });
-				MstAdj[Parent[U]].Add(U);
-				MstAdj[U].Add(Parent[U]);
-			}
-			for (int32 V = 0; V < NumRooms; ++V)
-			{
-				if (!InTree[V])
-				{
-					const float D = FVector2D::Distance(Rooms[U].Center, Rooms[V].Center);
-					if (D < MinD[V])
-					{
-						MinD[V] = D;
-						Parent[V] = U;
-					}
-				}
-			}
-		}
-
-		// Diameter: two BFS passes over the MST give the two farthest-apart rooms (Start/End endpoints).
-		// The path between them is the spine. Start = endpoint nearer CenterPoint (entrance), End = other.
-		auto BfsFarthest = [&](int32 Src, TArray<int32>& OutParent) -> int32 {
-			TArray<int32> Dist;
-			Dist.Init(-1, NumRooms);
-			OutParent.Init(INDEX_NONE, NumRooms);
-			TArray<int32> Q;
-			Q.Add(Src);
-			Dist[Src] = 0;
-			int32 Head = 0;
-			int32 Far = Src;
-			while (Head < Q.Num())
-			{
-				const int32 U = Q[Head++];
-				if (Dist[U] > Dist[Far])
-				{
-					Far = U;
-				}
-				for (int32 V : MstAdj[U])
-				{
-					if (Dist[V] < 0)
-					{
-						Dist[V] = Dist[U] + 1;
-						OutParent[V] = U;
-						Q.Add(V);
-					}
-				}
-			}
-			return Far;
-		};
-
-		TArray<int32> P1;
-		const int32	  A = BfsFarthest(0, P1);
-		TArray<int32> P2;
-		const int32	  B = BfsFarthest(A, P2); // P2 = parents rooted at A; B = far end
-
-		// Orient: Start is the endpoint closer to CenterPoint (the level entrance), End the farther.
-		if (FVector2D::Distance(Rooms[B].Center, CenterPoint) < FVector2D::Distance(Rooms[A].Center, CenterPoint))
-		{
-			StartRoomIdx = B;
-			EndRoomIdx = A;
-		}
-		else
-		{
-			StartRoomIdx = A;
-			EndRoomIdx = B;
-		}
-
-		// Spine edges = the A..B path (walk B up to A via P2).
 		TSet<uint64> SpineEdges;
-		for (int32 N = B; P2[N] != INDEX_NONE; N = P2[N])
-		{
-			SpineEdges.Add(EdgeKey(N, P2[N]));
-		}
+		FindSpine(Rooms, MstAdj, CenterPoint, StartRoomIdx, EndRoomIdx, SpineEdges);
 
 		// Backbone corridors (spine ones widened).
 		TSet<uint64> EdgeSet;
@@ -1565,4 +1405,199 @@ FOrganicDungeonGridData UOrganicDungeonGenerator2D::RasterizeLayout(const FOrgan
 	Result.LocationStartRoomIndex = Layout.LocationStartRoomIndex;
 	Result.Diagram = MoveTemp(Diagram);
 	return Result;
+}
+
+// ---------------------------------------------------------------------------
+// Isolated algorithmic stages — stateless helpers with clean, testable interfaces.
+// ---------------------------------------------------------------------------
+
+int32 UOrganicDungeonGenerator2D::BuildRoomQueue(const FOrganicDungeonResolvedParams& Params, FRandomStream& RandomStream, TArray<int32>& OutQueue)
+{
+	// Accumulate per-type counts and sum for the total requested.
+	const int32	  NumTypes = Params.RoomTypes.Num();
+	TArray<int32> Remaining;
+	Remaining.Reserve(NumTypes);
+	int32 RequestedRoomCount = 0;
+	for (const FOrganicResolvedRoomType& RT : Params.RoomTypes)
+	{
+		const int32 Count = FMath::Max(0, RT.Count);
+		Remaining.Add(Count);
+		RequestedRoomCount += Count;
+	}
+
+	OutQueue.Reset();
+	OutQueue.Reserve(RequestedRoomCount);
+	int32 PrevType = INDEX_NONE;
+
+	for (int32 Placed = 0; Placed < RequestedRoomCount; ++Placed)
+	{
+		// Eligible = types with rooms left, excluding the previous type whenever any OTHER type still has
+		// rooms (so two of the same type never sit adjacent until that type is genuinely the only one left).
+		bool bHasNonPrev = false;
+		for (int32 t = 0; t < NumTypes; ++t)
+		{
+			if (Remaining[t] > 0 && t != PrevType)
+			{
+				bHasNonPrev = true;
+				break;
+			}
+		}
+
+		int32 Chosen = INDEX_NONE;
+		if (!bHasNonPrev)
+		{
+			Chosen = PrevType; // only the previous type remains — it has to repeat
+		}
+		else if (Params.bShuffleRoomOrder)
+		{
+			// Weighted-random by remaining count: a high-count type is picked more often but the
+			// exact sequence is random, so there is no fixed repeating pattern.
+			Chosen =
+				ProceduralGeometry_PickWeightedType(Remaining, PrevType, [&](int32 MaxInclusive) { return RandomStream.RandRange(0, MaxInclusive); });
+			if (Chosen == INDEX_NONE)
+			{
+				Chosen = PrevType; // fallback: only prev type has rooms
+			}
+		}
+		else
+		{
+			// Deterministic spread: most-remaining non-prev type (ties go to lowest declared index).
+			for (int32 t = 0; t < NumTypes; ++t)
+			{
+				if (Remaining[t] <= 0 || t == PrevType)
+				{
+					continue;
+				}
+				if (Chosen == INDEX_NONE || Remaining[t] > Remaining[Chosen])
+				{
+					Chosen = t;
+				}
+			}
+		}
+
+		OutQueue.Add(Chosen);
+		--Remaining[Chosen];
+		PrevType = Chosen;
+	}
+	return RequestedRoomCount;
+}
+
+void UOrganicDungeonGenerator2D::BuildMST(const TArray<FOrganicRoom>& Rooms, TArray<TPair<int32, int32>>& OutEdges, TArray<TArray<int32>>& OutAdj)
+{
+	const int32 NumRooms = Rooms.Num();
+	OutEdges.Reset();
+	OutAdj.SetNum(NumRooms);
+
+	TArray<bool>  InTree;
+	TArray<float> MinD;
+	TArray<int32> Parent;
+	InTree.Init(false, NumRooms);
+	MinD.Init(FLT_MAX, NumRooms);
+	Parent.Init(INDEX_NONE, NumRooms);
+	MinD[0] = 0.0f;
+
+	// Prim's algorithm: O(N^2), appropriate for the small room counts (<= ~200) used here.
+	for (int32 It = 0; It < NumRooms; ++It)
+	{
+		// Pick the unvisited node with the smallest tentative distance.
+		int32 U = INDEX_NONE;
+		float Best = FLT_MAX;
+		for (int32 V = 0; V < NumRooms; ++V)
+		{
+			if (!InTree[V] && MinD[V] < Best)
+			{
+				Best = MinD[V];
+				U = V;
+			}
+		}
+		if (U == INDEX_NONE)
+		{
+			break; // disconnected (shouldn't happen for a fully-connected complete graph)
+		}
+		InTree[U] = true;
+		if (Parent[U] != INDEX_NONE)
+		{
+			OutEdges.Add({ Parent[U], U });
+			OutAdj[Parent[U]].Add(U);
+			OutAdj[U].Add(Parent[U]);
+		}
+		// Relax neighbours.
+		for (int32 V = 0; V < NumRooms; ++V)
+		{
+			if (!InTree[V])
+			{
+				const float D = FVector2D::Distance(Rooms[U].Center, Rooms[V].Center);
+				if (D < MinD[V])
+				{
+					MinD[V] = D;
+					Parent[V] = U;
+				}
+			}
+		}
+	}
+}
+
+void UOrganicDungeonGenerator2D::FindSpine(const TArray<FOrganicRoom>& Rooms,
+	const TArray<TArray<int32>>&									   MstAdj,
+	const FVector2D&												   CenterPoint,
+	int32&															   OutStartRoomIdx,
+	int32&															   OutEndRoomIdx,
+	TSet<uint64>&													   OutSpineEdges)
+{
+	const int32 NumRooms = Rooms.Num();
+	OutSpineEdges.Reset();
+
+	// BFS from Src; returns the farthest reachable node and populates OutParent.
+	auto BfsFarthest = [&](int32 Src, TArray<int32>& OutParent) -> int32 {
+		TArray<int32> Dist;
+		Dist.Init(-1, NumRooms);
+		OutParent.Init(INDEX_NONE, NumRooms);
+		TArray<int32> Q;
+		Q.Add(Src);
+		Dist[Src] = 0;
+		int32 Head = 0;
+		int32 Far = Src;
+		while (Head < Q.Num())
+		{
+			const int32 U = Q[Head++];
+			if (Dist[U] > Dist[Far])
+			{
+				Far = U;
+			}
+			for (int32 V : MstAdj[U])
+			{
+				if (Dist[V] < 0)
+				{
+					Dist[V] = Dist[U] + 1;
+					OutParent[V] = U;
+					Q.Add(V);
+				}
+			}
+		}
+		return Far;
+	};
+
+	// Two BFS passes give the graph diameter endpoints A and B.
+	TArray<int32> P1;
+	const int32	  A = BfsFarthest(0, P1);
+	TArray<int32> P2;
+	const int32	  B = BfsFarthest(A, P2); // P2 = parents rooted at A; B = far end
+
+	// Orient: Start = diameter endpoint closer to CenterPoint (level entrance), End = farther.
+	if (FVector2D::Distance(Rooms[B].Center, CenterPoint) < FVector2D::Distance(Rooms[A].Center, CenterPoint))
+	{
+		OutStartRoomIdx = B;
+		OutEndRoomIdx = A;
+	}
+	else
+	{
+		OutStartRoomIdx = A;
+		OutEndRoomIdx = B;
+	}
+
+	// Walk the A→B path using P2 (parents rooted at A); each step is a spine edge.
+	for (int32 N = B; P2[N] != INDEX_NONE; N = P2[N])
+	{
+		OutSpineEdges.Add(EdgeKey(N, P2[N]));
+	}
 }

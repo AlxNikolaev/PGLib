@@ -113,4 +113,11 @@ public:
 private:
 	/** Core generation pipeline shared by Generate() and GenerateWithGridData(). */
 	FDrunkardWalkGridData GenerateInternal();
+
+	/**
+	 * Expands RoomTypes into a flat queue of type indices (one entry per room, count = Weight) and
+	 * optionally shuffles it with Fisher-Yates so the placement order varies per seed.
+	 * Extracted so it can be verified in isolation from the full walk pipeline.
+	 */
+	static TArray<int32> BuildRoomQueue(const TArray<FRoomTypeConfig>& RoomTypes, bool bShuffle, FRandomStream& RandomStream);
 };

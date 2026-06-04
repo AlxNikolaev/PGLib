@@ -1,9 +1,9 @@
-#include "Generators/OrganicDungeon2D/OrganicDungeon2DVisualizer.h"
+﻿#include "Generators/OrganicDungeon2D/OrganicDungeon2DVisualizer.h"
 
 #include "DrawDebugHelpers.h"
 #include "Generators/OrganicDungeon2D/OrganicDungeonGenerator2D.h"
+#include "Generators/VisualizerCellMesh.h"
 #include "LevelInstance/LevelInstanceActor.h"
-#include "ProceduralMeshComponent.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogOrganicViz, Log, All);
 
@@ -89,7 +89,7 @@ void AOrganicDungeon2DVisualizer::OnConstruction(const FTransform& Transform)
 			}
 			if (WallCells.Num() > 0)
 			{
-				BuildCellMeshSection(SectionIndex++, WallCells, CS, GridOriginLocal, WallLinearColor, 0.0f);
+				ProcGen_BuildCellMeshSection(GridMeshComponent, DebugMaterial, SectionIndex++, WallCells, CS, GridOriginLocal, WallLinearColor, 0.0f);
 			}
 		}
 
@@ -105,7 +105,8 @@ void AOrganicDungeon2DVisualizer::OnConstruction(const FTransform& Transform)
 			}
 			if (CorridorCells.Num() > 0)
 			{
-				BuildCellMeshSection(SectionIndex++, CorridorCells, CS, GridOriginLocal, CorridorLinearColor, 1.0f);
+				ProcGen_BuildCellMeshSection(
+					GridMeshComponent, DebugMaterial, SectionIndex++, CorridorCells, CS, GridOriginLocal, CorridorLinearColor, 1.0f);
 			}
 		}
 
@@ -125,7 +126,8 @@ void AOrganicDungeon2DVisualizer::OnConstruction(const FTransform& Transform)
 			{
 				RoomColor = FLinearColor(0.9f, 0.05f, 0.05f);
 			}
-			BuildCellMeshSection(SectionIndex++, GridData.RoomFootprintCells[r], CS, GridOriginLocal, RoomColor, 1.5f);
+			ProcGen_BuildCellMeshSection(
+				GridMeshComponent, DebugMaterial, SectionIndex++, GridData.RoomFootprintCells[r], CS, GridOriginLocal, RoomColor, 1.5f);
 		}
 	}
 
@@ -263,7 +265,7 @@ void AOrganicDungeon2DVisualizer::OnConstruction(const FTransform& Transform)
 	}
 
 	UE_LOG(LogOrganicViz,
-		Log,
+		Verbose,
 		TEXT("OnConstruction: %dx%d grid, %d rooms, %d corridors, %d sections."),
 		GridData.GridWidth,
 		GridData.GridHeight,
@@ -326,64 +328,4 @@ void AOrganicDungeon2DVisualizer::ClearSpawnedInstances()
 		}
 	}
 	SpawnedInstances.Empty();
-}
-
-void AOrganicDungeon2DVisualizer::BuildCellMeshSection(int32 SectionIndex,
-	const TArray<FIntPoint>&								 CellPositions,
-	float													 CellSize,
-	const FVector2D&										 GridOriginLocal,
-	const FLinearColor&										 Color,
-	float													 ZOffset)
-{
-	if (CellPositions.Num() == 0)
-	{
-		return;
-	}
-
-	TArray<FVector>			 Vertices;
-	TArray<int32>			 Triangles;
-	TArray<FVector>			 Normals;
-	TArray<FVector2D>		 UVs;
-	TArray<FLinearColor>	 Colors;
-	TArray<FProcMeshTangent> Tangents;
-
-	Vertices.Reserve(CellPositions.Num() * 4);
-	Triangles.Reserve(CellPositions.Num() * 6);
-
-	for (const FIntPoint& Cell : CellPositions)
-	{
-		const float X0 = GridOriginLocal.X + Cell.X * CellSize;
-		const float Y0 = GridOriginLocal.Y + Cell.Y * CellSize;
-		const float X1 = X0 + CellSize;
-		const float Y1 = Y0 + CellSize;
-
-		const int32 Base = Vertices.Num();
-		Vertices.Add(FVector(X0, Y0, ZOffset));
-		Vertices.Add(FVector(X1, Y0, ZOffset));
-		Vertices.Add(FVector(X1, Y1, ZOffset));
-		Vertices.Add(FVector(X0, Y1, ZOffset));
-
-		Triangles.Add(Base);
-		Triangles.Add(Base + 2);
-		Triangles.Add(Base + 1);
-		Triangles.Add(Base);
-		Triangles.Add(Base + 3);
-		Triangles.Add(Base + 2);
-
-		for (int32 v = 0; v < 4; ++v)
-		{
-			Normals.Add(FVector::UpVector);
-			Colors.Add(Color);
-		}
-		UVs.Add(FVector2D(0, 0));
-		UVs.Add(FVector2D(1, 0));
-		UVs.Add(FVector2D(1, 1));
-		UVs.Add(FVector2D(0, 1));
-	}
-
-	GridMeshComponent->CreateMeshSection_LinearColor(SectionIndex, Vertices, Triangles, Normals, UVs, Colors, Tangents, true);
-	if (DebugMaterial)
-	{
-		GridMeshComponent->SetMaterial(SectionIndex, DebugMaterial);
-	}
 }
