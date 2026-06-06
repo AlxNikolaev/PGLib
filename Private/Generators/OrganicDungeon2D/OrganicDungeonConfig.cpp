@@ -82,12 +82,14 @@ namespace
 		return Result.bValid;
 	}
 
-	/** Resolves a room type's level ref, doorways, display name, and footprint (override → measured → fallback). */
+	/** Resolves a room type's level ref, doorways, display name, footprint, and baked doorway declarations. */
 	void ResolveRoomFootprint(const FOrganicRoomType& Type, FOrganicResolvedRoomType& Out)
 	{
 		Out.RoomLevel = Type.RoomLevel;
-		Out.DoorwaysPerEdge = FMath::Max(1, Type.DoorwaysPerEdge);
 		Out.DisplayName = Type.RoomLevel.IsNull() ? FName(TEXT("<unset>")) : FName(*Type.RoomLevel.GetAssetName());
+
+		// Copy baked doorway declarations. Non-empty → declared-doorway room (no synthetic generation).
+		Out.Doorways = Type.BakedDoorways;
 
 		float	  MW = 0.0f;
 		float	  MH = 0.0f;
@@ -143,17 +145,20 @@ FOrganicDungeonResolvedParams FOrganicDungeonConfig::Resolve() const
 		TotalRooms += Resolved.Count;
 	}
 
-	// Special start/end rooms (optional): present if a level is assigned or a footprint override is set.
+	// Special entrance room (optional): present if a level is assigned or a footprint override is set.
 	auto HasRoom = [](const FOrganicRoomType& T) { return !T.RoomLevel.IsNull() || (T.FootprintOverride.X > 0.0f && T.FootprintOverride.Y > 0.0f); };
 	Params.bHasStartRoom = HasRoom(StartRoom);
 	if (Params.bHasStartRoom)
 	{
 		ResolveRoomFootprint(StartRoom, Params.StartRoom);
 	}
-	Params.bHasEndRoom = HasRoom(EndRoom);
-	if (Params.bHasEndRoom)
+
+	// Exit terminus: resolve the portal-room prefab (optional). All anchors fall back to PortalStub when null.
+	Params.ExitTerminusForm = DefaultExitTerminusForm;
+	Params.bHasExitPortalRoom = HasRoom(ExitPortalRoom);
+	if (Params.bHasExitPortalRoom)
 	{
-		ResolveRoomFootprint(EndRoom, Params.EndRoom);
+		ResolveRoomFootprint(ExitPortalRoom, Params.ExitPortalRoom);
 	}
 
 	Params.MinRoomGap = FMath::Max(0.0f, MinRoomGap);

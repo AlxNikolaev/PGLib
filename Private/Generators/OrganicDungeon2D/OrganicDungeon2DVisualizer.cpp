@@ -120,11 +120,21 @@ void AOrganicDungeon2DVisualizer::OnConstruction(const FTransform& Transform)
 			FLinearColor RoomColor = GetRoomDistinctColor(r);
 			if (r == GridData.StartRoomIndex)
 			{
-				RoomColor = FLinearColor(0.05f, 0.9f, 0.1f);
+				RoomColor = FLinearColor(0.05f, 0.9f, 0.1f); // entrance = green
 			}
-			else if (r == GridData.EndRoomIndex)
+			else
 			{
-				RoomColor = FLinearColor(0.9f, 0.05f, 0.05f);
+				// Highlight exit anchor rooms: PortalRoomPrefab anchors in magenta, PortalStub in orange.
+				for (const FOrganicExitAnchor& Anchor : GridData.ExitAnchors)
+				{
+					if (Anchor.RoomIndex == r)
+					{
+						RoomColor = (Anchor.Form == EOrganicTerminusForm::PortalRoomPrefab)
+							? FLinearColor(0.9f, 0.05f, 0.9f)  // magenta = portal-room prefab
+							: FLinearColor(0.9f, 0.5f, 0.05f); // orange = portal stub
+						break;
+					}
+				}
 			}
 			ProcGen_BuildCellMeshSection(
 				GridMeshComponent, DebugMaterial, SectionIndex++, GridData.RoomFootprintCells[r], CS, GridOriginLocal, RoomColor, 1.5f);
@@ -165,6 +175,9 @@ void AOrganicDungeon2DVisualizer::OnConstruction(const FTransform& Transform)
 	}
 
 	// Doorways (world space, Z=4)
+	// Declared doorways (bDeclared=true) are drawn in cyan with a width indicator so authors can
+	// verify alignment between markers and the generated corridor endpoints.
+	// Legacy synthetic doorways are drawn in green (unchanged).
 	if (bShowDoorways)
 	{
 		for (const FOrganicRoom& Room : GridData.Rooms)
@@ -176,9 +189,35 @@ void AOrganicDungeon2DVisualizer::OnConstruction(const FTransform& Transform)
 					continue;
 				}
 				const FVector Pos(D.Pos.X, D.Pos.Y, ActorLoc.Z + 4.0f);
-				DrawDebugPoint(GetWorld(), Pos, 12.0f, FColor::Green, true);
 				const FVector NEnd = Pos + FVector(D.OutwardNormal.X, D.OutwardNormal.Y, 0.0f) * (CS * 1.5f);
-				DrawDebugLine(GetWorld(), Pos, NEnd, FColor::Green, true, -1.f, 0, 1.5f);
+				const FColor  DoorColor = D.bDeclared ? FColor(0, 220, 220) : FColor::Green; // cyan vs green
+				const float	  DotSize = D.bDeclared ? 16.0f : 12.0f;
+
+				DrawDebugPoint(GetWorld(), Pos, DotSize, DoorColor, true);
+				DrawDebugLine(GetWorld(), Pos, NEnd, DoorColor, true, -1.f, 0, D.bDeclared ? 3.0f : 1.5f);
+
+				// For declared doorways draw a width bar perpendicular to the outward normal so
+				// authors can verify the opening width against the prefab geometry.
+				if (D.bDeclared && D.Width > 0.0f)
+				{
+					const FVector2D Perp(-D.OutwardNormal.Y, D.OutwardNormal.X);
+					const float		HalfW = D.Width * 0.5f;
+					const FVector	WA(D.Pos.X + Perp.X * HalfW, D.Pos.Y + Perp.Y * HalfW, ActorLoc.Z + 4.0f);
+					const FVector	WB(D.Pos.X - Perp.X * HalfW, D.Pos.Y - Perp.Y * HalfW, ActorLoc.Z + 4.0f);
+					DrawDebugLine(GetWorld(), WA, WB, FColor(0, 180, 180), true, -1.f, 0, 2.0f);
+				}
+			}
+
+			// Show free (unused) declared doorways in a dimmer tint so authors can see which openings
+			// have no corridor attached (potential wall-gen concern / content issue).
+			for (const FOrganicDoorway& D : Room.Doorways)
+			{
+				if (D.bUsed || !D.bDeclared)
+				{
+					continue;
+				}
+				const FVector Pos(D.Pos.X, D.Pos.Y, ActorLoc.Z + 4.0f);
+				DrawDebugPoint(GetWorld(), Pos, 10.0f, FColor(0, 120, 120), true); // dim cyan
 			}
 		}
 	}
@@ -206,12 +245,16 @@ void AOrganicDungeon2DVisualizer::OnConstruction(const FTransform& Transform)
 			DrawDebugPoint(GetWorld(), FVector(Room.Center.X, Room.Center.Y, ActorLoc.Z + 5.0f), 8.0f, FColor::Orange, true);
 		}
 
-		// Exit hand-off anchor on the end room (where the next-part portal / continuation attaches).
-		if (GridData.EndRoomIndex >= 0)
+		// Exit anchors: draw an outward arrow at each anchor.
+		// PortalRoomPrefab anchors = magenta; PortalStub anchors = orange; fallback stubs are drawn thinner.
+		for (const FOrganicExitAnchor& Anchor : GridData.ExitAnchors)
 		{
-			const FVector Start(GridData.ExitAnchorPos.X, GridData.ExitAnchorPos.Y, ActorLoc.Z + 6.0f);
-			const FVector End = Start + FVector(GridData.ExitAnchorNormal.X, GridData.ExitAnchorNormal.Y, 0.0f) * (CS * 4.0f);
-			DrawDebugDirectionalArrow(GetWorld(), Start, End, CS * 2.0f, FColor::Magenta, true, -1.f, 0, 6.0f);
+			const FColor  ArrowColor = (Anchor.Form == EOrganicTerminusForm::PortalRoomPrefab) ? FColor(220, 0, 220)  // magenta = portal-room prefab
+																							   : FColor(220, 140, 0); // orange  = portal stub
+			const float	  Thickness = Anchor.bIsFallbackStub ? 2.0f : 6.0f;
+			const FVector Start(Anchor.Pos.X, Anchor.Pos.Y, ActorLoc.Z + 6.0f);
+			const FVector End = Start + FVector(Anchor.Normal.X, Anchor.Normal.Y, 0.0f) * (CS * 4.0f);
+			DrawDebugDirectionalArrow(GetWorld(), Start, End, CS * 2.0f, ArrowColor, true, -1.f, 0, Thickness);
 		}
 	}
 

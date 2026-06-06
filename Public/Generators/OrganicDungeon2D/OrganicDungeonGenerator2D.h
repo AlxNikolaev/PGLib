@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "Generators/LayoutGenerator.h"
 #include "Generators/OrganicDungeon2D/OrganicDungeonConfig.h"
+#include "Generators/OrganicDungeon2D/OrganicFloorTypes.h"
 #include "OrganicDungeonGenerator2D.generated.h"
 
 /** Cell type constants for OrganicDungeon grid cells. */
@@ -20,6 +21,16 @@ struct PROCEDURALGEOMETRY_API FOrganicDoorway
 	FVector2D Pos;
 	FVector2D OutwardNormal;
 	bool	  bUsed = false;
+
+	/** Declared opening width (world units). 0 = legacy/synthetic doorway (no width constraint). */
+	float Width = 0.0f;
+
+	/**
+	 * True when this doorway was built from a designer-declared FOrganicBakedDoorway (marker-baked).
+	 * False for legacy synthetic per-edge punch-points.
+	 * Only declared doorways are used as mandatory corridor attachment points.
+	 */
+	bool bDeclared = false;
 };
 
 /** A placed room — a level instance to spawn — in continuous world space. */
@@ -65,6 +76,37 @@ struct PROCEDURALGEOMETRY_API FOrganicCorridor
 };
 
 /**
+ * One cluster exit anchor — a far-leaf room with a reserved outward doorway that serves as
+ * an out-portal attachment point. Produced by SelectExitAnchors; stored on FOrganicDungeonGridData.
+ */
+struct PROCEDURALGEOMETRY_API FOrganicExitAnchor
+{
+	/** Index into FOrganicDungeonGridData::Rooms. INDEX_NONE for a pure dead-end stub with no room. */
+	int32 RoomIndex = INDEX_NONE;
+
+	/** World-space position of the reserved outward doorway (corridor hand-off / portal placement point). */
+	FVector2D Pos = FVector2D::ZeroVector;
+
+	/** Outward unit vector at the doorway (away from cluster interior). */
+	FVector2D Normal = FVector2D(1.0f, 0.0f);
+
+	/**
+	 * BFS hops from the entrance room (StartRoomIndex) to this anchor room.
+	 * Anchors are sorted far-to-near; anchors closer to the entrance are fallbacks.
+	 */
+	int32 GraphDistance = 0;
+
+	/** How the runtime realizes this anchor: portal-room prefab or bare portal stub. */
+	EOrganicTerminusForm Form = EOrganicTerminusForm::PortalStub;
+
+	/**
+	 * True when this anchor was synthesized because far leaves were insufficient for the
+	 * requested exit count. The runtime still places a portal here but emits a Warning.
+	 */
+	bool bIsFallbackStub = false;
+};
+
+/**
  * Debug/visualization data from the organic dungeon pipeline. NOT a stable production API.
  * Exposes raw intermediate state (world-space rooms/corridors + the rasterized fine grid).
  */
@@ -84,31 +126,49 @@ struct PROCEDURALGEOMETRY_API FOrganicDungeonGridData
 	TArray<TArray<FIntPoint>> RoomFootprintCells; // per-room rasterized cells (array coords) for the visualizer
 	int32					  RequestedRoomCount = 0;
 
-	// Transition metadata: the entrance/exit rooms (graph-diameter endpoints) and the exit hand-off point.
-	int32	  StartRoomIndex = -1;
-	int32	  EndRoomIndex = -1;
-	FVector2D ExitAnchorPos;	// world position of the end room's outward doorway (next-part hand-off)
-	FVector2D ExitAnchorNormal; // outward direction at the exit
+	// Transition metadata: the entrance room and all far-leaf exit anchors.
+	int32					   StartRoomIndex = -1;
+	TArray<FOrganicExitAnchor> ExitAnchors; // cluster-wide exit hand-off points (sorted far→near)
 
 	// Per-location (chained-segment) start-room global index, in cluster location order. Used to seed each
 	// location's zone allocation / debug label inside its own start room instead of the shared cluster center.
 	TArray<int32> LocationStartRoomIndex;
 
 	FLayoutDiagram2D Diagram; // full floor (rooms + corridors)
+
+	// ---- Floor-mesh data (populated by FOrganicFloorBuilder::ComputeWalkableContour) ----
+
+	/**
+	 * Walkable-region boundary contour for this cluster: corridor-ribbon ∪ room-footprint,
+	 * derived from the rasterized floor grid so the union is exact.
+	 * Populated at the end of UOrganicDungeonGenerator2D::GenerateWithGridData / RasterizeLayout.
+	 * Consumed by FOrganicFloorBuilder::BuildCorridorFloorMesh (grid-contour path) and persisted
+	 * on AGeneratedLevelActor for the future wall-generation pass.
+	 */
+	FWalkableRegionContour WalkableContour;
+
+	/**
+	 * Generator's recommendation for which floor-mesh strategy the runtime should use.
+	 * true  → use the grid-contour path (marching-squares triangulation of WalkableContour).
+	 * false → use the ribbon-extrusion path (corridor centerlines + room rectangles).
+	 *
+	 * Set by the generator to true when corridor smoothing is enabled OR when cave-style
+	 * corridors are used (variable-width discs that diverge significantly from centerlines).
+	 * Decouples the runtime from generator parameters.
+	 */
+	bool bUseGridContourFloor = false;
 };
 
-/** Continuous-space layout (rooms + corridors + start/end) produced before rasterization. Internal. */
+/** Continuous-space layout (rooms + corridors + entrance + exit anchors) produced before rasterization. Internal. */
 struct PROCEDURALGEOMETRY_API FOrganicLayout
 {
-	TArray<FOrganicRoom>	 Rooms;
-	TArray<FOrganicCorridor> Corridors;
-	int32					 StartRoomIdx = -1;
-	int32					 EndRoomIdx = -1;
-	FVector2D				 ExitAnchorPos = FVector2D::ZeroVector;
-	FVector2D				 ExitAnchorNormal = FVector2D(1.0f, 0.0f);
-	int32					 RequestedRoomCount = 0;
-	int32					 PlacedCount = 0;
-	TArray<int32>			 LocationStartRoomIndex; // per chained segment: global index of its start room
+	TArray<FOrganicRoom>	   Rooms;
+	TArray<FOrganicCorridor>   Corridors;
+	int32					   StartRoomIdx = -1;
+	TArray<FOrganicExitAnchor> ExitAnchors; // populated after SelectExitAnchors; [0] is chain-leaf for multi-loc merge
+	int32					   RequestedRoomCount = 0;
+	int32					   PlacedCount = 0;
+	TArray<int32>			   LocationStartRoomIndex; // per chained segment: global index of its start room
 };
 
 UCLASS()
@@ -116,8 +176,9 @@ class PROCEDURALGEOMETRY_API UOrganicDungeonGenerator2D final : public ULayoutGe
 {
 	GENERATED_BODY()
 
-	FOrganicDungeonResolvedParams		  Params;	// first/only segment (back-compat)
-	TArray<FOrganicDungeonResolvedParams> Segments; // chained segments (>=1); each is one OD location
+	FOrganicDungeonResolvedParams		  Params;				   // first/only segment (back-compat)
+	TArray<FOrganicDungeonResolvedParams> Segments;				   // chained segments (>=1); each is one OD location
+	int32								  RequiredExitAnchors = 1; // how many distinct far-leaf anchors to produce
 
 public:
 	UOrganicDungeonGenerator2D();
@@ -134,11 +195,70 @@ public:
 	/** Applies an ordered list of segment params — the dungeon is generated as chained segments (one per OD location). */
 	UOrganicDungeonGenerator2D* ApplyResolvedParamsList(const TArray<FOrganicDungeonResolvedParams>& InSegments);
 
+	/**
+	 * Sets the number of distinct far-leaf exit anchors the generator should produce.
+	 * Default 1 (preserves single-exit / preview behavior). The runtime calls this with the
+	 * cluster's out-edge count before generation. Returns `this` for chaining.
+	 */
+	UOrganicDungeonGenerator2D* SetRequiredExitAnchors(int32 InCount);
+
+	/**
+	 * Pure, stateless far-leaf anchor selector. Ranks MST leaves by graph distance from the entrance
+	 * (BFS on MstAdj), picks the top RequiredCount distinct rooms, and populates their best free
+	 * outward doorways as exit anchors.
+	 *
+	 * When fewer distinct far leaves exist than RequiredCount, falls back to the deepest rooms with
+	 * any free doorway (setting bIsFallbackStub=true). If the pool is exhausted, OutShortfall > 0
+	 * and the caller must emit a Warning. The distinctness invariant (no two anchors share a room or
+	 * doorway) is always maintained.
+	 *
+	 * Exposed as public static so unit tests can exercise anchor selection on hand-built graphs
+	 * without running full generation.
+	 *
+	 * @param Rooms              Placed room array (world space); doorway bUsed flags are mutated.
+	 * @param MstAdj             MST adjacency list parallel to Rooms.
+	 * @param EntranceRoomIdx    Index of the cluster entrance room (excluded from anchor candidates).
+	 * @param RequiredCount      Desired number of distinct exit anchors (>=1).
+	 * @param DefaultForm        Terminus form assigned to each anchor.
+	 * @param OutAnchors         Resulting anchors, sorted far→near by GraphDistance.
+	 * @param OutShortfall       RequiredCount minus the number of anchors actually produced (0 = success).
+	 */
+	static void SelectExitAnchors(TArray<FOrganicRoom>& Rooms,
+		const TArray<TArray<int32>>&					MstAdj,
+		int32											EntranceRoomIdx,
+		int32											RequiredCount,
+		EOrganicTerminusForm							DefaultForm,
+		TArray<FOrganicExitAnchor>&						OutAnchors,
+		int32&											OutShortfall);
+
 	// Generation
 	virtual FLayoutDiagram2D Generate() override;
 
 	/** Returns full intermediate data (rooms, corridors, grid). For visualization/testing only. */
 	FOrganicDungeonGridData GenerateWithGridData();
+
+	/**
+	 * Pure orientation solver for declared-doorway rooms: finds a rotation θ and a doorway assignment
+	 * that maps every mandatory connection direction to a distinct declared doorway within tolerance.
+	 *
+	 * Candidate rotations are generated by aligning each declared doorway, in turn, to the primary
+	 * mandatory connection (first entry in MandatoryDirs), then testing whether the remaining mandatory
+	 * directions each match a distinct unused declared doorway within AngularToleranceDeg.
+	 *
+	 * @param Declared           Local-space baked doorways for this room type.
+	 * @param MandatoryDirs      World-space unit vectors toward each MST neighbour (and optional exit).
+	 * @param AngularToleranceDeg  Maximum angle between a rotated doorway outward-dir and a mandatory dir.
+	 * @param CandidateRotations   θ values to try, in order (generated by caller from declared dirs + primaryDir).
+	 * @param OutRotationDeg       Best rotation found.
+	 * @param OutDoorwayForConnection  Per mandatory-dir index → declared-doorway index (parallel to MandatoryDirs).
+	 * @return true if a feasible assignment was found; false when connections > doorways or no rotation aligns.
+	 */
+	static bool SolveRoomOrientation(const TArray<FOrganicBakedDoorway>& Declared,
+		const TArray<FVector2D>&										 MandatoryDirs,
+		float															 AngularToleranceDeg,
+		TArrayView<const float>											 CandidateRotations,
+		float&															 OutRotationDeg,
+		TArray<int32>&													 OutDoorwayForConnection);
 
 private:
 	FOrganicDungeonGridData GenerateInternal();

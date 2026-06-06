@@ -5,6 +5,66 @@
 
 class UWorld;
 
+/**
+ * A single OD doorway: a declared opening on a room footprint where a corridor may connect.
+ * Authored directly on the Location asset's room config (FOrganicRoomType::BakedDoorways), so a room
+ * advertises its walkable openings as data instead of via ADoorwayMarker actors baked from the room .umap.
+ *
+ * Coordinate convention: prefab-level-origin-local XY (same space the OD generator uses).
+ *   LocalPosition   – center of the doorway opening.
+ *   LocalOutwardDir – unit vector pointing away from the room interior (a corridor approaches from here).
+ */
+USTRUCT(BlueprintType)
+struct PROCEDURALGEOMETRY_API FOrganicBakedDoorway
+{
+	GENERATED_BODY()
+
+	/**
+	 * Center of the doorway opening in prefab-level-local XY space.
+	 * Authored visually via the Location preview viewport's Doorway Authoring mode (read-only here).
+	 */
+	UPROPERTY(VisibleAnywhere,
+		BlueprintReadWrite,
+		Category = "Doorway",
+		meta = (ToolTip = "Center of the doorway opening in room-local XY (world units). Authored in the viewport."))
+	FVector2D LocalPosition = FVector2D::ZeroVector;
+
+	/**
+	 * Outward normal (unit vector, local XY): the direction a corridor approaches from.
+	 * Authored visually via the Location preview viewport's Doorway Authoring mode (read-only here).
+	 */
+	UPROPERTY(VisibleAnywhere,
+		BlueprintReadWrite,
+		Category = "Doorway",
+		meta = (ToolTip =
+					"Outward normal in room-local XY (need not be normalized): the direction a corridor approaches from. Authored in the viewport."))
+	FVector2D LocalOutwardDir = FVector2D(1.0f, 0.0f);
+
+	/**
+	 * Clear opening width in world units. Corridor radius is clamped to Width/2 at this doorway.
+	 * Authored visually via the Location preview viewport's Doorway Authoring mode (read-only here).
+	 */
+	UPROPERTY(VisibleAnywhere,
+		BlueprintReadWrite,
+		Category = "Doorway",
+		meta = (ClampMin = 10.0,
+			ToolTip = "Clear opening width in world units. Corridor radius is clamped to Width/2 at this doorway. Authored in the viewport."))
+	float Width = 100.0f;
+};
+
+/**
+ * How an exit anchor is realized at the end of an OD cluster corridor.
+ * PortalRoomPrefab places the designer-authored ExitPortalRoom prefab level at the anchor room.
+ * PortalStub leaves a bare corridor dead-end; the runtime drops an APortal actor at the doorway.
+ */
+UENUM(BlueprintType)
+enum class EOrganicTerminusForm : uint8
+{
+	PortalRoomPrefab UMETA(DisplayName = "Portal Room Prefab",
+		ToolTip = "Swap in the ExitPortalRoom level instance at the anchor room (requires ExitPortalRoom to be set)."),
+	PortalStub UMETA(DisplayName = "Portal Stub", ToolTip = "Leave the dead-end bare; the runtime drops an APortal actor at the outward doorway."),
+};
+
 /** Corridor visual style. */
 UENUM(BlueprintType)
 enum class EOrganicCorridorStyle : uint8
@@ -55,14 +115,21 @@ struct PROCEDURALGEOMETRY_API FOrganicRoomType
 	UPROPERTY(EditAnywhere,
 		BlueprintReadWrite,
 		Category = "Room Type",
-		meta = (ClampMin = 1, ToolTip = "Candidate doorways (punch-points) per footprint edge."))
-	int32 DoorwaysPerEdge = 1;
-
-	UPROPERTY(EditAnywhere,
-		BlueprintReadWrite,
-		Category = "Room Type",
 		meta = (ToolTip = "Manual footprint in world units. If either axis is <= 0 it is measured from RoomLevel's bounds instead."))
 	FVector2D FootprintOverride = FVector2D::ZeroVector;
+
+	/**
+	 * Authored doorway openings for this room, defined as data on the Location asset.
+	 * Each entry is a declared opening (XY position + outward dir + width) in room-local space.
+	 * When non-empty, the generator uses these declared openings instead of synthesising a single
+	 * per-edge punch-point, ensuring corridors connect to real walkable doorway geometry.
+	 * When empty, the generator falls back to exactly one synthetic doorway per footprint edge.
+	 *
+	 * Authored exclusively in-editor via the Location asset's preview viewport Doorway Authoring mode
+	 * (doorway handles write their transforms here). Read-only in the Details panel — do not hand-edit.
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Room Type", meta = (TitleProperty = "Width"))
+	TArray<FOrganicBakedDoorway> BakedDoorways;
 };
 
 /** A resolved room type with a concrete footprint. Plain C++ struct. */
@@ -73,11 +140,17 @@ struct PROCEDURALGEOMETRY_API FOrganicResolvedRoomType
 	int32				   Weight = 1; // relative weight carried from FOrganicRoomType (for ResolveForTotal)
 	int32				   Min = 0;	   // mandatory minimum carried from FOrganicRoomType (for ResolveForTotal)
 	int32				   Max = 0;	   // cap carried from FOrganicRoomType (for ResolveForTotal; 0 = uncapped)
-	int32				   DoorwaysPerEdge = 1;
 	float				   FootprintWidth = 600.0f;
 	float				   FootprintHeight = 600.0f;
 	FVector2D			   FootprintCenter = FVector2D::ZeroVector; // bounds center offset from level origin (XY)
 	FName				   DisplayName;
+
+	/**
+	 * Baked doorway declarations copied from FOrganicRoomType::BakedDoorways by ResolveRoomFootprint().
+	 * Non-empty → "declared-doorway" room: generator uses only these openings (no synthetic per-edge candidates).
+	 * Empty → "legacy" room: generator synthesises doorways from the footprint bounding box (back-compat).
+	 */
+	TArray<FOrganicBakedDoorway> Doorways;
 };
 
 /** Resolved organic-dungeon parameters. Plain C++ struct — NOT a USTRUCT. */
@@ -85,11 +158,14 @@ struct PROCEDURALGEOMETRY_API FOrganicDungeonResolvedParams
 {
 	TArray<FOrganicResolvedRoomType> RoomTypes;
 
-	// Special entrance/exit rooms placed at the two graph-diameter endpoints (optional).
+	// Special entrance room placed at the graph-diameter start endpoint (optional).
 	bool					 bHasStartRoom = false;
 	FOrganicResolvedRoomType StartRoom;
-	bool					 bHasEndRoom = false;
-	FOrganicResolvedRoomType EndRoom;
+
+	// Exit terminus configuration: portal-room prefab for PortalRoomPrefab anchors (optional).
+	bool					 bHasExitPortalRoom = false;
+	FOrganicResolvedRoomType ExitPortalRoom;
+	EOrganicTerminusForm	 ExitTerminusForm = EOrganicTerminusForm::PortalStub;
 
 	// Placement
 	float MinRoomGap = 100.0f;
@@ -138,15 +214,31 @@ struct PROCEDURALGEOMETRY_API FOrganicDungeonConfig
 	UPROPERTY(EditAnywhere,
 		BlueprintReadWrite,
 		Category = "Organic Dungeon|Rooms",
-		meta = (ToolTip = "Optional entrance prefab, placed at one graph-diameter endpoint (the start)."))
+		meta = (ToolTip = "Optional entrance prefab, placed at the graph-diameter start endpoint."))
 	FOrganicRoomType StartRoom;
 
+	/**
+	 * Default terminus form for exit anchors — how each out-portal attachment point is realized.
+	 * PortalStub (default): bare corridor dead-end; the runtime drops an APortal actor at the doorway.
+	 * PortalRoomPrefab: swap in the ExitPortalRoom prefab level at each anchor room.
+	 * Designers opt into PortalRoomPrefab by also setting ExitPortalRoom.
+	 */
 	UPROPERTY(EditAnywhere,
 		BlueprintReadWrite,
 		Category = "Organic Dungeon|Rooms",
-		meta = (ToolTip =
-					"Optional exit prefab, placed at the farthest graph-diameter endpoint (the end). Its outward doorway is the transition to the next part."))
-	FOrganicRoomType EndRoom;
+		meta = (ToolTip = "How exit anchor doorways are realized (portal-room prefab or bare portal stub)."))
+	EOrganicTerminusForm DefaultExitTerminusForm = EOrganicTerminusForm::PortalStub;
+
+	/**
+	 * Optional portal-room prefab placed at PortalRoomPrefab exit anchors.
+	 * Small room sized to a portal footprint with baked doorway markers.
+	 * When RoomLevel is null, all anchors fall back to PortalStub.
+	 */
+	UPROPERTY(EditAnywhere,
+		BlueprintReadWrite,
+		Category = "Organic Dungeon|Rooms",
+		meta = (ToolTip = "Portal-room prefab level placed at each PortalRoomPrefab exit anchor. Requires baked doorway markers."))
+	FOrganicRoomType ExitPortalRoom;
 
 	UPROPERTY(EditAnywhere,
 		BlueprintReadWrite,

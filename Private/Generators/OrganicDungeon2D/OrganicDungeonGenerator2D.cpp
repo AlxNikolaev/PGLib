@@ -1,4 +1,5 @@
 #include "Generators/OrganicDungeon2D/OrganicDungeonGenerator2D.h"
+#include "Generators/OrganicDungeon2D/OrganicFloorBuilder.h"
 
 #include "Generators/WeightedDistribute.h"
 #include "ProceduralGeometry.h"
@@ -140,6 +141,12 @@ UOrganicDungeonGenerator2D* UOrganicDungeonGenerator2D::ApplyResolvedParamsList(
 	return this;
 }
 
+UOrganicDungeonGenerator2D* UOrganicDungeonGenerator2D::SetRequiredExitAnchors(int32 InCount)
+{
+	RequiredExitAnchors = FMath::Max(1, InCount);
+	return this;
+}
+
 FLayoutDiagram2D UOrganicDungeonGenerator2D::Generate()
 {
 	return GenerateInternal().Diagram;
@@ -183,8 +190,6 @@ FOrganicDungeonGridData UOrganicDungeonGenerator2D::GenerateInternal()
 	int32		   PrevEndGlobalIdx = INDEX_NONE;
 	FVector2D	   PrevEndPos = CenterPoint;
 	FVector2D	   PrevEndNormal = FVector2D(1.0f, 0.0f);
-	FVector2D	   LastExitPos = CenterPoint;
-	FVector2D	   LastExitNormal = FVector2D(1.0f, 0.0f);
 	bool		   bHavePrev = false;
 
 	// Per-segment start-room index (kept aligned with cluster location order; -1 for an empty segment).
@@ -227,8 +232,9 @@ FOrganicDungeonGridData UOrganicDungeonGenerator2D::GenerateInternal()
 			Merged.Corridors.Add(MoveTemp(C));
 		}
 
-		const int32 ThisStartGlobal = (Sub.StartRoomIdx >= 0) ? RoomBase + Sub.StartRoomIdx : RoomBase;
-		const int32 ThisEndGlobal = (Sub.EndRoomIdx >= 0) ? RoomBase + Sub.EndRoomIdx : RoomBase + Sub.Rooms.Num() - 1;
+		const int32				  ThisStartGlobal = (Sub.StartRoomIdx >= 0) ? RoomBase + Sub.StartRoomIdx : RoomBase;
+		const FOrganicExitAnchor* ChainLeaf = Sub.ExitAnchors.Num() > 0 ? &Sub.ExitAnchors[0] : nullptr;
+		const int32 ThisEndGlobal = (ChainLeaf && ChainLeaf->RoomIndex >= 0) ? RoomBase + ChainLeaf->RoomIndex : RoomBase + Sub.Rooms.Num() - 1;
 
 		Merged.LocationStartRoomIndex[s] = ThisStartGlobal;
 
@@ -237,7 +243,7 @@ FOrganicDungeonGridData UOrganicDungeonGenerator2D::GenerateInternal()
 			OverallStartIdx = ThisStartGlobal;
 		}
 
-		// Stitch subgraphs into one graph: previous location's end room -> this location's start room.
+		// Stitch subgraphs into one graph: previous location's chain-leaf room -> this location's start room.
 		if (bHavePrev && PrevEndGlobalIdx >= 0)
 		{
 			FOrganicCorridor Link = BuildInterLocationCorridor(
@@ -246,10 +252,8 @@ FOrganicDungeonGridData UOrganicDungeonGenerator2D::GenerateInternal()
 		}
 
 		PrevEndGlobalIdx = ThisEndGlobal;
-		PrevEndPos = Merged.Rooms[ThisEndGlobal].Center;
-		PrevEndNormal = Sub.ExitAnchorNormal;
-		LastExitPos = Sub.ExitAnchorPos;
-		LastExitNormal = Sub.ExitAnchorNormal;
+		PrevEndPos = (ChainLeaf && ChainLeaf->RoomIndex >= 0) ? ChainLeaf->Pos : Merged.Rooms[ThisEndGlobal].Center;
+		PrevEndNormal = (ChainLeaf && ChainLeaf->RoomIndex >= 0) ? ChainLeaf->Normal : FVector2D(1.0f, 0.0f);
 		bHavePrev = true;
 	}
 
@@ -262,19 +266,60 @@ FOrganicDungeonGridData UOrganicDungeonGenerator2D::GenerateInternal()
 	}
 
 	Merged.StartRoomIdx = OverallStartIdx;
-	Merged.EndRoomIdx = PrevEndGlobalIdx;
-	Merged.ExitAnchorPos = LastExitPos;
-	Merged.ExitAnchorNormal = LastExitNormal;
 	Merged.PlacedCount = Merged.Rooms.Num();
+
+	// Build merged MST adjacency and select cluster-scope exit anchors.
+	// SelectExitAnchors BFS-ranks MST leaves by graph distance from the entrance and picks
+	// RequiredExitAnchors distinct far-leaf anchors. Falls back gracefully when supply is low.
+	TArray<TArray<int32>>		MergedMstAdj;
+	TArray<TPair<int32, int32>> MergedMstEdges;
+	if (Merged.Rooms.Num() >= 2)
+	{
+		BuildMST(Merged.Rooms, MergedMstEdges, MergedMstAdj);
+	}
+	else
+	{
+		MergedMstAdj.SetNum(Merged.Rooms.Num());
+	}
+
+	const EOrganicTerminusForm DefaultForm = (Segs.Num() > 0) ? Segs[0].ExitTerminusForm : EOrganicTerminusForm::PortalStub;
+	int32					   Shortfall = 0;
+	SelectExitAnchors(Merged.Rooms, MergedMstAdj, Merged.StartRoomIdx, RequiredExitAnchors, DefaultForm, Merged.ExitAnchors, Shortfall);
+	if (Shortfall > 0)
+	{
+		UE_LOG(LogRoguelikeGeometry,
+			Warning,
+			TEXT("[ORG] Exit-anchor shortfall: required=%d produced=%d. Cross-cluster out-edges may share anchor or fall back to random cells."),
+			RequiredExitAnchors,
+			RequiredExitAnchors - Shortfall);
+	}
+
+	// Swap in portal-room prefab for PortalRoomPrefab anchors (mirrors old end-room swap).
+	if (Segs.Num() > 0 && Segs[0].bHasExitPortalRoom)
+	{
+		for (FOrganicExitAnchor& Anchor : Merged.ExitAnchors)
+		{
+			if (Anchor.Form == EOrganicTerminusForm::PortalRoomPrefab && Merged.Rooms.IsValidIndex(Anchor.RoomIndex))
+			{
+				Merged.Rooms[Anchor.RoomIndex].RoomLevel = Segs[0].ExitPortalRoom.RoomLevel;
+				Merged.Rooms[Anchor.RoomIndex].FootprintCenterOffset = Segs[0].ExitPortalRoom.FootprintCenter;
+				UE_LOG(LogRoguelikeGeometry,
+					Verbose,
+					TEXT("[ORG] Swapped portal-room prefab at anchor room[%d] '%s'"),
+					Anchor.RoomIndex,
+					*Segs[0].ExitPortalRoom.DisplayName.ToString());
+			}
+		}
+	}
 
 	UE_LOG(LogRoguelikeGeometry,
 		Log,
-		TEXT("[ORG] Cluster graph: %d location(s) -> rooms=%d corridors=%d start=%d end=%d"),
+		TEXT("[ORG] Cluster graph: %d location(s) -> rooms=%d corridors=%d entrance=%d exitAnchors=%d"),
 		Segs.Num(),
 		Merged.Rooms.Num(),
 		Merged.Corridors.Num(),
 		Merged.StartRoomIdx,
-		Merged.EndRoomIdx);
+		Merged.ExitAnchors.Num());
 
 	return RasterizeLayout(Merged);
 }
@@ -484,29 +529,68 @@ FOrganicLayout UOrganicDungeonGenerator2D::GenerateLocationSubgraph(
 		return FVector2D(Params.RoomTypes[TypeIdx].FootprintWidth * 0.5f, Params.RoomTypes[TypeIdx].FootprintHeight * 0.5f);
 	};
 
+	// Generates doorways for a room.
+	// For declared-doorway rooms (Doorways.Num() > 0 on the resolved type) the designer-baked
+	// openings are transformed local→world.  Legacy rooms fall back to the synthetic per-edge
+	// punch-points.  Room.RotationDeg must be set before calling.
 	auto GenerateDoorways = [&](FOrganicRoom& Room) {
-		const int32		PerEdge = FMath::Max(1, Params.RoomTypes[Room.TypeIndex].DoorwaysPerEdge);
-		const FVector2D AxisX = RotateDeg(FVector2D(1, 0), Room.RotationDeg);
-		const FVector2D AxisY = RotateDeg(FVector2D(0, 1), Room.RotationDeg);
-		// 4 edges: +X, -X, +Y, -Y (local normals)
-		const FVector2D LocalNormals[4] = { FVector2D(1, 0), FVector2D(-1, 0), FVector2D(0, 1), FVector2D(0, -1) };
-		for (int32 e = 0; e < 4; ++e)
+		const FOrganicResolvedRoomType& RT = Params.RoomTypes[Room.TypeIndex];
+		const FVector2D					AxisX = RotateDeg(FVector2D(1, 0), Room.RotationDeg);
+		const FVector2D					AxisY = RotateDeg(FVector2D(0, 1), Room.RotationDeg);
+		Room.Doorways.Reset();
+
+		if (RT.Doorways.Num() > 0)
 		{
-			const FVector2D N = LocalNormals[e];
-			const FVector2D WorldN = (AxisX * N.X + AxisY * N.Y).GetSafeNormal();
-			// Tangent along the edge (perpendicular to N)
-			const FVector2D LocalT(-N.Y, N.X);
-			const float		EdgeHalf = (e < 2) ? Room.HalfExtent.Y : Room.HalfExtent.X; // edge length/2 along its tangent
-			const float		Push = (e < 2) ? Room.HalfExtent.X : Room.HalfExtent.Y;		// distance from center to edge
-			for (int32 i = 0; i < PerEdge; ++i)
+			// Declared-doorway path: transform each baked entry local→world.
+			//
+			// The room is placed so its bounds-center (FootprintCenterOffset from level origin)
+			// maps to Room.Center.  A doorway at LocalPosition (relative to level origin) lands at:
+			//   world = Room.Center + Rotate(LocalPosition - FootprintCenterOffset, RotDeg)
+			Room.Doorways.Reserve(RT.Doorways.Num());
+			for (const FOrganicBakedDoorway& Decl : RT.Doorways)
 			{
-				const float		Frac = (PerEdge == 1) ? 0.0f : (((i + 1.0f) / (PerEdge + 1.0f)) * 2.0f - 1.0f); // [-1,1]
-				const FVector2D LocalPos = N * Push + LocalT * (Frac * EdgeHalf);
-				const FVector2D WorldPos = Room.Center + AxisX * LocalPos.X + AxisY * LocalPos.Y;
+				const FVector2D LocalRelCenter = Decl.LocalPosition - Room.FootprintCenterOffset;
+				const FVector2D WorldPos = Room.Center + AxisX * LocalRelCenter.X + AxisY * LocalRelCenter.Y;
+				const FVector2D WorldNormal = (AxisX * Decl.LocalOutwardDir.X + AxisY * Decl.LocalOutwardDir.Y).GetSafeNormal();
+
 				FOrganicDoorway D;
 				D.Pos = WorldPos;
-				D.OutwardNormal = WorldN;
+				D.OutwardNormal = WorldNormal.IsNearlyZero() ? AxisX : WorldNormal;
+				D.Width = Decl.Width;
+				D.bDeclared = true;
 				Room.Doorways.Add(D);
+			}
+			UE_LOG(LogRoguelikeGeometry,
+				Verbose,
+				TEXT("[ORG] Room type '%s' rot=%.1f°: generated %d declared doorway(s)"),
+				*RT.DisplayName.ToString(),
+				Room.RotationDeg,
+				Room.Doorways.Num());
+		}
+		else
+		{
+			// Legacy synthetic fallback (room has NO authored doorways): exactly one centered punch-point per footprint edge.
+			constexpr int32 PerEdge = 1;
+			// 4 edges: +X, -X, +Y, -Y (local normals)
+			const FVector2D LocalNormals[4] = { FVector2D(1, 0), FVector2D(-1, 0), FVector2D(0, 1), FVector2D(0, -1) };
+			for (int32 e = 0; e < 4; ++e)
+			{
+				const FVector2D N = LocalNormals[e];
+				const FVector2D WorldN = (AxisX * N.X + AxisY * N.Y).GetSafeNormal();
+				const FVector2D LocalT(-N.Y, N.X);
+				const float		EdgeHalf = (e < 2) ? Room.HalfExtent.Y : Room.HalfExtent.X;
+				const float		Push = (e < 2) ? Room.HalfExtent.X : Room.HalfExtent.Y;
+				for (int32 i = 0; i < PerEdge; ++i)
+				{
+					const float		Frac = (PerEdge == 1) ? 0.0f : (((i + 1.0f) / (PerEdge + 1.0f)) * 2.0f - 1.0f);
+					const FVector2D LocalPos = N * Push + LocalT * (Frac * EdgeHalf);
+					const FVector2D WorldPos = Room.Center + AxisX * LocalPos.X + AxisY * LocalPos.Y;
+					FOrganicDoorway D;
+					D.Pos = WorldPos;
+					D.OutwardNormal = WorldN;
+					// Width and bDeclared remain at defaults (0.0f / false).
+					Room.Doorways.Add(D);
+				}
 			}
 		}
 	};
@@ -817,6 +901,18 @@ FOrganicLayout UOrganicDungeonGenerator2D::GenerateLocationSubgraph(
 		{
 			return false;
 		}
+
+		// Clamp corridor endpoint radii to half the declared opening width so the carved passage
+		// never blasts through the wall geometry surrounding the doorway.
+		if (Rooms[A].Doorways[DA].bDeclared && Rooms[A].Doorways[DA].Width > 0.0f && Cor.Radii.Num() > 0)
+		{
+			Cor.Radii[0] = FMath::Min(Cor.Radii[0], Rooms[A].Doorways[DA].Width * 0.5f);
+		}
+		if (Rooms[B].Doorways[DB].bDeclared && Rooms[B].Doorways[DB].Width > 0.0f && Cor.Radii.Num() > 0)
+		{
+			Cor.Radii.Last() = FMath::Min(Cor.Radii.Last(), Rooms[B].Doorways[DB].Width * 0.5f);
+		}
+
 		Rooms[A].Doorways[DA].bUsed = true;
 		Rooms[B].Doorways[DB].bUsed = true;
 		Cor.AnchorA = { EOrganicAnchorType::Room, A, APos, ANrm };
@@ -827,15 +923,305 @@ FOrganicLayout UOrganicDungeonGenerator2D::GenerateLocationSubgraph(
 		return true;
 	};
 
+	// MST adjacency/edges and spine set — declared outside the if-block so the orientation solve
+	// and drop logic can rebuild them if rooms are dropped.
+	TArray<TArray<int32>>		MstAdj;
+	TArray<TPair<int32, int32>> MstEdges;
+	TSet<uint64>				SpineEdges;
+
 	if (NumRooms >= 2)
 	{
 		// Build MST (Prim's, O(N^2)) → backbone connectivity; find graph diameter → spine endpoints.
-		TArray<TArray<int32>>		MstAdj;
-		TArray<TPair<int32, int32>> MstEdges;
 		BuildMST(Rooms, MstEdges, MstAdj);
-
-		TSet<uint64> SpineEdges;
 		FindSpine(Rooms, MstAdj, CenterPoint, StartRoomIdx, EndRoomIdx, SpineEdges);
+
+		// --- Orientation solve stage ---
+		// For each declared-doorway room, choose a rotation that maps every mandatory MST connection
+		// to a distinct declared doorway within angular tolerance.  Rooms that cannot be satisfied
+		// are re-rolled to another pool entry or dropped.  Runs after MST/spine so mandatory
+		// connections are known, before backbone carve so doorways are not yet consumed.
+
+		// Angular tolerance for matching a rotated doorway direction to a mandatory connection.
+		constexpr float SolveToleranceDeg = 45.0f;
+
+		TArray<int32> DroppedRoomIndices; // collected in ascending order, removed in reverse
+
+		for (int32 r = 0; r < Rooms.Num(); ++r)
+		{
+			const FOrganicResolvedRoomType& RT = Params.RoomTypes[Rooms[r].TypeIndex];
+			if (RT.Doorways.Num() == 0)
+			{
+				continue; // legacy room — skip solve, synthetic doorways already generated
+			}
+
+			// Gather mandatory connection directions (toward each MST neighbour).
+			TArray<FVector2D> MandatoryDirs;
+			if (MstAdj.IsValidIndex(r))
+			{
+				for (int32 Neighbor : MstAdj[r])
+				{
+					MandatoryDirs.Add((Rooms[Neighbor].Center - Rooms[r].Center).GetSafeNormal());
+				}
+			}
+
+			if (MandatoryDirs.Num() == 0)
+			{
+				// Isolated declared-doorway room — regenerate at current rotation, no solve needed.
+				GenerateDoorways(Rooms[r]);
+				continue;
+			}
+
+			// Fast-reject: impossible if more connections than doorways.
+			if (MandatoryDirs.Num() > RT.Doorways.Num())
+			{
+				UE_LOG(LogRoguelikeGeometry,
+					Verbose,
+					TEXT("[ORG] Orientation: room[%d] type '%s' has %d mandatory connections but only %d doorways — skip to re-roll"),
+					r,
+					*RT.DisplayName.ToString(),
+					MandatoryDirs.Num(),
+					RT.Doorways.Num());
+				// Fall through to re-roll/drop logic below.
+			}
+			else
+			{
+				// Generate candidate rotations: align each declared doorway to the primary connection.
+				const float	  PrimaryAngleDeg = FMath::RadiansToDegrees(FMath::Atan2(MandatoryDirs[0].Y, MandatoryDirs[0].X));
+				TArray<float> Candidates;
+				Candidates.Reserve(RT.Doorways.Num());
+				for (const FOrganicBakedDoorway& D : RT.Doorways)
+				{
+					const float DoorAngleDeg = FMath::RadiansToDegrees(FMath::Atan2(D.LocalOutwardDir.Y, D.LocalOutwardDir.X));
+					Candidates.Add(PrimaryAngleDeg - DoorAngleDeg);
+				}
+
+				float		  SolvedRot = 0.0f;
+				TArray<int32> Assignment;
+				const bool	  bSolved = SolveRoomOrientation(RT.Doorways,
+					   MandatoryDirs,
+					   SolveToleranceDeg,
+					   TArrayView<const float>(Candidates.GetData(), Candidates.Num()),
+					   SolvedRot,
+					   Assignment);
+
+				if (bSolved)
+				{
+					// Validate footprint overlap at the new rotation.
+					const FOBB2D NewOBB = MakeOBB(Rooms[r].Center, SolvedRot, Rooms[r].HalfExtent, Params.MinRoomGap * 0.5f);
+					bool		 bOverlap = false;
+					for (int32 i = 0; i < Rooms.Num() && !bOverlap; ++i)
+					{
+						if (i == r)
+						{
+							continue;
+						}
+						bOverlap = OBBOverlap(NewOBB, MakeOBB(Rooms[i].Center, Rooms[i].RotationDeg, Rooms[i].HalfExtent, Params.MinRoomGap * 0.5f));
+					}
+					for (int32 i = 0; i < Obstacles.Num() && !bOverlap; ++i)
+					{
+						bOverlap = OBBOverlap(
+							NewOBB, MakeOBB(Obstacles[i].Center, Obstacles[i].RotationDeg, Obstacles[i].HalfExtent, Params.MinRoomGap * 0.5f));
+					}
+
+					if (!bOverlap)
+					{
+						// Commit orientation: update rotation and regenerate doorways.
+						Rooms[r].RotationDeg = SolvedRot;
+						GenerateDoorways(Rooms[r]);
+						UE_LOG(LogRoguelikeGeometry,
+							Verbose,
+							TEXT("[ORG] Orientation: room[%d] type '%s' solved rot=%.1f° (%d connections → %d doorways)"),
+							r,
+							*RT.DisplayName.ToString(),
+							SolvedRot,
+							MandatoryDirs.Num(),
+							RT.Doorways.Num());
+						continue; // success — move to next room
+					}
+					UE_LOG(LogRoguelikeGeometry,
+						Verbose,
+						TEXT("[ORG] Orientation: room[%d] solved rot=%.1f° overlaps another room — trying re-roll"),
+						r,
+						SolvedRot);
+				}
+				else
+				{
+					UE_LOG(LogRoguelikeGeometry,
+						Verbose,
+						TEXT("[ORG] Orientation: room[%d] type '%s' no rotation aligns %d mandatory connection(s) — trying re-roll"),
+						r,
+						*RT.DisplayName.ToString(),
+						MandatoryDirs.Num());
+				}
+			}
+
+			// Re-roll: try another room type from the pool with enough declared doorways.
+			bool		bRerolled = false;
+			const int32 OrigTypeIdx = Rooms[r].TypeIndex;
+			for (int32 t = 0; t < Params.RoomTypes.Num() && !bRerolled; ++t)
+			{
+				if (t == OrigTypeIdx)
+				{
+					continue;
+				}
+				const FOrganicResolvedRoomType& AltRT = Params.RoomTypes[t];
+				if (AltRT.Doorways.Num() == 0 || AltRT.Doorways.Num() < MandatoryDirs.Num())
+				{
+					continue;
+				}
+
+				const float AltPrimaryAngleDeg =
+					MandatoryDirs.Num() > 0 ? FMath::RadiansToDegrees(FMath::Atan2(MandatoryDirs[0].Y, MandatoryDirs[0].X)) : 0.0f;
+				TArray<float> AltCandidates;
+				AltCandidates.Reserve(AltRT.Doorways.Num());
+				for (const FOrganicBakedDoorway& D : AltRT.Doorways)
+				{
+					const float DA = FMath::RadiansToDegrees(FMath::Atan2(D.LocalOutwardDir.Y, D.LocalOutwardDir.X));
+					AltCandidates.Add(AltPrimaryAngleDeg - DA);
+				}
+
+				float		  AltRot = 0.0f;
+				TArray<int32> AltAssignment;
+				if (!SolveRoomOrientation(AltRT.Doorways,
+						MandatoryDirs,
+						SolveToleranceDeg,
+						TArrayView<const float>(AltCandidates.GetData(), AltCandidates.Num()),
+						AltRot,
+						AltAssignment))
+				{
+					continue;
+				}
+
+				const FVector2D AltHalf(AltRT.FootprintWidth * 0.5f, AltRT.FootprintHeight * 0.5f);
+				const FOBB2D	AltOBB = MakeOBB(Rooms[r].Center, AltRot, AltHalf, Params.MinRoomGap * 0.5f);
+				bool			bAltOverlap = false;
+				for (int32 i = 0; i < Rooms.Num() && !bAltOverlap; ++i)
+				{
+					if (i == r)
+					{
+						continue;
+					}
+					bAltOverlap = OBBOverlap(AltOBB, MakeOBB(Rooms[i].Center, Rooms[i].RotationDeg, Rooms[i].HalfExtent, Params.MinRoomGap * 0.5f));
+				}
+				for (int32 i = 0; i < Obstacles.Num() && !bAltOverlap; ++i)
+				{
+					bAltOverlap =
+						OBBOverlap(AltOBB, MakeOBB(Obstacles[i].Center, Obstacles[i].RotationDeg, Obstacles[i].HalfExtent, Params.MinRoomGap * 0.5f));
+				}
+				if (bAltOverlap)
+				{
+					continue;
+				}
+
+				// Commit re-roll.
+				Rooms[r].TypeIndex = t;
+				Rooms[r].RotationDeg = AltRot;
+				Rooms[r].HalfExtent = AltHalf;
+				Rooms[r].RoomLevel = AltRT.RoomLevel;
+				Rooms[r].FootprintCenterOffset = AltRT.FootprintCenter;
+				GenerateDoorways(Rooms[r]);
+				bRerolled = true;
+
+				UE_LOG(LogRoguelikeGeometry,
+					Log,
+					TEXT("[ORG] Orientation: room[%d] re-rolled from type '%s' to '%s' (rot=%.1f°)"),
+					r,
+					*Params.RoomTypes[OrigTypeIdx].DisplayName.ToString(),
+					*AltRT.DisplayName.ToString(),
+					AltRot);
+			}
+
+			if (!bRerolled)
+			{
+				// Cannot satisfy mandatory connections with any pool entry — schedule drop.
+				DroppedRoomIndices.Add(r);
+				UE_LOG(LogRoguelikeGeometry,
+					Warning,
+					TEXT("[ORG] Orientation: room[%d] type '%s' dropped — no pool entry satisfies %d mandatory connection(s)"),
+					r,
+					*RT.DisplayName.ToString(),
+					MandatoryDirs.Num());
+			}
+		}
+
+		// Process drops: remove in reverse-index order (preserves remaining indices),
+		// then rebuild MST + spine over the surviving rooms.
+		if (DroppedRoomIndices.Num() > 0)
+		{
+			// Sort descending so RemoveAt doesn't invalidate earlier indices.
+			DroppedRoomIndices.Sort([](int32 A, int32 B) { return A > B; });
+			for (const int32 DropIdx : DroppedRoomIndices)
+			{
+				Rooms.RemoveAt(DropIdx);
+				// Keep start/end indices consistent.
+				if (StartRoomIdx == DropIdx)
+				{
+					StartRoomIdx = Rooms.Num() > 0 ? 0 : INDEX_NONE;
+				}
+				else if (StartRoomIdx > DropIdx)
+				{
+					--StartRoomIdx;
+				}
+				if (EndRoomIdx == DropIdx)
+				{
+					EndRoomIdx = INDEX_NONE;
+				}
+				else if (EndRoomIdx > DropIdx)
+				{
+					--EndRoomIdx;
+				}
+			}
+			UE_LOG(LogRoguelikeGeometry,
+				Warning,
+				TEXT("[ORG] Orientation: dropped %d room(s); %d remain. Rebuilding MST."),
+				DroppedRoomIndices.Num(),
+				Rooms.Num());
+
+			// Rebuild MST + spine over survivors.
+			MstAdj.Empty();
+			MstEdges.Empty();
+			SpineEdges.Empty();
+			if (Rooms.Num() >= 2)
+			{
+				BuildMST(Rooms, MstEdges, MstAdj);
+				FindSpine(Rooms, MstAdj, CenterPoint, StartRoomIdx, EndRoomIdx, SpineEdges);
+			}
+			else
+			{
+				MstAdj.SetNum(Rooms.Num());
+				if (Rooms.Num() == 1)
+				{
+					StartRoomIdx = 0;
+					EndRoomIdx = 0;
+				}
+			}
+		}
+		// --- End orientation solve stage ---
+
+		// Helper: for declared-doorway rooms, returns true only if a free declared doorway
+		// faces Toward within ~60°.  Legacy rooms always return true (no restriction).
+		// Used to gate optional edges (loops, dead-ends, links) so they never silently
+		// consume a declared opening that was intended for a mandatory corridor.
+		auto CanAttachOptional = [&](int32 RoomIdx, const FVector2D& Toward) -> bool {
+			if (!Rooms.IsValidIndex(RoomIdx))
+			{
+				return false;
+			}
+			const FOrganicResolvedRoomType& RT = Params.RoomTypes[Rooms[RoomIdx].TypeIndex];
+			if (RT.Doorways.Num() == 0)
+			{
+				return true; // legacy room: always eligible
+			}
+			constexpr float AlignDot = 0.5f; // cos(60°)
+			for (const FOrganicDoorway& D : Rooms[RoomIdx].Doorways)
+			{
+				if (!D.bUsed && FVector2D::DotProduct(D.OutwardNormal, Toward) >= AlignDot)
+				{
+					return true;
+				}
+			}
+			return false;
+		};
 
 		// Backbone corridors (spine ones widened).
 		TSet<uint64> EdgeSet;
@@ -853,10 +1239,11 @@ FOrganicLayout UOrganicDungeonGenerator2D::GenerateLocationSubgraph(
 		// Loops: add the shortest non-backbone edges within LoopMaxDistance, up to LoopCount.
 		if (Params.LoopCount > 0)
 		{
+			const int32						CurrentRoomCount = Rooms.Num();
 			TArray<TPair<float, FIntPoint>> Cand;
-			for (int32 a = 0; a < NumRooms; ++a)
+			for (int32 a = 0; a < CurrentRoomCount; ++a)
 			{
-				for (int32 b = a + 1; b < NumRooms; ++b)
+				for (int32 b = a + 1; b < CurrentRoomCount; ++b)
 				{
 					if (EdgeSet.Contains(EdgeKey(a, b)))
 					{
@@ -872,8 +1259,14 @@ FOrganicLayout UOrganicDungeonGenerator2D::GenerateLocationSubgraph(
 			Cand.Sort([](const TPair<float, FIntPoint>& L, const TPair<float, FIntPoint>& R) { return L.Key < R.Key; });
 			for (int32 i = 0; i < Cand.Num() && StatLoops < Params.LoopCount; ++i)
 			{
-				const int32 a = Cand[i].Value.X;
-				const int32 b = Cand[i].Value.Y;
+				const int32		a = Cand[i].Value.X;
+				const int32		b = Cand[i].Value.Y;
+				const FVector2D ToB = (Rooms[b].Center - Rooms[a].Center).GetSafeNormal();
+				// Optional edge: skip if a declared-doorway room has no free aligned opening.
+				if (!CanAttachOptional(a, ToB) || !CanAttachOptional(b, -ToB))
+				{
+					continue;
+				}
 				if (MakeRoomCorridor(a, b, true, false, 1.0f, true))
 				{
 					EdgeSet.Add(EdgeKey(a, b));
@@ -883,28 +1276,34 @@ FOrganicLayout UOrganicDungeonGenerator2D::GenerateLocationSubgraph(
 		}
 	}
 
-	// --- Designate start/end prefabs at the diameter endpoints and compute the exit hand-off anchor ---
-	FVector2D ExitAnchorPos = (EndRoomIdx >= 0) ? Rooms[EndRoomIdx].Center : CenterPoint;
-	FVector2D ExitAnchorNormal = FVector2D(1.0f, 0.0f);
+	// --- Compute chain-leaf anchor for inter-location stitching and entrance prefab swap ---
+	// The chain leaf is the MST diameter endpoint opposite the entrance. Its outward doorway position
+	// is stored in ExitAnchors[0] so GenerateInternal can seed the next location's anchor point.
+	// The doorway is NOT reserved here — BuildInterLocationCorridor will independently pick the best
+	// facing doorway when stitching, and cluster-scope SelectExitAnchors runs after all carving.
+	FOrganicExitAnchor ChainLeaf;
+	ChainLeaf.RoomIndex = EndRoomIdx;
+	ChainLeaf.Form = EOrganicTerminusForm::PortalStub; // placeholder; overridden by SelectExitAnchors
 	if (EndRoomIdx >= 0)
 	{
-		// Dungeon centroid — used to point the exit outward, away from the rest of the level.
+		// Compute outward direction from dungeon centroid so the chain-leaf doorway faces away from the cluster.
 		FVector2D Centroid(0.0f, 0.0f);
 		for (const FOrganicRoom& R : Rooms)
 		{
 			Centroid += R.Center;
 		}
-		Centroid /= FMath::Max(1, Rooms.Num());
+		Centroid /= static_cast<float>(FMath::Max(1, Rooms.Num()));
 		const FVector2D Outward = (Rooms[EndRoomIdx].Center - Centroid).GetSafeNormal();
 
-		// End room's doorway best facing outward (prefer free); reserve it so corridors don't take it.
+		// Find the best outward-facing free doorway (prefer free so the chain-leaf has a clean attachment point).
 		int32 BestFree = INDEX_NONE;
 		float BestFreeDot = -FLT_MAX;
 		int32 BestAny = INDEX_NONE;
 		float BestAnyDot = -FLT_MAX;
 		for (int32 d = 0; d < Rooms[EndRoomIdx].Doorways.Num(); ++d)
 		{
-			const float Dot = FVector2D::DotProduct(Rooms[EndRoomIdx].Doorways[d].OutwardNormal, Outward);
+			const FVector2D Dir = Outward.IsNearlyZero() ? FVector2D(1.0f, 0.0f) : Outward;
+			const float		Dot = FVector2D::DotProduct(Rooms[EndRoomIdx].Doorways[d].OutwardNormal, Dir);
 			if (Dot > BestAnyDot)
 			{
 				BestAnyDot = Dot;
@@ -916,22 +1315,24 @@ FOrganicLayout UOrganicDungeonGenerator2D::GenerateLocationSubgraph(
 				BestFree = d;
 			}
 		}
-		const int32 ExitDoor = (BestFree != INDEX_NONE) ? BestFree : BestAny;
-		if (ExitDoor != INDEX_NONE)
+		const int32 ChainDoor = (BestFree != INDEX_NONE) ? BestFree : BestAny;
+		if (ChainDoor != INDEX_NONE)
 		{
-			Rooms[EndRoomIdx].Doorways[ExitDoor].bUsed = true; // reserve from dead-ends/links
-			ExitAnchorPos = Rooms[EndRoomIdx].Doorways[ExitDoor].Pos;
-			ExitAnchorNormal = Rooms[EndRoomIdx].Doorways[ExitDoor].OutwardNormal;
+			ChainLeaf.Pos = Rooms[EndRoomIdx].Doorways[ChainDoor].Pos;
+			ChainLeaf.Normal = Rooms[EndRoomIdx].Doorways[ChainDoor].OutwardNormal;
 		}
-
-		// Swap in the End prefab (level ref + bounds-center offset); keep the placed footprint so the
-		// already-carved corridors stay attached to its edges.
-		if (Params.bHasEndRoom)
+		else
 		{
-			Rooms[EndRoomIdx].RoomLevel = Params.EndRoom.RoomLevel;
-			Rooms[EndRoomIdx].FootprintCenterOffset = Params.EndRoom.FootprintCenter;
+			ChainLeaf.Pos = Rooms[EndRoomIdx].Center;
+			ChainLeaf.Normal = Outward.IsNearlyZero() ? FVector2D(1.0f, 0.0f) : Outward;
 		}
 	}
+	else
+	{
+		ChainLeaf.Pos = CenterPoint;
+		ChainLeaf.Normal = FVector2D(1.0f, 0.0f);
+	}
+
 	if (StartRoomIdx >= 0 && Params.bHasStartRoom)
 	{
 		Rooms[StartRoomIdx].RoomLevel = Params.StartRoom.RoomLevel;
@@ -1109,7 +1510,8 @@ FOrganicLayout UOrganicDungeonGenerator2D::GenerateLocationSubgraph(
 
 	UE_LOG(LogRoguelikeGeometry,
 		Log,
-		TEXT("[ORG] Layout: rooms=%d/%d corridors=%d spine=%d loops=%d deadEnds=%d links=%d | start=%d end=%d | placementRetries=%d backtracks=%d"),
+		TEXT(
+			"[ORG] Layout: rooms=%d/%d corridors=%d spine=%d loops=%d deadEnds=%d links=%d | entrance=%d chainLeaf=%d | placementRetries=%d backtracks=%d"),
 		PlacedCount,
 		RequestedRoomCount,
 		Corridors.Num(),
@@ -1118,7 +1520,7 @@ FOrganicLayout UOrganicDungeonGenerator2D::GenerateLocationSubgraph(
 		StatDeadEnds,
 		StatLinks,
 		StartRoomIdx,
-		EndRoomIdx,
+		ChainLeaf.RoomIndex,
 		StatRetries,
 		StatBacktracks);
 
@@ -1126,9 +1528,7 @@ FOrganicLayout UOrganicDungeonGenerator2D::GenerateLocationSubgraph(
 	OutLayout.Rooms = MoveTemp(Rooms);
 	OutLayout.Corridors = MoveTemp(Corridors);
 	OutLayout.StartRoomIdx = StartRoomIdx;
-	OutLayout.EndRoomIdx = EndRoomIdx;
-	OutLayout.ExitAnchorPos = ExitAnchorPos;
-	OutLayout.ExitAnchorNormal = ExitAnchorNormal;
+	OutLayout.ExitAnchors.Add(ChainLeaf); // [0] = chain leaf; GenerateInternal uses this for inter-location stitching
 	OutLayout.RequestedRoomCount = RequestedRoomCount;
 	OutLayout.PlacedCount = PlacedCount;
 	return OutLayout;
@@ -1143,9 +1543,6 @@ FOrganicDungeonGridData UOrganicDungeonGenerator2D::RasterizeLayout(const FOrgan
 	const TArray<FOrganicRoom>&		Rooms = Layout.Rooms;
 	const TArray<FOrganicCorridor>& Corridors = Layout.Corridors;
 	const int32						StartRoomIdx = Layout.StartRoomIdx;
-	const int32						EndRoomIdx = Layout.EndRoomIdx;
-	const FVector2D					ExitAnchorPos = Layout.ExitAnchorPos;
-	const FVector2D					ExitAnchorNormal = Layout.ExitAnchorNormal;
 	const int32						PlacedCount = Layout.PlacedCount;
 	const int32						RequestedRoomCount = Layout.RequestedRoomCount;
 
@@ -1369,12 +1766,12 @@ FOrganicDungeonGridData UOrganicDungeonGenerator2D::RasterizeLayout(const FOrgan
 
 	UE_LOG(LogRoguelikeGeometry,
 		Log,
-		TEXT("[ORG] Rasterize: rooms=%d/%d corridors=%d | start=%d end=%d | regions=%d"),
+		TEXT("[ORG] Rasterize: rooms=%d/%d corridors=%d | entrance=%d exitAnchors=%d | regions=%d"),
 		PlacedCount,
 		RequestedRoomCount,
 		Corridors.Num(),
 		StartRoomIdx,
-		EndRoomIdx,
+		Layout.ExitAnchors.Num(),
 		Regions.Num());
 
 	// Position the diagram in world: cell (0,0) maps to GridOrigin, CellSize = GridSize.
@@ -1399,11 +1796,21 @@ FOrganicDungeonGridData UOrganicDungeonGenerator2D::RasterizeLayout(const FOrgan
 	Result.RoomFootprintCells = MoveTemp(RoomFootprintCells);
 	Result.RequestedRoomCount = RequestedRoomCount;
 	Result.StartRoomIndex = StartRoomIdx;
-	Result.EndRoomIndex = EndRoomIdx;
-	Result.ExitAnchorPos = ExitAnchorPos;
-	Result.ExitAnchorNormal = ExitAnchorNormal;
+	Result.ExitAnchors = Layout.ExitAnchors;
 	Result.LocationStartRoomIndex = Layout.LocationStartRoomIndex;
 	Result.Diagram = MoveTemp(Diagram);
+
+	// ---- Floor mesh preparation ----
+	// Select the floor-mesh strategy based on corridor style and smoothing.
+	// Cave-style corridors (variable-width disc-stamped) and smoothed corridors both produce
+	// floor shapes that diverge from the centerline ribbon — use grid-contour for those.
+	// Clean-style corridors with no smoothing are well-approximated by ribbon extrusion.
+	Result.bUseGridContourFloor = Params.bSmoothCorridors || (Params.CorridorStyle == EOrganicCorridorStyle::Cave);
+
+	// Extract the walkable boundary contour from the completed floor grid.
+	// This is a pure-data pass (no UObject/world access) — safe to do inline here.
+	FOrganicFloorBuilder::ComputeWalkableContour(Result, Result.WalkableContour);
+
 	return Result;
 }
 
@@ -1600,4 +2007,346 @@ void UOrganicDungeonGenerator2D::FindSpine(const TArray<FOrganicRoom>& Rooms,
 	{
 		OutSpineEdges.Add(EdgeKey(N, P2[N]));
 	}
+}
+
+void UOrganicDungeonGenerator2D::SelectExitAnchors(TArray<FOrganicRoom>& Rooms,
+	const TArray<TArray<int32>>&										 MstAdj,
+	int32																 EntranceRoomIdx,
+	int32																 RequiredCount,
+	EOrganicTerminusForm												 DefaultForm,
+	TArray<FOrganicExitAnchor>&											 OutAnchors,
+	int32&																 OutShortfall)
+{
+	OutAnchors.Reset();
+	OutShortfall = 0;
+
+	const int32 NumRooms = Rooms.Num();
+	if (NumRooms == 0 || RequiredCount <= 0)
+	{
+		return;
+	}
+
+	// Validate adjacency and entrance index.
+	if (MstAdj.Num() != NumRooms || !MstAdj.IsValidIndex(EntranceRoomIdx))
+	{
+		UE_LOG(LogRoguelikeGeometry,
+			Warning,
+			TEXT("[ORG] SelectExitAnchors: degenerate MST (rooms=%d adj=%d entrance=%d) — falling back to single stub."),
+			NumRooms,
+			MstAdj.Num(),
+			EntranceRoomIdx);
+		if (NumRooms > 0)
+		{
+			FOrganicExitAnchor Stub;
+			Stub.RoomIndex = 0;
+			Stub.Pos = Rooms[0].Center;
+			Stub.Normal = FVector2D(1.0f, 0.0f);
+			Stub.GraphDistance = 0;
+			Stub.Form = DefaultForm;
+			Stub.bIsFallbackStub = true;
+			OutAnchors.Add(Stub);
+		}
+		OutShortfall = FMath::Max(0, RequiredCount - OutAnchors.Num());
+		return;
+	}
+
+	// BFS from entrance to compute per-room hop distances.
+	TArray<int32> Dist;
+	Dist.Init(-1, NumRooms);
+	Dist[EntranceRoomIdx] = 0;
+	TArray<int32> Queue;
+	Queue.Reserve(NumRooms);
+	Queue.Add(EntranceRoomIdx);
+	int32 Head = 0;
+	while (Head < Queue.Num())
+	{
+		const int32 U = Queue[Head++];
+		for (int32 V : MstAdj[U])
+		{
+			if (Dist[V] < 0)
+			{
+				Dist[V] = Dist[U] + 1;
+				Queue.Add(V);
+			}
+		}
+	}
+
+	const FVector2D EntrancePos = Rooms[EntranceRoomIdx].Center;
+
+	// Centroid used for outward-doorway selection (doorway facing away from cluster interior).
+	FVector2D Centroid(0.0f, 0.0f);
+	for (const FOrganicRoom& R : Rooms)
+	{
+		Centroid += R.Center;
+	}
+	Centroid /= static_cast<float>(FMath::Max(1, NumRooms));
+
+	// Returns the best free outward-facing doorway index on a room, or INDEX_NONE.
+	// Falls back to the best of any doorway when all are used.
+	auto PickBestFreeDoorway = [&](int32 RoomIdx) -> int32 {
+		const FVector2D Outward = (Rooms[RoomIdx].Center - Centroid).GetSafeNormal();
+		const FVector2D Dir = Outward.IsNearlyZero() ? FVector2D(1.0f, 0.0f) : Outward;
+
+		int32 BestFree = INDEX_NONE;
+		float BestFreeDot = -FLT_MAX;
+		int32 BestAny = INDEX_NONE;
+		float BestAnyDot = -FLT_MAX;
+		for (int32 d = 0; d < Rooms[RoomIdx].Doorways.Num(); ++d)
+		{
+			const float Dot = FVector2D::DotProduct(Rooms[RoomIdx].Doorways[d].OutwardNormal, Dir);
+			if (!Rooms[RoomIdx].Doorways[d].bUsed && Dot > BestFreeDot)
+			{
+				BestFreeDot = Dot;
+				BestFree = d;
+			}
+			if (Dot > BestAnyDot)
+			{
+				BestAnyDot = Dot;
+				BestAny = d;
+			}
+		}
+		return (BestFree != INDEX_NONE) ? BestFree : INDEX_NONE; // only free doorways for exit anchors
+	};
+
+	// Builds an FOrganicExitAnchor from a room index and marks its selected doorway used.
+	auto MakeAnchor = [&](int32 RoomIdx, int32 GraphDist, bool bFallback) -> FOrganicExitAnchor {
+		FOrganicExitAnchor A;
+		A.RoomIndex = RoomIdx;
+		A.GraphDistance = GraphDist;
+		A.Form = DefaultForm;
+		A.bIsFallbackStub = bFallback;
+
+		const int32 DoorIdx = PickBestFreeDoorway(RoomIdx);
+		if (DoorIdx != INDEX_NONE)
+		{
+			A.Pos = Rooms[RoomIdx].Doorways[DoorIdx].Pos;
+			A.Normal = Rooms[RoomIdx].Doorways[DoorIdx].OutwardNormal;
+			Rooms[RoomIdx].Doorways[DoorIdx].bUsed = true;
+		}
+		else
+		{
+			// No free doorway — synthesize a position from the room center + outward direction.
+			const FVector2D Outward = (Rooms[RoomIdx].Center - Centroid).GetSafeNormal();
+			A.Pos = Rooms[RoomIdx].Center;
+			A.Normal = Outward.IsNearlyZero() ? (Rooms[RoomIdx].Center - EntrancePos).GetSafeNormal() : Outward;
+			if (A.Normal.IsNearlyZero())
+			{
+				A.Normal = FVector2D(1.0f, 0.0f);
+			}
+		}
+		return A;
+	};
+
+	// Deterministic sort comparator: farthest graph distance first; then farthest Euclidean from entrance; then lowest room index.
+	auto SortFarFirst = [&](int32 RA, int32 RB) -> bool {
+		const int32 DA = Dist.IsValidIndex(RA) ? Dist[RA] : -1;
+		const int32 DB = Dist.IsValidIndex(RB) ? Dist[RB] : -1;
+		if (DA != DB)
+		{
+			return DA > DB;
+		}
+		const float EA = FVector2D::Distance(Rooms[RA].Center, EntrancePos);
+		const float EB = FVector2D::Distance(Rooms[RB].Center, EntrancePos);
+		if (!FMath::IsNearlyEqual(EA, EB, 1.0f))
+		{
+			return EA > EB;
+		}
+		return RA < RB;
+	};
+
+	// --- Pass 1: MST leaves (degree 1) excluding entrance, sorted far→near ---
+	TSet<int32> UsedRooms;
+	UsedRooms.Add(EntranceRoomIdx);
+
+	TArray<int32> Leaves;
+	for (int32 r = 0; r < NumRooms; ++r)
+	{
+		if (r == EntranceRoomIdx)
+		{
+			continue;
+		}
+		const int32 Degree = MstAdj[r].Num();
+		const int32 GraphDist = Dist[r];
+		if (Degree == 1 && GraphDist > 0) // must be reachable and not the entrance
+		{
+			Leaves.Add(r);
+		}
+	}
+	Leaves.Sort([&](int32 A, int32 B) { return SortFarFirst(A, B); });
+
+	for (int32 r : Leaves)
+	{
+		if (OutAnchors.Num() >= RequiredCount)
+		{
+			break;
+		}
+		if (UsedRooms.Contains(r))
+		{
+			continue;
+		}
+		// Only select leaves that have a free doorway (PickBestFreeDoorway returns INDEX_NONE when all are used).
+		if (PickBestFreeDoorway(r) == INDEX_NONE)
+		{
+			continue;
+		}
+		OutAnchors.Add(MakeAnchor(r, Dist[r], false));
+		UsedRooms.Add(r);
+
+		UE_LOG(LogRoguelikeGeometry,
+			Verbose,
+			TEXT("[ORG] SelectExitAnchors: leaf anchor[%d] room=%d graphDist=%d pos=(%.0f,%.0f)"),
+			OutAnchors.Num() - 1,
+			r,
+			Dist[r],
+			OutAnchors.Last().Pos.X,
+			OutAnchors.Last().Pos.Y);
+	}
+
+	// --- Pass 2: fallback — any non-entrance room with a free doorway, sorted far→near ---
+	if (OutAnchors.Num() < RequiredCount)
+	{
+		TArray<int32> FallbackRooms;
+		for (int32 r = 0; r < NumRooms; ++r)
+		{
+			if (UsedRooms.Contains(r))
+			{
+				continue;
+			}
+			if (Dist[r] <= 0) // must be farther than entrance
+			{
+				continue;
+			}
+			if (PickBestFreeDoorway(r) == INDEX_NONE)
+			{
+				continue;
+			}
+			FallbackRooms.Add(r);
+		}
+		FallbackRooms.Sort([&](int32 A, int32 B) { return SortFarFirst(A, B); });
+
+		for (int32 r : FallbackRooms)
+		{
+			if (OutAnchors.Num() >= RequiredCount)
+			{
+				break;
+			}
+			if (UsedRooms.Contains(r))
+			{
+				continue;
+			}
+			OutAnchors.Add(MakeAnchor(r, Dist[r], true));
+			UsedRooms.Add(r);
+
+			UE_LOG(LogRoguelikeGeometry,
+				Verbose,
+				TEXT("[ORG] SelectExitAnchors: fallback anchor[%d] room=%d graphDist=%d pos=(%.0f,%.0f)"),
+				OutAnchors.Num() - 1,
+				r,
+				Dist[r],
+				OutAnchors.Last().Pos.X,
+				OutAnchors.Last().Pos.Y);
+		}
+	}
+
+	OutShortfall = FMath::Max(0, RequiredCount - OutAnchors.Num());
+}
+
+bool UOrganicDungeonGenerator2D::SolveRoomOrientation(const TArray<FOrganicBakedDoorway>& Declared,
+	const TArray<FVector2D>&															  MandatoryDirs,
+	float																				  AngularToleranceDeg,
+	TArrayView<const float>																  CandidateRotations,
+	float&																				  OutRotationDeg,
+	TArray<int32>&																		  OutDoorwayForConnection)
+{
+	// Trivially infeasible: more connections than declared doorways.
+	if (MandatoryDirs.Num() > Declared.Num())
+	{
+		UE_LOG(LogRoguelikeGeometry,
+			Verbose,
+			TEXT("[SolveRoomOrientation] infeasible: %d connections > %d doorways"),
+			MandatoryDirs.Num(),
+			Declared.Num());
+		return false;
+	}
+
+	if (MandatoryDirs.Num() == 0)
+	{
+		// No connections to satisfy — any rotation is fine; use the first candidate or 0.
+		OutRotationDeg = CandidateRotations.Num() > 0 ? CandidateRotations[0] : 0.0f;
+		OutDoorwayForConnection.Reset();
+		return true;
+	}
+
+	const float CosTol = FMath::Cos(FMath::DegreesToRadians(AngularToleranceDeg));
+
+	// For each candidate rotation, check whether every mandatory direction can be matched to a
+	// distinct declared doorway whose rotated outward dir is within tolerance.
+	// Uses a greedy bipartite matching (sufficient for small counts typical in OD rooms).
+	for (const float Theta : CandidateRotations)
+	{
+		// Pre-rotate all declared doorway directions by Theta.
+		const float ThetaRad = FMath::DegreesToRadians(Theta);
+		const float CosT = FMath::Cos(ThetaRad);
+		const float SinT = FMath::Sin(ThetaRad);
+
+		TArray<FVector2D> RotatedDirs;
+		RotatedDirs.Reserve(Declared.Num());
+		for (const FOrganicBakedDoorway& D : Declared)
+		{
+			RotatedDirs.Add(
+				FVector2D(D.LocalOutwardDir.X * CosT - D.LocalOutwardDir.Y * SinT, D.LocalOutwardDir.X * SinT + D.LocalOutwardDir.Y * CosT)
+					.GetSafeNormal());
+		}
+
+		// Greedy assignment: for each mandatory direction, pick the best-matching unassigned doorway.
+		TArray<bool> Used;
+		Used.Init(false, Declared.Num());
+		TArray<int32> Assignment;
+		Assignment.Reserve(MandatoryDirs.Num());
+		bool bFeasible = true;
+
+		for (const FVector2D& Dir : MandatoryDirs)
+		{
+			float BestDot = CosTol - KINDA_SMALL_NUMBER; // must exceed threshold
+			int32 BestIdx = INDEX_NONE;
+
+			for (int32 d = 0; d < Declared.Num(); ++d)
+			{
+				if (Used[d])
+				{
+					continue;
+				}
+				const float Dot = FVector2D::DotProduct(RotatedDirs[d], Dir);
+				if (Dot > BestDot)
+				{
+					BestDot = Dot;
+					BestIdx = d;
+				}
+			}
+
+			if (BestIdx == INDEX_NONE)
+			{
+				bFeasible = false;
+				break;
+			}
+			Used[BestIdx] = true;
+			Assignment.Add(BestIdx);
+		}
+
+		if (bFeasible)
+		{
+			OutRotationDeg = Theta;
+			OutDoorwayForConnection = MoveTemp(Assignment);
+			UE_LOG(
+				LogRoguelikeGeometry, Verbose, TEXT("[SolveRoomOrientation] feasible: rot=%.1f° for %d connection(s)"), Theta, MandatoryDirs.Num());
+			return true;
+		}
+	}
+
+	UE_LOG(LogRoguelikeGeometry,
+		Verbose,
+		TEXT("[SolveRoomOrientation] no candidate rotation satisfies %d connection(s) within %.0f°"),
+		MandatoryDirs.Num(),
+		AngularToleranceDeg);
+	return false;
 }
