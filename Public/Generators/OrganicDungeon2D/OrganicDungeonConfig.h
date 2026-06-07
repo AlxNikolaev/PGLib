@@ -52,19 +52,6 @@ struct PROCEDURALGEOMETRY_API FOrganicBakedDoorway
 	float Width = 100.0f;
 };
 
-/**
- * How an exit anchor is realized at the end of an OD cluster corridor.
- * PortalRoomPrefab places the designer-authored ExitPortalRoom prefab level at the anchor room.
- * PortalStub leaves a bare corridor dead-end; the runtime drops an APortal actor at the doorway.
- */
-UENUM(BlueprintType)
-enum class EOrganicTerminusForm : uint8
-{
-	PortalRoomPrefab UMETA(DisplayName = "Portal Room Prefab",
-		ToolTip = "Swap in the ExitPortalRoom level instance at the anchor room (requires ExitPortalRoom to be set)."),
-	PortalStub UMETA(DisplayName = "Portal Stub", ToolTip = "Leave the dead-end bare; the runtime drops an APortal actor at the outward doorway."),
-};
-
 /** Corridor visual style. */
 UENUM(BlueprintType)
 enum class EOrganicCorridorStyle : uint8
@@ -119,6 +106,49 @@ struct PROCEDURALGEOMETRY_API FOrganicRoomType
 	FVector2D FootprintOverride = FVector2D::ZeroVector;
 
 	/**
+	 * Baked footprint width (world units) read from the room's ABasementMarker at author/save time.
+	 * The marker is an editor-only actor stripped at cook, so its dimensions must be baked here to survive
+	 * into packaged builds (mirrors how BakedDoorways are baked). When bHasBakedMarkerFootprint is true and
+	 * both axes are positive, this is the TOP-priority footprint signal (above FootprintOverride and measured
+	 * bounds). Authored exclusively in-editor; read-only in the Details panel — do not hand-edit.
+	 */
+	UPROPERTY(VisibleAnywhere,
+		BlueprintReadWrite,
+		Category = "Room Type",
+		meta = (ToolTip = "Baked from the room's ABasementMarker at save time. Top-priority footprint signal. Read-only."))
+	float BakedMarkerWidth = 0.0f;
+
+	/**
+	 * Baked footprint height (world units) read from the room's ABasementMarker at author/save time.
+	 * See BakedMarkerWidth. Read-only in the Details panel — do not hand-edit.
+	 */
+	UPROPERTY(VisibleAnywhere,
+		BlueprintReadWrite,
+		Category = "Room Type",
+		meta = (ToolTip = "Baked from the room's ABasementMarker at save time. Top-priority footprint signal. Read-only."))
+	float BakedMarkerHeight = 0.0f;
+
+	/**
+	 * Baked footprint center offset (room-local XY) read from the room's ABasementMarker at author/save time.
+	 * Used so synthesized doorway transforms stay aligned with the marker-driven footprint. Read-only.
+	 */
+	UPROPERTY(VisibleAnywhere,
+		BlueprintReadWrite,
+		Category = "Room Type",
+		meta = (ToolTip = "Baked from the room's ABasementMarker at save time (room-local XY). Read-only."))
+	FVector2D BakedMarkerCenter = FVector2D::ZeroVector;
+
+	/**
+	 * True when an ABasementMarker was found in RoomLevel and its dimensions were baked into the fields above
+	 * at author/save time. Gates the marker footprint branch in ResolveRoomFootprint. Read-only.
+	 */
+	UPROPERTY(VisibleAnywhere,
+		BlueprintReadWrite,
+		Category = "Room Type",
+		meta = (ToolTip = "True when a basement marker footprint was baked from RoomLevel. Read-only."))
+	bool bHasBakedMarkerFootprint = false;
+
+	/**
 	 * Authored doorway openings for this room, defined as data on the Location asset.
 	 * Each entry is a declared opening (XY position + outward dir + width) in room-local space.
 	 * When non-empty, the generator uses these declared openings instead of synthesising a single
@@ -162,10 +192,9 @@ struct PROCEDURALGEOMETRY_API FOrganicDungeonResolvedParams
 	bool					 bHasStartRoom = false;
 	FOrganicResolvedRoomType StartRoom;
 
-	// Exit terminus configuration: portal-room prefab for PortalRoomPrefab anchors (optional).
-	bool					 bHasExitPortalRoom = false;
-	FOrganicResolvedRoomType ExitPortalRoom;
-	EOrganicTerminusForm	 ExitTerminusForm = EOrganicTerminusForm::PortalStub;
+	// Special exit room placed at the graph-diameter far endpoint (optional).
+	bool					 bHasEndRoom = false;
+	FOrganicResolvedRoomType EndRoom;
 
 	// Placement
 	float MinRoomGap = 100.0f;
@@ -214,31 +243,19 @@ struct PROCEDURALGEOMETRY_API FOrganicDungeonConfig
 	UPROPERTY(EditAnywhere,
 		BlueprintReadWrite,
 		Category = "Organic Dungeon|Rooms",
-		meta = (ToolTip = "Optional entrance prefab, placed at the graph-diameter start endpoint."))
+		meta = (ToolTip = "Optional entrance prefab, placed at the graph-diameter start endpoint. The cluster's single entrance portal is placed at this prefab's PortalTransitionMarker."))
 	FOrganicRoomType StartRoom;
 
 	/**
-	 * Default terminus form for exit anchors — how each out-portal attachment point is realized.
-	 * PortalStub (default): bare corridor dead-end; the runtime drops an APortal actor at the doorway.
-	 * PortalRoomPrefab: swap in the ExitPortalRoom prefab level at each anchor room.
-	 * Designers opt into PortalRoomPrefab by also setting ExitPortalRoom.
+	 * Optional exit prefab, placed at the single graph-diameter far endpoint (the room farthest from the
+	 * entrance along the proximity graph). The cluster's single exit portal is placed at this prefab's
+	 * PortalTransitionMarker. When RoomLevel is null the far-endpoint room keeps its regular prefab.
 	 */
 	UPROPERTY(EditAnywhere,
 		BlueprintReadWrite,
 		Category = "Organic Dungeon|Rooms",
-		meta = (ToolTip = "How exit anchor doorways are realized (portal-room prefab or bare portal stub)."))
-	EOrganicTerminusForm DefaultExitTerminusForm = EOrganicTerminusForm::PortalStub;
-
-	/**
-	 * Optional portal-room prefab placed at PortalRoomPrefab exit anchors.
-	 * Small room sized to a portal footprint with baked doorway markers.
-	 * When RoomLevel is null, all anchors fall back to PortalStub.
-	 */
-	UPROPERTY(EditAnywhere,
-		BlueprintReadWrite,
-		Category = "Organic Dungeon|Rooms",
-		meta = (ToolTip = "Portal-room prefab level placed at each PortalRoomPrefab exit anchor. Requires baked doorway markers."))
-	FOrganicRoomType ExitPortalRoom;
+		meta = (ToolTip = "Optional exit prefab, placed at the graph-diameter far endpoint. The cluster's single exit portal is placed at this prefab's PortalTransitionMarker."))
+	FOrganicRoomType EndRoom;
 
 	UPROPERTY(EditAnywhere,
 		BlueprintReadWrite,

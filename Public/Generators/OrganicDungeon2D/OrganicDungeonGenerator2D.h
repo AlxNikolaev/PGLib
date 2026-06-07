@@ -76,34 +76,20 @@ struct PROCEDURALGEOMETRY_API FOrganicCorridor
 };
 
 /**
- * One cluster exit anchor — a far-leaf room with a reserved outward doorway that serves as
- * an out-portal attachment point. Produced by SelectExitAnchors; stored on FOrganicDungeonGridData.
+ * One end-room hand-off point — the far-endpoint room with its outward doorway. Used for
+ * inter-location stitching (chain leaf) and to seed the cluster's single exit. Produced by
+ * ComputeChainLeaf; the cluster-scope exit is the merged end room (FOrganicLayout::EndRoomIdx).
  */
-struct PROCEDURALGEOMETRY_API FOrganicExitAnchor
+struct PROCEDURALGEOMETRY_API FOrganicEndRoomAnchor
 {
-	/** Index into FOrganicDungeonGridData::Rooms. INDEX_NONE for a pure dead-end stub with no room. */
+	/** Index into the rooms array. INDEX_NONE when no end room could be resolved. */
 	int32 RoomIndex = INDEX_NONE;
 
-	/** World-space position of the reserved outward doorway (corridor hand-off / portal placement point). */
+	/** World-space position of the outward doorway (corridor hand-off / portal placement point). */
 	FVector2D Pos = FVector2D::ZeroVector;
 
 	/** Outward unit vector at the doorway (away from cluster interior). */
 	FVector2D Normal = FVector2D(1.0f, 0.0f);
-
-	/**
-	 * BFS hops from the entrance room (StartRoomIndex) to this anchor room.
-	 * Anchors are sorted far-to-near; anchors closer to the entrance are fallbacks.
-	 */
-	int32 GraphDistance = 0;
-
-	/** How the runtime realizes this anchor: portal-room prefab or bare portal stub. */
-	EOrganicTerminusForm Form = EOrganicTerminusForm::PortalStub;
-
-	/**
-	 * True when this anchor was synthesized because far leaves were insufficient for the
-	 * requested exit count. The runtime still places a portal here but emits a Warning.
-	 */
-	bool bIsFallbackStub = false;
 };
 
 /**
@@ -126,9 +112,9 @@ struct PROCEDURALGEOMETRY_API FOrganicDungeonGridData
 	TArray<TArray<FIntPoint>> RoomFootprintCells; // per-room rasterized cells (array coords) for the visualizer
 	int32					  RequestedRoomCount = 0;
 
-	// Transition metadata: the entrance room and all far-leaf exit anchors.
-	int32					   StartRoomIndex = -1;
-	TArray<FOrganicExitAnchor> ExitAnchors; // cluster-wide exit hand-off points (sorted far→near)
+	// Transition metadata: the single entrance room and the single exit room (graph-diameter endpoints).
+	int32 StartRoomIndex = -1;
+	int32 EndRoomIndex = -1; // cluster-wide exit room (the far endpoint opposite StartRoomIndex)
 
 	// Per-location (chained-segment) start-room global index, in cluster location order. Used to seed each
 	// location's zone allocation / debug label inside its own start room instead of the shared cluster center.
@@ -167,13 +153,13 @@ struct FOrgSubgraphBuild;
 /** Continuous-space layout (rooms + corridors + entrance + exit anchors) produced before rasterization. Internal. */
 struct PROCEDURALGEOMETRY_API FOrganicLayout
 {
-	TArray<FOrganicRoom>	   Rooms;
-	TArray<FOrganicCorridor>   Corridors;
-	int32					   StartRoomIdx = -1;
-	TArray<FOrganicExitAnchor> ExitAnchors; // populated after SelectExitAnchors; [0] is chain-leaf for multi-loc merge
-	int32					   RequestedRoomCount = 0;
-	int32					   PlacedCount = 0;
-	TArray<int32>			   LocationStartRoomIndex; // per chained segment: global index of its start room
+	TArray<FOrganicRoom>	 Rooms;
+	TArray<FOrganicCorridor> Corridors;
+	int32					 StartRoomIdx = -1;
+	int32					 EndRoomIdx = -1; // chain-leaf / cluster exit room (far endpoint opposite StartRoomIdx)
+	int32					 RequestedRoomCount = 0;
+	int32					 PlacedCount = 0;
+	TArray<int32>			 LocationStartRoomIndex; // per chained segment: global index of its start room
 };
 
 UCLASS()
@@ -181,9 +167,8 @@ class PROCEDURALGEOMETRY_API UOrganicDungeonGenerator2D final : public ULayoutGe
 {
 	GENERATED_BODY()
 
-	FOrganicDungeonResolvedParams		  Params;				   // first/only segment (back-compat)
-	TArray<FOrganicDungeonResolvedParams> Segments;				   // chained segments (>=1); each is one OD location
-	int32								  RequiredExitAnchors = 1; // how many distinct far-leaf anchors to produce
+	FOrganicDungeonResolvedParams		  Params;	  // first/only segment (back-compat)
+	TArray<FOrganicDungeonResolvedParams> Segments;	  // chained segments (>=1); each is one OD location
 
 public:
 	UOrganicDungeonGenerator2D();
@@ -199,42 +184,6 @@ public:
 
 	/** Applies an ordered list of segment params — the dungeon is generated as chained segments (one per OD location). */
 	UOrganicDungeonGenerator2D* ApplyResolvedParamsList(const TArray<FOrganicDungeonResolvedParams>& InSegments);
-
-	/**
-	 * Sets the number of distinct far-leaf exit anchors the generator should produce.
-	 * Default 1 (preserves single-exit / preview behavior). The runtime calls this with the
-	 * cluster's out-edge count before generation. Returns `this` for chaining.
-	 */
-	UOrganicDungeonGenerator2D* SetRequiredExitAnchors(int32 InCount);
-
-	/**
-	 * Pure, stateless far-leaf anchor selector. Ranks MST leaves by graph distance from the entrance
-	 * (BFS on MstAdj), picks the top RequiredCount distinct rooms, and populates their best free
-	 * outward doorways as exit anchors.
-	 *
-	 * When fewer distinct far leaves exist than RequiredCount, falls back to the deepest rooms with
-	 * any free doorway (setting bIsFallbackStub=true). If the pool is exhausted, OutShortfall > 0
-	 * and the caller must emit a Warning. The distinctness invariant (no two anchors share a room or
-	 * doorway) is always maintained.
-	 *
-	 * Exposed as public static so unit tests can exercise anchor selection on hand-built graphs
-	 * without running full generation.
-	 *
-	 * @param Rooms              Placed room array (world space); doorway bUsed flags are mutated.
-	 * @param MstAdj             MST adjacency list parallel to Rooms.
-	 * @param EntranceRoomIdx    Index of the cluster entrance room (excluded from anchor candidates).
-	 * @param RequiredCount      Desired number of distinct exit anchors (>=1).
-	 * @param DefaultForm        Terminus form assigned to each anchor.
-	 * @param OutAnchors         Resulting anchors, sorted far→near by GraphDistance.
-	 * @param OutShortfall       RequiredCount minus the number of anchors actually produced (0 = success).
-	 */
-	static void SelectExitAnchors(TArray<FOrganicRoom>& Rooms,
-		const TArray<TArray<int32>>&					MstAdj,
-		int32											EntranceRoomIdx,
-		int32											RequiredCount,
-		EOrganicTerminusForm							DefaultForm,
-		TArray<FOrganicExitAnchor>&						OutAnchors,
-		int32&											OutShortfall);
 
 	// Generation
 	virtual FLayoutDiagram2D Generate() override;
@@ -378,11 +327,11 @@ private:
 		FOrgSubgraphBuild& Ctx, const FOrganicDungeonResolvedParams& Params, const FVector2D& CenterPoint, const TArray<FOrganicRoom>& Obstacles);
 
 	/**
-	 * Computes the chain-leaf exit anchor (the diameter endpoint opposite the entrance) used for
-	 * inter-location stitching, and performs the entrance-room prefab swap when bHasStartRoom is set.
-	 * The chain-leaf doorway is NOT reserved here.
+	 * Computes the chain-leaf end-room anchor (the diameter endpoint opposite the entrance) used for
+	 * inter-location stitching and as the segment's exit room. Performs the entrance-room prefab swap when
+	 * bHasStartRoom is set and the exit-room prefab swap when bHasEndRoom is set. The doorway is NOT reserved.
 	 */
-	FOrganicExitAnchor ComputeChainLeaf(FOrgSubgraphBuild& Ctx, const FOrganicDungeonResolvedParams& Params, const FVector2D& CenterPoint);
+	FOrganicEndRoomAnchor ComputeChainLeaf(FOrgSubgraphBuild& Ctx, const FOrganicDungeonResolvedParams& Params, const FVector2D& CenterPoint);
 
 	/**
 	 * Layer 1b — dead-end stubs. Adds up to DeadEndCount free-doorway corridor stubs ending in open
@@ -391,16 +340,20 @@ private:
 	void AddDeadEnds(FOrgSubgraphBuild& Ctx, const FOrganicDungeonResolvedParams& Params);
 
 	/**
-	 * Layer 1b — corridor links. Adds up to CorridorLinkCount branches from a random corridor to the
-	 * nearest free room doorway or other corridor. Draws RandomStream (source corridor, branch point,
-	 * branch side) in the existing order.
+	 * Layer 1b — corridor links. Adds up to CorridorLinkCount branches that spring from a random corridor.
+	 * Each link primarily joins the nearest other corridor (a corridor-to-corridor connection that forms
+	 * independent of room-doorway capacity), falling back to the nearest free room doorway only when no
+	 * corridor target exists. A link whose curve would cross a room body it does not connect is dropped.
+	 * Draws RandomStream (source corridor, branch point, branch side) in the existing order.
 	 */
 	void AddCorridorLinks(FOrgSubgraphBuild& Ctx, const FOrganicDungeonResolvedParams& Params);
 
 	/**
 	 * Carves a corridor between two rooms via their best-facing doorways, consuming those doorways and
 	 * appending to Ctx.Corridors. When bRejectIfClipsRoom is set the corridor is discarded if its curve
-	 * would clip a third room. Returns true if a corridor was carved.
+	 * crosses any third room, or if it crosses the body of either endpoint room beyond the shallow doorway
+	 * approach span (e.g. a far-side doorway whose corridor would traverse the room interior). Returns true
+	 * if a corridor was carved.
 	 */
 	bool MakeRoomCorridor(FOrgSubgraphBuild& Ctx,
 		const FOrganicDungeonResolvedParams& Params,

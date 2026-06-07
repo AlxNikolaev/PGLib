@@ -60,6 +60,93 @@ namespace OrganicFloorBuilderImpl
 		}
 	}
 
+	/**
+	 * Hard curvature clamp for a variable-width centerline (B1.5).
+	 *
+	 * BuildVectorContour offsets every centerline sample outward by its OWN radius to form the
+	 * corridor ribbon. At a concave corner whose local radius of curvature falls below the offset
+	 * radius, that offset polyline crosses itself, producing a figure-eight lobe that the union +
+	 * Delaunay then fill twice — giving inverted normals and overlapping coincident floor patches.
+	 *
+	 * This helper reconciles geometry and radius so the inner offset can never fold, taming even very
+	 * high waviness. For each interior vertex it:
+	 *   (a) relaxes the vertex toward its neighbours' chord midpoint when the turn exceeds
+	 *       MaxTurnPerVertex, raising the local curvature radius (endpoints are left pinned); and
+	 *   (b) caps the stored radius to r_max = SafetyFactor * shorterHalfSegment * tan(halfTurn) so a
+	 *       concave corner physically cannot self-cross. The cap only ever REDUCES a radius, and never
+	 *       below the polyline's existing minimum radius, so the offset width band is preserved.
+	 *
+	 * The threshold is derived from the LOCAL geometry (adjacent segment lengths + turn angle), not a
+	 * single global angle, so legitimate gentle waviness is left untouched.
+	 */
+	void ClampCenterlineCurvature(TArray<FVector2D>& Pts, TArray<float>& Rad)
+	{
+		const int32 N = Pts.Num();
+		if (N < 3 || Rad.Num() != N)
+		{
+			return;
+		}
+
+		// Geometry-derived fold safety: keep the offset strictly inside the corner.
+		static constexpr float SafetyFactor = 0.95f;
+		// Largest per-vertex turn left untouched; sharper turns are relaxed toward the neighbour chord.
+		static constexpr float MaxTurnDegPerVertex = 60.0f;
+		const float			   MaxTurnRad = FMath::DegreesToRadians(MaxTurnDegPerVertex);
+		// Fraction of the over-turn corrected per visit (gentle nudge so corners are tamed, not flattened).
+		static constexpr float RelaxStrength = 0.5f;
+
+		// Lower bound for any clamped radius: never shrink the band below its current minimum width.
+		float MinRadius = MAX_FLT;
+		for (const float R : Rad)
+		{
+			MinRadius = FMath::Min(MinRadius, R);
+		}
+
+		for (int32 i = 1; i + 1 < N; ++i)
+		{
+			const FVector2D Din = (Pts[i] - Pts[i - 1]).GetSafeNormal();
+			const FVector2D Dout = (Pts[i + 1] - Pts[i]).GetSafeNormal();
+			if (Din.IsNearlyZero() || Dout.IsNearlyZero())
+			{
+				continue;
+			}
+
+			const float Dot = FMath::Clamp(FVector2D::DotProduct(Din, Dout), -1.0f, 1.0f);
+			const float TurnAngle = FMath::Acos(Dot); // 0 = straight, π = reversal
+			if (TurnAngle <= KINDA_SMALL_NUMBER)
+			{
+				continue; // collinear — nothing can fold here
+			}
+
+			// (a) Relax the vertex toward the neighbour-chord midpoint when the turn is too sharp; this
+			//     raises the local curvature radius so the offset has room to clear the corner. Endpoints
+			//     (i == 0 / i == N-1) are intentionally excluded from this loop, keeping them pinned.
+			if (TurnAngle > MaxTurnRad)
+			{
+				const float OverTurn = (TurnAngle - MaxTurnRad) / FMath::Max(PI - MaxTurnRad, KINDA_SMALL_NUMBER);
+				const float Strength = RelaxStrength * FMath::Clamp(OverTurn, 0.0f, 1.0f);
+				const FVector2D ChordMid = (Pts[i - 1] + Pts[i + 1]) * 0.5f;
+				Pts[i] = FMath::Lerp(Pts[i], ChordMid, Strength);
+			}
+
+			// (b) Cap the radius against the (possibly relaxed) local geometry so the inner offset stays
+			//     inside the corner. r_max = SafetyFactor * shorterHalfSeg * tan(halfTurn).
+			const float HalfTurn = TurnAngle * 0.5f;
+			const float TanHalf = FMath::Tan(HalfTurn);
+			if (TanHalf > KINDA_SMALL_NUMBER)
+			{
+				const float PrevHalfLen = FVector2D::Distance(Pts[i], Pts[i - 1]) * 0.5f;
+				const float NextHalfLen = FVector2D::Distance(Pts[i], Pts[i + 1]) * 0.5f;
+				const float ShorterHalf = FMath::Min(PrevHalfLen, NextHalfLen);
+				const float RMax = SafetyFactor * ShorterHalf * TanHalf;
+
+				// Only ever reduce, and never below the band's existing minimum width.
+				const float ClampedR = FMath::Clamp(RMax, MinRadius, Rad[i]);
+				Rad[i] = ClampedR;
+			}
+		}
+	}
+
 	// -------------------------------------------------------------------------
 	// Conversions between engine geometry types and FWalkable* structs
 	// -------------------------------------------------------------------------
@@ -167,6 +254,91 @@ namespace OrganicFloorBuilderImpl
 		Mesh.Tangents.Add(FProcMeshTangent(FVector(1.0f, 0.0f, 0.0f), false));
 	}
 
+	/**
+	 * Inset a boundary loop inward by Thickness, producing the inner-face polyline that runs parallel
+	 * to the outer wall face Thickness units toward the walkable interior.
+	 *
+	 * The inward direction for an edge whose travel direction is D is left-of-travel: (-D.Y, D.X).
+	 * This is correct for every loop the wall builder receives because the rings are normalized to the
+	 * FWalkablePolygon convention (CCW outer / CW holes), and CutDoorwayGaps walks each ring in its
+	 * original order WITHOUT reversing it — so an open (doorway-cut) span inherits its source ring's
+	 * winding and the same left-of-travel rule points toward the interior for both open and closed
+	 * loops. Each interior vertex averages the inward normals of its two adjacent edges; open-loop
+	 * endpoints use their single adjacent edge so the ends do not splay.
+	 *
+	 * (Pin this assumption: if a future change makes CutDoorwayGaps reverse open spans, the inner
+	 *  faces emitted here would silently flip inward/outward.)
+	 */
+	TArray<FVector2D> InsetLoop(const TArray<FVector2D>& Loop, bool bClosed, float Thickness)
+	{
+		const int32 N = Loop.Num();
+		TArray<FVector2D> Inset;
+		Inset.SetNumUninitialized(N);
+		if (N < 2)
+		{
+			for (int32 i = 0; i < N; ++i)
+			{
+				Inset[i] = Loop[i];
+			}
+			return Inset;
+		}
+
+		const int32 SegCount = bClosed ? N : (N - 1);
+
+		// Per-edge inward unit normal (left of travel). For a closed loop there are N edges; for an
+		// open loop there are N-1 edges (indexed by their start vertex).
+		TArray<FVector2D> EdgeNormal;
+		EdgeNormal.SetNumZeroed(SegCount);
+		for (int32 i = 0; i < SegCount; ++i)
+		{
+			const int32		Next = (i + 1) % N;
+			const FVector2D D = (Loop[Next] - Loop[i]).GetSafeNormal();
+			EdgeNormal[i] = FVector2D(-D.Y, D.X);
+		}
+
+		for (int32 i = 0; i < N; ++i)
+		{
+			FVector2D NSum(0.0f, 0.0f);
+
+			if (bClosed)
+			{
+				// Average the incoming edge (ending at i) and the outgoing edge (starting at i).
+				const int32 PrevEdge = (i + SegCount - 1) % SegCount;
+				NSum = EdgeNormal[PrevEdge] + EdgeNormal[i];
+			}
+			else
+			{
+				// Open loop: endpoints have a single adjacent edge; interior vertices average two.
+				if (i > 0)
+				{
+					NSum += EdgeNormal[i - 1]; // incoming edge ends at i
+				}
+				if (i < SegCount)
+				{
+					NSum += EdgeNormal[i]; // outgoing edge starts at i
+				}
+			}
+
+			FVector2D Dir = NSum.GetSafeNormal();
+			if (Dir.IsNearlyZero())
+			{
+				// Near-reversal corner: averaged normal collapses; fall back to either adjacent edge.
+				if (bClosed)
+				{
+					Dir = EdgeNormal[i % SegCount];
+				}
+				else
+				{
+					Dir = (i < SegCount) ? EdgeNormal[i] : EdgeNormal[i - 1];
+				}
+			}
+
+			Inset[i] = Loop[i] + Dir * Thickness;
+		}
+
+		return Inset;
+	}
+
 } // namespace OrganicFloorBuilderImpl
 
 // ============================================================================
@@ -236,6 +408,11 @@ void FOrganicFloorBuilder::SmoothCenterline(
 		Rad = MoveTemp(NextRad);
 	}
 
+	// Hard curvature clamp on the smoothed centerline so the variable-width ribbon that
+	// BuildVectorContour offsets from it can never self-intersect at sharp (high-waviness) turns.
+	// Endpoints stay pinned and radii are only ever reduced within their existing range.
+	OrganicFloorBuilderImpl::ClampCenterlineCurvature(Pts, Rad);
+
 	OutCenterline = MoveTemp(Pts);
 	OutRadii = MoveTemp(Rad);
 }
@@ -288,17 +465,30 @@ bool FOrganicFloorBuilder::BuildVectorContour(
 		for (int32 i = 0; i < N; ++i)
 		{
 			FVector2D NSum(0.0f, 0.0f);
+			FVector2D PrevPerp(0.0f, 0.0f);
+			FVector2D NextPerp(0.0f, 0.0f);
 			if (i > 0)
 			{
 				const FVector2D D = (Smoothed[i] - Smoothed[i - 1]).GetSafeNormal();
-				NSum += FVector2D(-D.Y, D.X);
+				PrevPerp = FVector2D(-D.Y, D.X);
+				NSum += PrevPerp;
 			}
 			if (i + 1 < N)
 			{
 				const FVector2D D = (Smoothed[i + 1] - Smoothed[i]).GetSafeNormal();
-				NSum += FVector2D(-D.Y, D.X);
+				NextPerp = FVector2D(-D.Y, D.X);
+				NSum += NextPerp;
 			}
+
 			Normals[i] = NSum.GetSafeNormal();
+
+			// At a hard corner where the incoming and outgoing segments nearly reverse, the averaged
+			// normal collapses toward zero, which would pinch the ribbon to zero width. Fall back to a
+			// single adjacent segment's perpendicular so the offset always has a valid direction.
+			if (Normals[i].IsNearlyZero())
+			{
+				Normals[i] = !NextPerp.IsNearlyZero() ? NextPerp : PrevPerp;
+			}
 		}
 
 		// Closed ribbon: up the left side, back down the right side; each sample offset by its radius.
@@ -593,15 +783,41 @@ void FOrganicFloorBuilder::TriangulateFloorCap(const FWalkablePolygon& Poly, flo
 		AddFlatVert(FVector2D(static_cast<float>(V.X), static_cast<float>(V.Y)), Z, OutMesh);
 	}
 
+	// Defensive emission: bOutputCCW already winds well-formed triangles CCW, but the PolygonsUnion
+	// fallback path (bCopyInputOnFailure) can pass folded/back-facing input straight through. Every
+	// surviving cap triangle must be CCW in XY so its unconditional +Z normal stays front-facing, so
+	// guard against zero-area degenerates and corrective-flip any CW (negative-area) triangle.
+	static constexpr double TriAreaEpsilon = 1.0; // world-unit² — well below any real cap triangle
 	for (const FIndex3i& T : Tris)
 	{
+		const FVec2d& A = Verts[T.A];
+		const FVec2d& B = Verts[T.B];
+		const FVec2d& C = Verts[T.C];
+
+		// Twice the signed area (shoelace). Positive = CCW (front-facing against +Z), negative = CW.
+		const double SignedArea2x = (B.X - A.X) * (C.Y - A.Y) - (C.X - A.X) * (B.Y - A.Y);
+		if (FMath::Abs(SignedArea2x) < TriAreaEpsilon)
+		{
+			continue; // drop degenerate / zero-area sliver
+		}
+
 		OutMesh.Triangles.Add(BaseIdx + T.A);
-		OutMesh.Triangles.Add(BaseIdx + T.B);
-		OutMesh.Triangles.Add(BaseIdx + T.C);
+		if (SignedArea2x < 0.0)
+		{
+			// CW triangle (only the fallback path should reach here): swap B/C to face +Z.
+			OutMesh.Triangles.Add(BaseIdx + T.C);
+			OutMesh.Triangles.Add(BaseIdx + T.B);
+		}
+		else
+		{
+			OutMesh.Triangles.Add(BaseIdx + T.B);
+			OutMesh.Triangles.Add(BaseIdx + T.C);
+		}
 	}
 }
 
-void FOrganicFloorBuilder::ExtrudeWallLoop(const TArray<FVector2D>& Loop, bool bClosed, float FloorHeight, float WallHeight, FMeshData& OutMesh)
+void FOrganicFloorBuilder::ExtrudeWallLoop(
+	const TArray<FVector2D>& Loop, bool bClosed, float FloorHeight, float WallHeight, float WallThickness, FMeshData& OutMesh)
 {
 	using namespace OrganicFloorBuilderImpl;
 
@@ -611,36 +827,42 @@ void FOrganicFloorBuilder::ExtrudeWallLoop(const TArray<FVector2D>& Loop, bool b
 		return;
 	}
 
+	const float TopZ = FloorHeight + WallHeight;
+	const int32 SegCount = bClosed ? N : (N - 1);
+
+	// Inner-face polyline: the loop inset inward (toward the walkable interior) by WallThickness.
+	const TArray<FVector2D> Inner = InsetLoop(Loop, bClosed, WallThickness);
+
 	// One side-quad per consecutive point pair, matching UProceduralMeshFactory::BuildSideGeometry:
 	//   four verts (bottom_i, bottom_next, top_i, top_next), accumulated-length U, height V,
 	//   side normal = -cross(top_i - bottom_i, bottom_next - bottom_i), winding {0,3,1, 0,2,3}.
-	const float TopZ = FloorHeight + WallHeight;
-	const int32 SegCount = bClosed ? N : (N - 1);
-	float		AccumulatedLength = 0.0f;
-
-	for (int32 i = 0; i < SegCount; ++i)
+	// bReverse flips the winding and side normal so the inner face points the opposite way (into the
+	// walkable interior) from the outer face.
+	const auto EmitSideQuad = [&](const FVector2D& P0, const FVector2D& P1, float& AccumLength, bool bReverse)
 	{
-		const int32 NextIndex = (i + 1) % N;
-
-		const FVector Bottom0(Loop[i].X, Loop[i].Y, FloorHeight);
-		const FVector Bottom1(Loop[NextIndex].X, Loop[NextIndex].Y, FloorHeight);
-		const FVector Top0(Loop[i].X, Loop[i].Y, TopZ);
-		const FVector Top1(Loop[NextIndex].X, Loop[NextIndex].Y, TopZ);
+		const FVector Bottom0(P0.X, P0.Y, FloorHeight);
+		const FVector Bottom1(P1.X, P1.Y, FloorHeight);
+		const FVector Top0(P0.X, P0.Y, TopZ);
+		const FVector Top1(P1.X, P1.Y, TopZ);
 
 		const int32 Base = OutMesh.Vertices.Num();
 		OutMesh.Vertices.Append({ Bottom0, Bottom1, Top0, Top1 });
 
-		const float EdgeLength = FVector2D::Distance(Loop[i], Loop[NextIndex]);
-		const float UStart = AccumulatedLength * UVScale;
-		const float UEnd = (AccumulatedLength + EdgeLength) * UVScale;
-		AccumulatedLength += EdgeLength;
+		const float EdgeLength = FVector2D::Distance(P0, P1);
+		const float UStart = AccumLength * UVScale;
+		const float UEnd = (AccumLength + EdgeLength) * UVScale;
+		AccumLength += EdgeLength;
 
 		OutMesh.UVs.Append(
 			{ FVector2D(UStart, 0.0f), FVector2D(UEnd, 0.0f), FVector2D(UStart, WallHeight * UVScale), FVector2D(UEnd, WallHeight * UVScale) });
 
-		const FVector SideNormal =
+		FVector SideNormal =
 			-FVector::CrossProduct(OutMesh.Vertices[Base + 2] - OutMesh.Vertices[Base], OutMesh.Vertices[Base + 1] - OutMesh.Vertices[Base])
 				 .GetSafeNormal();
+		if (bReverse)
+		{
+			SideNormal = -SideNormal;
+		}
 
 		for (int32 j = 0; j < 4; ++j)
 		{
@@ -649,7 +871,75 @@ void FOrganicFloorBuilder::ExtrudeWallLoop(const TArray<FVector2D>& Loop, bool b
 			OutMesh.Tangents.Add(FProcMeshTangent(FVector(1.0f, 0.0f, 0.0f), false));
 		}
 
-		OutMesh.Triangles.Append({ Base, Base + 3, Base + 1, Base, Base + 2, Base + 3 });
+		if (bReverse)
+		{
+			OutMesh.Triangles.Append({ Base, Base + 1, Base + 3, Base, Base + 3, Base + 2 });
+		}
+		else
+		{
+			OutMesh.Triangles.Append({ Base, Base + 3, Base + 1, Base, Base + 2, Base + 3 });
+		}
+	};
+
+	// --- Outer wall face (byte-identical to the legacy single-curtain recipe). ---
+	float OuterAccum = 0.0f;
+	for (int32 i = 0; i < SegCount; ++i)
+	{
+		const int32 NextIndex = (i + 1) % N;
+		EmitSideQuad(Loop[i], Loop[NextIndex], OuterAccum, /*bReverse=*/false);
+	}
+
+	// --- Inner wall face (inset copy, reversed so it faces the walkable interior). ---
+	float InnerAccum = 0.0f;
+	for (int32 i = 0; i < SegCount; ++i)
+	{
+		const int32 NextIndex = (i + 1) % N;
+		EmitSideQuad(Inner[i], Inner[NextIndex], InnerAccum, /*bReverse=*/true);
+	}
+
+	// --- Top cap strip: bridge outer-top to inner-top at Z = TopZ, facing up (+Z). ---
+	// One quad per wall segment; open loops emit no cap across the doorway gap (only per-segment caps)
+	// so doorway openings stay open through the full wall thickness.
+	for (int32 i = 0; i < SegCount; ++i)
+	{
+		const int32 NextIndex = (i + 1) % N;
+
+		const FVector OuterTop0(Loop[i].X, Loop[i].Y, TopZ);
+		const FVector OuterTop1(Loop[NextIndex].X, Loop[NextIndex].Y, TopZ);
+		const FVector InnerTop0(Inner[i].X, Inner[i].Y, TopZ);
+		const FVector InnerTop1(Inner[NextIndex].X, Inner[NextIndex].Y, TopZ);
+
+		const int32 Base = OutMesh.Vertices.Num();
+		OutMesh.Vertices.Append({ OuterTop0, OuterTop1, InnerTop1, InnerTop0 });
+
+		// Flat top-cap UVs from world XY (matching AddFlatVert's flat-UV convention).
+		OutMesh.UVs.Append({ FVector2D(Loop[i].X * UVScale, Loop[i].Y * UVScale),
+			FVector2D(Loop[NextIndex].X * UVScale, Loop[NextIndex].Y * UVScale),
+			FVector2D(Inner[NextIndex].X * UVScale, Inner[NextIndex].Y * UVScale),
+			FVector2D(Inner[i].X * UVScale, Inner[i].Y * UVScale) });
+
+		for (int32 j = 0; j < 4; ++j)
+		{
+			OutMesh.Normals.Add(FVector(0.0f, 0.0f, 1.0f));
+			OutMesh.VertexColors.Add(FLinearColor::White);
+			OutMesh.Tangents.Add(FProcMeshTangent(FVector(1.0f, 0.0f, 0.0f), false));
+		}
+
+		// Emit the two cap triangles CCW in XY so they stay front-facing against the +Z normal. The
+		// quad's XY winding depends on the loop's travel direction (outer CCW vs hole CW), so pick the
+		// triangle order from the first triangle's signed area rather than assuming one fixed order.
+		const double SignedArea2x =
+			(OuterTop1.X - OuterTop0.X) * (InnerTop1.Y - OuterTop0.Y) - (InnerTop1.X - OuterTop0.X) * (OuterTop1.Y - OuterTop0.Y);
+		if (SignedArea2x >= 0.0)
+		{
+			// CCW quad (0,1,2,3): split into {0,1,2} and {0,2,3}.
+			OutMesh.Triangles.Append({ Base, Base + 1, Base + 2, Base, Base + 2, Base + 3 });
+		}
+		else
+		{
+			// CW quad: reverse so both triangles are CCW (front-facing up).
+			OutMesh.Triangles.Append({ Base, Base + 2, Base + 1, Base, Base + 3, Base + 2 });
+		}
 	}
 }
 
@@ -665,11 +955,14 @@ bool FOrganicFloorBuilder::BuildFoundationMesh(const FWalkablePolygon& Poly,
 	// Floor cap from the CLOSED polygon (spans doorway openings).
 	TriangulateFloorCap(Poly, FloorHeight, OutMesh);
 
-	// Walls from the (doorway-cut) boundary loops.
+	// Walls from the (doorway-cut) boundary loops. Walls are true-thick: an outer face, an inner face
+	// inset inward by WallThickness, and a top cap bridging the two. Clamp thickness to a small
+	// positive minimum so a zero/negative value can never collapse the inner face onto the outer one.
 	const float SafeWallHeight = FMath::Max(WallHeight, 1.0f);
+	const float SafeWallThickness = FMath::Max(WallThickness, 1.0f);
 	for (const FWalkableBoundaryLoop& Loop : WallLoops)
 	{
-		ExtrudeWallLoop(Loop.Points, Loop.bClosed, FloorHeight, SafeWallHeight, OutMesh);
+		ExtrudeWallLoop(Loop.Points, Loop.bClosed, FloorHeight, SafeWallHeight, SafeWallThickness, OutMesh);
 	}
 
 	const bool bHasGeometry = !OutMesh.Triangles.IsEmpty();

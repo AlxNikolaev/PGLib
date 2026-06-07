@@ -41,7 +41,7 @@ struct PROCEDURALGEOMETRY_API FWalkableRegionContour
  * A single doorway opening in WORLD-space XY: where a wall boundary should be cut
  * open so a corridor connects to a room (or an out-portal).
  *
- * Produced from FOrganicBakedDoorway / FOrganicExitAnchor declarations (transformed
+ * Produced from FOrganicBakedDoorway declarations (transformed
  * to world space) and consumed by FOrganicFloorBuilder when cutting boundary loops:
  * the boundary span nearest Position along the boundary is removed over a Width-wide
  * arc, turning a closed wall ring into an open polyline at the opening.

@@ -122,19 +122,9 @@ void AOrganicDungeon2DVisualizer::OnConstruction(const FTransform& Transform)
 			{
 				RoomColor = FLinearColor(0.05f, 0.9f, 0.1f); // entrance = green
 			}
-			else
+			else if (r == GridData.EndRoomIndex)
 			{
-				// Highlight exit anchor rooms: PortalRoomPrefab anchors in magenta, PortalStub in orange.
-				for (const FOrganicExitAnchor& Anchor : GridData.ExitAnchors)
-				{
-					if (Anchor.RoomIndex == r)
-					{
-						RoomColor = (Anchor.Form == EOrganicTerminusForm::PortalRoomPrefab)
-							? FLinearColor(0.9f, 0.05f, 0.9f)  // magenta = portal-room prefab
-							: FLinearColor(0.9f, 0.5f, 0.05f); // orange = portal stub
-						break;
-					}
-				}
+				RoomColor = FLinearColor(0.9f, 0.05f, 0.05f); // exit room = red
 			}
 			ProcGen_BuildCellMeshSection(
 				GridMeshComponent, DebugMaterial, SectionIndex++, GridData.RoomFootprintCells[r], CS, GridOriginLocal, RoomColor, 1.5f);
@@ -245,16 +235,11 @@ void AOrganicDungeon2DVisualizer::OnConstruction(const FTransform& Transform)
 			DrawDebugPoint(GetWorld(), FVector(Room.Center.X, Room.Center.Y, ActorLoc.Z + 5.0f), 8.0f, FColor::Orange, true);
 		}
 
-		// Exit anchors: draw an outward arrow at each anchor.
-		// PortalRoomPrefab anchors = magenta; PortalStub anchors = orange; fallback stubs are drawn thinner.
-		for (const FOrganicExitAnchor& Anchor : GridData.ExitAnchors)
+		// Exit room: draw a red marker at the single exit room center (graph-diameter far endpoint).
+		if (GridData.Rooms.IsValidIndex(GridData.EndRoomIndex))
 		{
-			const FColor  ArrowColor = (Anchor.Form == EOrganicTerminusForm::PortalRoomPrefab) ? FColor(220, 0, 220)  // magenta = portal-room prefab
-																							   : FColor(220, 140, 0); // orange  = portal stub
-			const float	  Thickness = Anchor.bIsFallbackStub ? 2.0f : 6.0f;
-			const FVector Start(Anchor.Pos.X, Anchor.Pos.Y, ActorLoc.Z + 6.0f);
-			const FVector End = Start + FVector(Anchor.Normal.X, Anchor.Normal.Y, 0.0f) * (CS * 4.0f);
-			DrawDebugDirectionalArrow(GetWorld(), Start, End, CS * 2.0f, ArrowColor, true, -1.f, 0, Thickness);
+			const FOrganicRoom& EndRoom = GridData.Rooms[GridData.EndRoomIndex];
+			DrawDebugPoint(GetWorld(), FVector(EndRoom.Center.X, EndRoom.Center.Y, ActorLoc.Z + 6.0f), 14.0f, FColor::Red, true);
 		}
 	}
 

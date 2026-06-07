@@ -174,7 +174,24 @@ namespace
 		float	  MW = 0.0f;
 		float	  MH = 0.0f;
 		FVector2D MCenter = FVector2D::ZeroVector;
-		if (Type.FootprintOverride.X > 0.0f && Type.FootprintOverride.Y > 0.0f)
+		// Precedence: baked basement marker → FootprintOverride → measured bounds → default.
+		// The marker is the authored intent for the room footprint, so it wins over the manual override.
+		// Its center is applied too, keeping synthesized doorway transforms aligned with the resized footprint.
+		if (Type.bHasBakedMarkerFootprint && Type.BakedMarkerWidth > 0.0f && Type.BakedMarkerHeight > 0.0f)
+		{
+			Out.FootprintWidth = Type.BakedMarkerWidth;
+			Out.FootprintHeight = Type.BakedMarkerHeight;
+			Out.FootprintCenter = Type.BakedMarkerCenter;
+			UE_LOG(LogRoguelikeGeometry,
+				Verbose,
+				TEXT("[ORG] Room type '%s' footprint from basement marker: %.0f x %.0f (center %.0f, %.0f)"),
+				*Out.DisplayName.ToString(),
+				Out.FootprintWidth,
+				Out.FootprintHeight,
+				Out.FootprintCenter.X,
+				Out.FootprintCenter.Y);
+		}
+		else if (Type.FootprintOverride.X > 0.0f && Type.FootprintOverride.Y > 0.0f)
 		{
 			Out.FootprintWidth = Type.FootprintOverride.X;
 			Out.FootprintHeight = Type.FootprintOverride.Y;
@@ -233,12 +250,11 @@ FOrganicDungeonResolvedParams FOrganicDungeonConfig::Resolve() const
 		ResolveRoomFootprint(StartRoom, Params.StartRoom);
 	}
 
-	// Exit terminus: resolve the portal-room prefab (optional). All anchors fall back to PortalStub when null.
-	Params.ExitTerminusForm = DefaultExitTerminusForm;
-	Params.bHasExitPortalRoom = HasRoom(ExitPortalRoom);
-	if (Params.bHasExitPortalRoom)
+	// Special exit room (optional): present if a level is assigned or a footprint override is set.
+	Params.bHasEndRoom = HasRoom(EndRoom);
+	if (Params.bHasEndRoom)
 	{
-		ResolveRoomFootprint(ExitPortalRoom, Params.ExitPortalRoom);
+		ResolveRoomFootprint(EndRoom, Params.EndRoom);
 	}
 
 	Params.MinRoomGap = FMath::Max(0.0f, MinRoomGap);

@@ -91,14 +91,16 @@ struct PROCEDURALGEOMETRY_API FOrganicFloorBuilder
 	 *
 	 * The floor cap is triangulated from the CLOSED union polygon (outer + holes) via
 	 * ConstrainedDelaunay2 so it correctly fills concave regions and spans doorway
-	 * openings.  Walls are extruded from the (doorway-cut) boundary loops using the same
-	 * side-quad recipe as UProceduralMeshFactory::BuildSideGeometry (bottom/top vert
-	 * pairs, side normal = -cross(top-bottom, next-bottom), accumulated-length U UVs), so
-	 * OD walls match Voronoi walls visually.
+	 * openings.  Walls are TRUE-THICK: each boundary loop emits an outer face, an inner
+	 * face inset inward by WallThickness, and a top cap bridging the two.  Both faces use
+	 * the same side-quad recipe as UProceduralMeshFactory::BuildSideGeometry (bottom/top
+	 * vert pairs, side normal = -cross(top-bottom, next-bottom), accumulated-length U UVs),
+	 * so OD walls match Voronoi walls visually.
 	 *
 	 * Top floor surface sits at Z = FloorHeight; walls rise from FloorHeight to
-	 * FloorHeight + WallHeight and are inset inward by WallThickness so they sit on the
-	 * floor cap rather than outside it.
+	 * FloorHeight + WallHeight.  The outer face follows the boundary loop; the inner face
+	 * is WallThickness world units toward the walkable interior, giving the wall real
+	 * thickness with an up-facing top cap.
 	 *
 	 * @param Poly           Closed union polygon (floor cap source).
 	 * @param WallLoops      Doorway-cut boundary loops (wall source); open loops skip their gap.
@@ -120,8 +122,14 @@ private:
 	static void TriangulateFloorCap(const FWalkablePolygon& Poly, float Z, FMeshData& OutMesh);
 
 	/**
-	 * Extrude one boundary loop into wall side-quads from FloorHeight to FloorHeight+WallHeight.
-	 * When bClosed the implicit closing edge (last→first) is also walled.
+	 * Extrude one boundary loop into a TRUE-THICK wall from FloorHeight to FloorHeight+WallHeight.
+	 *
+	 * Emits three connected strips per loop: an OUTER face along the loop, an INNER face along the
+	 * loop inset inward by WallThickness (toward the walkable interior, with reversed normal/winding),
+	 * and a TOP CAP bridging outer-top to inner-top (up-facing).  When bClosed the implicit closing
+	 * edge (last→first) is also walled; open (doorway-cut) loops leave the doorway gap open through the
+	 * full wall thickness (no cap across the gap).
 	 */
-	static void ExtrudeWallLoop(const TArray<FVector2D>& Loop, bool bClosed, float FloorHeight, float WallHeight, FMeshData& OutMesh);
+	static void ExtrudeWallLoop(
+		const TArray<FVector2D>& Loop, bool bClosed, float FloorHeight, float WallHeight, float WallThickness, FMeshData& OutMesh);
 };

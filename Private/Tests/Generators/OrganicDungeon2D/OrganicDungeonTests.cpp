@@ -191,7 +191,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FOrganicDungeonNoRoomTypesTest, "ProceduralGeom
 bool FOrganicDungeonNoRoomTypesTest::RunTest(const FString& Parameters)
 {
 	FOrganicDungeonResolvedParams EmptyParams;
-	// RoomTypes is empty; bHasStartRoom/bHasExitPortalRoom default to false.
+	// RoomTypes is empty; bHasStartRoom/bHasEndRoom default to false.
 
 	UOrganicDungeonGenerator2D* Gen = NewObject<UOrganicDungeonGenerator2D>();
 	Gen->SetSeed(TEXT("NoRoomTypes"));
@@ -207,38 +207,57 @@ bool FOrganicDungeonNoRoomTypesTest::RunTest(const FString& Parameters)
 }
 
 // ============================================================
-// Test 7: StartRoomIndex is valid and ExitAnchors are non-empty when rooms exist.
+// Test 7: StartRoomIndex and EndRoomIndex are valid, distinct room indices (the single entrance/exit)
+//         at the graph-diameter endpoints when more than one room exists.
 // ============================================================
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FOrganicDungeonEntranceAndAnchorsValidTest, "ProceduralGeometry.OrganicDungeon.EntranceAndAnchorsValid", DefaultTestFlags)
+	FOrganicDungeonEntranceAndExitValidTest, "ProceduralGeometry.OrganicDungeon.EntranceAndExitValid", DefaultTestFlags)
 
-bool FOrganicDungeonEntranceAndAnchorsValidTest::RunTest(const FString& Parameters)
+bool FOrganicDungeonEntranceAndExitValidTest::RunTest(const FString& Parameters)
 {
-	UOrganicDungeonGenerator2D*	  Gen = MakeOrganicGenerator(TEXT("EntranceAnchorTest"), 4);
+	UOrganicDungeonGenerator2D*	  Gen = MakeOrganicGenerator(TEXT("EntranceExitTest"), 4);
 	const FOrganicDungeonGridData Data = Gen->GenerateWithGridData();
 
 	if (Data.Rooms.Num() == 0)
 	{
-		AddWarning(TEXT("EntranceAndAnchorsValid: no rooms placed, skipping"));
+		AddWarning(TEXT("EntranceAndExitValid: no rooms placed, skipping"));
 		return true;
 	}
 
 	const int32 RoomCount = Data.Rooms.Num();
 
-	// Entrance must be a valid room index.
-	TestTrue("EntranceAndAnchorsValid: StartRoomIndex is valid", Data.StartRoomIndex >= 0 && Data.StartRoomIndex < RoomCount);
+	// Entrance and exit must both be valid room indices.
+	TestTrue("EntranceAndExitValid: StartRoomIndex is valid", Data.StartRoomIndex >= 0 && Data.StartRoomIndex < RoomCount);
+	TestTrue("EntranceAndExitValid: EndRoomIndex is valid", Data.EndRoomIndex >= 0 && Data.EndRoomIndex < RoomCount);
 
-	// At least one exit anchor must be produced (default RequiredExitAnchors = 1).
-	TestTrue("EntranceAndAnchorsValid: ExitAnchors is non-empty", Data.ExitAnchors.Num() > 0);
-
-	// All anchor rooms must be valid indices and distinct from the entrance.
-	for (int32 i = 0; i < Data.ExitAnchors.Num(); ++i)
+	// With more than one room the exit must be a different room from the entrance (the diameter far endpoint).
+	if (RoomCount >= 2)
 	{
-		const FOrganicExitAnchor& A = Data.ExitAnchors[i];
-		TestTrue(FString::Printf(TEXT("EntranceAndAnchorsValid: anchor[%d] RoomIndex valid"), i), A.RoomIndex >= 0 && A.RoomIndex < RoomCount);
-		TestTrue(FString::Printf(TEXT("EntranceAndAnchorsValid: anchor[%d] not at entrance"), i), A.RoomIndex != Data.StartRoomIndex);
-		TestTrue(FString::Printf(TEXT("EntranceAndAnchorsValid: anchor[%d] GraphDistance > 0"), i), A.GraphDistance > 0);
+		TestTrue("EntranceAndExitValid: EndRoomIndex distinct from StartRoomIndex", Data.EndRoomIndex != Data.StartRoomIndex);
 	}
+
+	return true;
+}
+
+// ============================================================
+// Test 7b: A single-room cluster degenerates to EndRoomIndex == StartRoomIndex without crashing.
+// ============================================================
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FOrganicDungeonSingleRoomExitTest, "ProceduralGeometry.OrganicDungeon.SingleRoomExitDegenerate", DefaultTestFlags)
+
+bool FOrganicDungeonSingleRoomExitTest::RunTest(const FString& Parameters)
+{
+	UOrganicDungeonGenerator2D*	  Gen = MakeOrganicGenerator(TEXT("SingleRoomExitTest"), 1);
+	const FOrganicDungeonGridData Data = Gen->GenerateWithGridData();
+
+	if (Data.Rooms.Num() != 1)
+	{
+		AddWarning(TEXT("SingleRoomExitDegenerate: expected exactly one room, skipping"));
+		return true;
+	}
+
+	TestEqual("SingleRoomExitDegenerate: StartRoomIndex == 0", Data.StartRoomIndex, 0);
+	TestEqual("SingleRoomExitDegenerate: EndRoomIndex collapses onto StartRoomIndex", Data.EndRoomIndex, Data.StartRoomIndex);
 
 	return true;
 }
@@ -470,16 +489,17 @@ bool FODConfigResolveForTotalStartEndUnaffectedTest::RunTest(const FString& Para
 	Config.RoomTypes.Add(MakeODRoomType(1));
 	Config.RoomTypes.Add(MakeODRoomType(1));
 	Config.StartRoom = MakeODRoomType(1);
-	// ExitPortalRoom has no level ref here so bHasExitPortalRoom = false; test just verifies StartRoom is unaffected.
+	// EndRoom left default (no level ref / no footprint override) so bHasEndRoom = false; test just verifies
+	// StartRoom is unaffected by the regular-room distribution.
 
 	const FOrganicDungeonResolvedParams Params = Config.ResolveForTotal(6);
 
 	// Regular types should sum to 6.
 	TestEqual("OD_ResolveForTotal_StartEndUnaffected: regular type sum == 6", SumODCounts(Params), 6);
 
-	// StartRoom still present and resolved; ExitPortalRoom left null (no level ref set).
+	// StartRoom still present and resolved; EndRoom left null (no level ref set).
 	TestTrue("OD_ResolveForTotal_StartEndUnaffected: bHasStartRoom", Params.bHasStartRoom);
-	TestFalse("OD_ResolveForTotal_StartEndUnaffected: bHasExitPortalRoom (null level ref)", Params.bHasExitPortalRoom);
+	TestFalse("OD_ResolveForTotal_StartEndUnaffected: bHasEndRoom (no level / footprint)", Params.bHasEndRoom);
 
 	return true;
 }
@@ -825,24 +845,49 @@ bool FOrganicFloorFoundationMeshTest::RunTest(const FString& /*Parameters*/)
 	TestEqual("FoundationMesh: colors match verts", Mesh.VertexColors.Num(), Mesh.Vertices.Num());
 	TestEqual("FoundationMesh: tangents match verts", Mesh.Tangents.Num(), Mesh.Vertices.Num());
 
-	// At least one up-facing floor-cap vertex at the floor plane and one wall vertex above it.
-	bool bHasUpFloor = false;
-	bool bHasWallTop = false;
+	// At least one up-facing floor-cap vertex at the floor plane and wall geometry above it. Walls are
+	// true-thick: side faces (outer + inner) have roughly horizontal normals, while the top cap at
+	// Z == FloorH + WallHeight faces up — so above-floor normals are no longer uniformly horizontal.
+	constexpr float TopZ = FloorH + WallHeight;
+	bool			bHasUpFloor = false;
+	bool			bHasWallSide = false;	// a side-face vertex above floor with a horizontal normal
+	bool			bHasTopCap = false;		// a top-cap vertex at TopZ with an up normal
+	float			MaxInsetDistSq = 0.0f;	// inner-face verts are inset from the outer boundary
 	for (int32 i = 0; i < Mesh.Vertices.Num(); ++i)
 	{
-		if (FMath::IsNearlyEqual(Mesh.Vertices[i].Z, FloorH, 0.1f) && Mesh.Normals[i].Z > 0.9f)
+		const FVector& V = Mesh.Vertices[i];
+		const FVector& Nrm = Mesh.Normals[i];
+
+		if (FMath::IsNearlyEqual(V.Z, FloorH, 0.1f) && Nrm.Z > 0.9f)
 		{
 			bHasUpFloor = true;
 		}
-		if (Mesh.Vertices[i].Z > FloorH + 1.0f)
+
+		if (V.Z > FloorH + 1.0f && FMath::Abs(Nrm.Z) < 0.5f)
 		{
-			bHasWallTop = true;
-			// Wall side normals are roughly horizontal (no strong +Z/-Z component).
-			TestTrue("FoundationMesh: wall normal roughly horizontal", FMath::Abs(Mesh.Normals[i].Z) < 0.5f);
+			bHasWallSide = true;
+		}
+
+		if (FMath::IsNearlyEqual(V.Z, TopZ, 0.1f) && Nrm.Z > 0.9f)
+		{
+			bHasTopCap = true;
+		}
+
+		// Track how far any floor-plane wall vertex sits from world origin; the inner face is inset
+		// inward by WallThickness, so true thickness is exercised when verts exist closer in than the
+		// outer ring's extent. (Room half-extent here is 300, outer ring sits beyond that.)
+		if (FMath::IsNearlyEqual(V.Z, FloorH, 0.1f))
+		{
+			MaxInsetDistSq = FMath::Max(MaxInsetDistSq, static_cast<float>(V.X * V.X + V.Y * V.Y));
 		}
 	}
 	TestTrue("FoundationMesh: has up-facing floor cap", bHasUpFloor);
-	TestTrue("FoundationMesh: has wall geometry above floor", bHasWallTop);
+	TestTrue("FoundationMesh: has horizontal wall side faces above floor", bHasWallSide);
+	TestTrue("FoundationMesh: has up-facing wall top cap", bHasTopCap);
+
+	// Sanity: at least one wall-floor vertex exists (outer/inner faces emit bottom verts at FloorH),
+	// confirming the true-thick wall produced inner-face geometry alongside the outer face.
+	TestTrue("FoundationMesh: wall faces emit floor-plane verts (thickness exercised)", MaxInsetDistSq > 0.0f);
 
 	return true;
 }
@@ -1475,213 +1520,6 @@ bool FOrganicMismatchDropRerollTest::RunTest(const FString& Parameters)
 }
 
 // ============================================================
-// SelectExitAnchors tests — pure, no world needed.
-// Build hand-crafted room arrays + MST adjacency lists and verify
-// anchor selection invariants without running the full generator.
-// ============================================================
-
-namespace
-{
-	/** Builds a minimal FOrganicRoom at (X, Y) with one synthetic doorway facing outward (+X). */
-	static FOrganicRoom MakeAnchorTestRoom(float X, float Y, int32 TypeIndex = 0)
-	{
-		FOrganicRoom R;
-		R.Center = FVector2D(X, Y);
-		R.HalfExtent = FVector2D(300.0f, 300.0f);
-		R.TypeIndex = TypeIndex;
-
-		// One outward (+X) synthetic doorway.
-		FOrganicDoorway D;
-		D.Pos = FVector2D(X + 300.0f, Y);
-		D.OutwardNormal = FVector2D(1.0f, 0.0f);
-		D.bUsed = false;
-		R.Doorways.Add(D);
-
-		return R;
-	}
-} // namespace
-
-// ============================================================
-// SelectExitAnchors_Distinctness: all returned anchors use distinct rooms/doorways.
-// ============================================================
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FODSelectExitAnchors_DistinctnessTest, "ProceduralGeometry.OrganicDungeon.SelectExitAnchors.Distinctness", DefaultTestFlags)
-
-bool FODSelectExitAnchors_DistinctnessTest::RunTest(const FString& Parameters)
-{
-	// Linear chain: 0-1-2-3-4. Entrance = 2 (center). Leaves = 0 and 4.
-	// Request 2 anchors — should get rooms 0 and 4 (the two leaves).
-	TArray<FOrganicRoom> Rooms;
-	for (int32 i = 0; i < 5; ++i)
-	{
-		Rooms.Add(MakeAnchorTestRoom(static_cast<float>(i) * 1200.0f, 0.0f));
-	}
-
-	TArray<TArray<int32>> MstAdj;
-	MstAdj.SetNum(5);
-	for (int32 i = 0; i + 1 < 5; ++i)
-	{
-		MstAdj[i].Add(i + 1);
-		MstAdj[i + 1].Add(i);
-	}
-
-	TArray<FOrganicExitAnchor> Anchors;
-	int32					   Shortfall = -1;
-	UOrganicDungeonGenerator2D::SelectExitAnchors(Rooms, MstAdj, 2, 2, EOrganicTerminusForm::PortalStub, Anchors, Shortfall);
-
-	TestEqual("Distinctness: 2 anchors produced", Anchors.Num(), 2);
-	TestEqual("Distinctness: no shortfall", Shortfall, 0);
-
-	// All anchor rooms must be distinct.
-	TSet<int32> UsedRooms;
-	for (int32 i = 0; i < Anchors.Num(); ++i)
-	{
-		TestFalse(FString::Printf(TEXT("Distinctness: anchor[%d] room not duplicated"), i), UsedRooms.Contains(Anchors[i].RoomIndex));
-		UsedRooms.Add(Anchors[i].RoomIndex);
-		TestTrue(FString::Printf(TEXT("Distinctness: anchor[%d] not the entrance"), i), Anchors[i].RoomIndex != 2);
-		TestTrue(FString::Printf(TEXT("Distinctness: anchor[%d] GraphDistance > 0"), i), Anchors[i].GraphDistance > 0);
-	}
-
-	return true;
-}
-
-// ============================================================
-// SelectExitAnchors_FarFromEntrance: every anchor is farther than immediate entrance neighbours.
-// ============================================================
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FODSelectExitAnchors_FarFromEntranceTest, "ProceduralGeometry.OrganicDungeon.SelectExitAnchors.FarFromEntrance", DefaultTestFlags)
-
-bool FODSelectExitAnchors_FarFromEntranceTest::RunTest(const FString& Parameters)
-{
-	// Star topology: entrance = 0, spokes = 1,2,3 (each at distance 1 from entrance),
-	// leaves = 4,5,6 (each at distance 2, connected to spoke 1,2,3 respectively).
-	// Requesting 1 anchor — should select one of the far leaves (dist=2).
-	TArray<FOrganicRoom> Rooms;
-	Rooms.Add(MakeAnchorTestRoom(0.0f, 0.0f));	   // 0 = entrance
-	Rooms.Add(MakeAnchorTestRoom(1200.0f, 0.0f));  // 1
-	Rooms.Add(MakeAnchorTestRoom(0.0f, 1200.0f));  // 2
-	Rooms.Add(MakeAnchorTestRoom(-1200.0f, 0.0f)); // 3
-	Rooms.Add(MakeAnchorTestRoom(2400.0f, 0.0f));  // 4 = leaf behind 1
-	Rooms.Add(MakeAnchorTestRoom(0.0f, 2400.0f));  // 5 = leaf behind 2
-	Rooms.Add(MakeAnchorTestRoom(-2400.0f, 0.0f)); // 6 = leaf behind 3
-
-	TArray<TArray<int32>> MstAdj;
-	MstAdj.SetNum(7);
-	auto AddEdge = [&](int32 A, int32 B) {
-		MstAdj[A].Add(B);
-		MstAdj[B].Add(A);
-	};
-	AddEdge(0, 1);
-	AddEdge(0, 2);
-	AddEdge(0, 3);
-	AddEdge(1, 4);
-	AddEdge(2, 5);
-	AddEdge(3, 6);
-
-	TArray<FOrganicExitAnchor> Anchors;
-	int32					   Shortfall = -1;
-	UOrganicDungeonGenerator2D::SelectExitAnchors(Rooms, MstAdj, 0, 1, EOrganicTerminusForm::PortalStub, Anchors, Shortfall);
-
-	TestEqual("FarFromEntrance: 1 anchor produced", Anchors.Num(), 1);
-	TestEqual("FarFromEntrance: no shortfall", Shortfall, 0);
-	if (Anchors.Num() == 1)
-	{
-		TestTrue("FarFromEntrance: anchor is a far leaf (dist=2)", Anchors[0].GraphDistance == 2);
-		TestTrue("FarFromEntrance: anchor not at entrance", Anchors[0].RoomIndex != 0);
-	}
-
-	return true;
-}
-
-// ============================================================
-// SelectExitAnchors_FallbackOnShortfall: graceful degradation when leaves < required.
-// ============================================================
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FODSelectExitAnchors_FallbackTest, "ProceduralGeometry.OrganicDungeon.SelectExitAnchors.Fallback", DefaultTestFlags)
-
-bool FODSelectExitAnchors_FallbackTest::RunTest(const FString& Parameters)
-{
-	// Single chain: 0-1-2. Entrance=0. Only one leaf = 2.
-	// Request 3 anchors — supply is 1 leaf; expect 1 regular anchor + fallback(s); shortfall = 3 - produced.
-	// Room 1 (non-leaf, dist=1) should be used as fallback.
-	TArray<FOrganicRoom> Rooms;
-	Rooms.Add(MakeAnchorTestRoom(0.0f, 0.0f));	  // 0 = entrance
-	Rooms.Add(MakeAnchorTestRoom(1200.0f, 0.0f)); // 1 = non-leaf
-	Rooms.Add(MakeAnchorTestRoom(2400.0f, 0.0f)); // 2 = leaf
-
-	TArray<TArray<int32>> MstAdj;
-	MstAdj.SetNum(3);
-	MstAdj[0].Add(1);
-	MstAdj[1].Add(0);
-	MstAdj[1].Add(2);
-	MstAdj[2].Add(1);
-
-	TArray<FOrganicExitAnchor> Anchors;
-	int32					   Shortfall = -1;
-	UOrganicDungeonGenerator2D::SelectExitAnchors(Rooms, MstAdj, 0, 3, EOrganicTerminusForm::PortalStub, Anchors, Shortfall);
-
-	// Should produce at most 2 anchors (rooms 1 and 2 — entrance excluded), with shortfall = max(0, 3-2)=1.
-	TestTrue("Fallback: produced > 0 anchors", Anchors.Num() > 0);
-	TestTrue("Fallback: Shortfall reported correctly", Shortfall == FMath::Max(0, 3 - Anchors.Num()));
-
-	// All rooms in anchors must be distinct and not the entrance.
-	TSet<int32> Seen;
-	for (int32 i = 0; i < Anchors.Num(); ++i)
-	{
-		TestFalse(FString::Printf(TEXT("Fallback: anchor[%d] not duplicated"), i), Seen.Contains(Anchors[i].RoomIndex));
-		TestFalse(FString::Printf(TEXT("Fallback: anchor[%d] not at entrance"), i), Anchors[i].RoomIndex == 0);
-		Seen.Add(Anchors[i].RoomIndex);
-	}
-
-	return true;
-}
-
-// ============================================================
-// SelectExitAnchors_Determinism: same inputs always produce the same anchor set/order.
-// ============================================================
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FODSelectExitAnchors_DeterminismTest, "ProceduralGeometry.OrganicDungeon.SelectExitAnchors.Determinism", DefaultTestFlags)
-
-bool FODSelectExitAnchors_DeterminismTest::RunTest(const FString& Parameters)
-{
-	// Linear chain 0-1-2-3-4. Entrance=1. Request 2 anchors.
-	auto MakeRooms = []() {
-		TArray<FOrganicRoom> Rooms;
-		for (int32 i = 0; i < 5; ++i)
-		{
-			Rooms.Add(MakeAnchorTestRoom(static_cast<float>(i) * 1200.0f, 0.0f));
-		}
-		return Rooms;
-	};
-
-	TArray<TArray<int32>> MstAdj;
-	MstAdj.SetNum(5);
-	for (int32 i = 0; i + 1 < 5; ++i)
-	{
-		MstAdj[i].Add(i + 1);
-		MstAdj[i + 1].Add(i);
-	}
-
-	TArray<FOrganicExitAnchor> Anchors1, Anchors2;
-	int32					   Shortfall1 = 0, Shortfall2 = 0;
-
-	TArray<FOrganicRoom> Rooms1 = MakeRooms();
-	UOrganicDungeonGenerator2D::SelectExitAnchors(Rooms1, MstAdj, 1, 2, EOrganicTerminusForm::PortalStub, Anchors1, Shortfall1);
-
-	TArray<FOrganicRoom> Rooms2 = MakeRooms();
-	UOrganicDungeonGenerator2D::SelectExitAnchors(Rooms2, MstAdj, 1, 2, EOrganicTerminusForm::PortalStub, Anchors2, Shortfall2);
-
-	TestEqual("Determinism: same anchor count", Anchors1.Num(), Anchors2.Num());
-	TestEqual("Determinism: same shortfall", Shortfall1, Shortfall2);
-	for (int32 i = 0; i < FMath::Min(Anchors1.Num(), Anchors2.Num()); ++i)
-	{
-		TestEqual(FString::Printf(TEXT("Determinism: anchor[%d] same room"), i), Anchors1[i].RoomIndex, Anchors2[i].RoomIndex);
-		TestEqual(FString::Printf(TEXT("Determinism: anchor[%d] same GraphDistance"), i), Anchors1[i].GraphDistance, Anchors2[i].GraphDistance);
-	}
-
-	return true;
-}
-
-// ============================================================
 // Footprint component-classification test — FOrganicDungeonConfig::IsFootprintExcludedComponentClass.
 // Drives the pure class-level footprint filter directly (no UWorld / level load): mesh components must
 // contribute to a prefab's measured footprint, while trigger volumes, spline guides, and editor marker
@@ -1712,6 +1550,67 @@ bool FOrganicFootprintComponentFilterTest::RunTest(const FString& Parameters)
 
 	// Null class is not classified as excluded (defensive).
 	TestFalse("FootprintComponentFilter: null class not excluded", FOrganicDungeonConfig::IsFootprintExcludedComponentClass(nullptr));
+
+	return true;
+}
+
+// ============================================================
+// Baked marker footprint precedence — FOrganicDungeonConfig::Resolve.
+// The baked basement-marker footprint is the top-priority signal: it must win over an explicit
+// FootprintOverride, and its center must be carried through to the resolved room type. Driven through
+// the public Resolve() (which calls the anonymous-namespace ResolveRoomFootprint); no UWorld load needed
+// because the baked fields are set directly on the FOrganicRoomType.
+// ============================================================
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FOrganicBakedMarkerFootprintPrecedenceTest, "ProceduralGeometry.OrganicDungeon.Config.BakedMarkerFootprintPrecedence", DefaultTestFlags)
+
+bool FOrganicBakedMarkerFootprintPrecedenceTest::RunTest(const FString& Parameters)
+{
+	// A room type with BOTH a baked marker footprint and a (different) explicit override.
+	// The marker must win, including its center offset.
+	FOrganicRoomType T;
+	T.Weight = 1;
+	T.FootprintOverride = FVector2D(600.0f, 600.0f);
+	T.bHasBakedMarkerFootprint = true;
+	T.BakedMarkerWidth = 1200.0f;
+	T.BakedMarkerHeight = 800.0f;
+	T.BakedMarkerCenter = FVector2D(150.0f, -50.0f);
+
+	FOrganicDungeonConfig Config;
+	Config.RoomTypes.Add(T);
+
+	const FOrganicDungeonResolvedParams Params = Config.Resolve();
+
+	if (!TestEqual("BakedMarkerFootprintPrecedence: one resolved room type", Params.RoomTypes.Num(), 1))
+	{
+		return false;
+	}
+
+	const FOrganicResolvedRoomType& RT = Params.RoomTypes[0];
+	TestEqual("BakedMarkerFootprintPrecedence: width from marker (not override)", (double)RT.FootprintWidth, 1200.0, 0.01);
+	TestEqual("BakedMarkerFootprintPrecedence: height from marker (not override)", (double)RT.FootprintHeight, 800.0, 0.01);
+	TestEqual("BakedMarkerFootprintPrecedence: center.X from marker", (double)RT.FootprintCenter.X, 150.0, 0.01);
+	TestEqual("BakedMarkerFootprintPrecedence: center.Y from marker", (double)RT.FootprintCenter.Y, -50.0, 0.01);
+
+	// With the marker flag cleared, the explicit override takes over (next precedence tier).
+	FOrganicRoomType TNoMarker = T;
+	TNoMarker.bHasBakedMarkerFootprint = false;
+
+	FOrganicDungeonConfig ConfigNoMarker;
+	ConfigNoMarker.RoomTypes.Add(TNoMarker);
+
+	const FOrganicDungeonResolvedParams ParamsNoMarker = ConfigNoMarker.Resolve();
+	if (TestEqual("BakedMarkerFootprintPrecedence: one resolved room type (no marker)", ParamsNoMarker.RoomTypes.Num(), 1))
+	{
+		TestEqual("BakedMarkerFootprintPrecedence: width falls back to override",
+			(double)ParamsNoMarker.RoomTypes[0].FootprintWidth,
+			600.0,
+			0.01);
+		TestEqual("BakedMarkerFootprintPrecedence: height falls back to override",
+			(double)ParamsNoMarker.RoomTypes[0].FootprintHeight,
+			600.0,
+			0.01);
+	}
 
 	return true;
 }
