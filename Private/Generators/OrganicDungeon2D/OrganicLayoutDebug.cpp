@@ -51,11 +51,150 @@ namespace OrganicLayoutDebugImpl
 				Add(Pt);
 			}
 		}
+		for (const FOrganicJunction& J : Grid.Junctions)
+		{
+			Add(J.Center + FVector2D(J.Radius, J.Radius));
+			Add(J.Center - FVector2D(J.Radius, J.Radius));
+		}
 		if (OutMin.X > OutMax.X) // empty layout
 		{
 			OutMin = FVector2D::ZeroVector;
 			OutMax = FVector2D(1.0f, 1.0f);
 		}
+	}
+
+	// True if a point lies inside (or on) a convex quad given in CCW order. Used to detect a corridor sample
+	// that starts/ends inside a room body (a crossing the segment test alone could miss for very short spans).
+	bool PointInQuad(const FVector2D& P, const FVector2D Quad[4])
+	{
+		for (int32 i = 0; i < 4; ++i)
+		{
+			const FVector2D A = Quad[i];
+			const FVector2D B = Quad[(i + 1) % 4];
+			const FVector2D Edge = B - A;
+			const FVector2D ToP = P - A;
+			// CCW quad: an interior point is to the left of (or on) every directed edge.
+			if (Edge.X * ToP.Y - Edge.Y * ToP.X < -1.0f) // small slack so on-edge doorway points are not "inside"
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
+	// True if segment [P0,P1] intersects segment [P2,P3] (proper or touching).
+	bool SegmentsIntersect(const FVector2D& P0, const FVector2D& P1, const FVector2D& P2, const FVector2D& P3)
+	{
+		auto			Cross = [](const FVector2D& A, const FVector2D& B) { return A.X * B.Y - A.Y * B.X; };
+		const FVector2D R = P1 - P0;
+		const FVector2D S = P3 - P2;
+		const float		Denom = Cross(R, S);
+		const FVector2D QP = P2 - P0;
+		if (FMath::IsNearlyZero(Denom)) // parallel — treat as non-crossing (collinear overlap is rare and not a body crossing)
+		{
+			return false;
+		}
+		const float T = Cross(QP, S) / Denom;
+		const float U = Cross(QP, R) / Denom;
+		return T >= 0.0f && T <= 1.0f && U >= 0.0f && U <= 1.0f;
+	}
+
+	// True if a corridor centerline segment [P0,P1] genuinely passes through a room body (OBB Quad). A shallow
+	// doorway-approach touch is excluded by requiring an actual interior crossing: either an endpoint sits inside
+	// the quad, or the segment crosses two of its edges (enter + exit) rather than merely grazing one.
+	bool SegmentCrossesRoomBody(const FVector2D& P0, const FVector2D& P1, const FVector2D Quad[4])
+	{
+		if (PointInQuad(P0, Quad) || PointInQuad(P1, Quad))
+		{
+			return true;
+		}
+		int32 Hits = 0;
+		for (int32 e = 0; e < 4; ++e)
+		{
+			if (SegmentsIntersect(P0, P1, Quad[e], Quad[(e + 1) % 4]))
+			{
+				++Hits;
+			}
+		}
+		// A segment that merely grazes one edge near a doorway touches once; a genuine body crossing enters and
+		// exits (two edge hits). Require >=2 so doorway-approach spans are not over-reported.
+		return Hits >= 2;
+	}
+
+	// Builds an SVG path ("M..C..") that smooths a polyline with a Catmull-Rom spline converted to cubic
+	// Beziers, so the few-point stored centerline renders as the visible curve. ToCanvas maps a world point to
+	// canvas space. For < 3 points it falls back to a straight "M L" path. Pure string building.
+	FString CatmullRomSvgPath(const TArray<FVector2D>& Pts, const TFunctionRef<FVector2D(const FVector2D&)>& ToCanvas)
+	{
+		if (Pts.Num() < 2)
+		{
+			return FString();
+		}
+		auto Canvas = [&](int32 i) {
+			const int32 Clamped = FMath::Clamp(i, 0, Pts.Num() - 1);
+			return ToCanvas(Pts[Clamped]);
+		};
+		const FVector2D P0 = Canvas(0);
+		FString			Path = FString::Printf(TEXT("M %.0f %.0f "), P0.X, P0.Y);
+		if (Pts.Num() == 2)
+		{
+			const FVector2D P1 = Canvas(1);
+			Path += FString::Printf(TEXT("L %.0f %.0f"), P1.X, P1.Y);
+			return Path;
+		}
+		// Catmull-Rom -> cubic Bezier control points (tension 0.5) per segment.
+		for (int32 i = 0; i + 1 < Pts.Num(); ++i)
+		{
+			const FVector2D Pm1 = Canvas(i - 1);
+			const FVector2D Pc = Canvas(i);
+			const FVector2D Pn = Canvas(i + 1);
+			const FVector2D Pn2 = Canvas(i + 2);
+			const FVector2D C1 = Pc + (Pn - Pm1) / 6.0f;
+			const FVector2D C2 = Pn - (Pn2 - Pc) / 6.0f;
+			Path += FString::Printf(TEXT("C %.0f %.0f %.0f %.0f %.0f %.0f "), C1.X, C1.Y, C2.X, C2.Y, Pn.X, Pn.Y);
+		}
+		return Path;
+	}
+
+	// Counts corridor centerline segments that cross a room body that is NOT one of that corridor's own Room
+	// anchors. Invariant: corridors never cross a room body (must be 0). Corridor-corridor overlap and junction
+	// pass-through are legal and not counted (only ROOM bodies are obstacles).
+	int32 CountCorridorRoomCrossings(const FOrganicDungeonGridData& Grid)
+	{
+		// Precompute room OBB corners once.
+		TArray<TArray<FVector2D>> RoomQuads;
+		RoomQuads.SetNum(Grid.Rooms.Num());
+		for (int32 r = 0; r < Grid.Rooms.Num(); ++r)
+		{
+			FVector2D Corners[4];
+			RoomCorners(Grid.Rooms[r], Corners);
+			RoomQuads[r] = { Corners[0], Corners[1], Corners[2], Corners[3] };
+		}
+
+		int32 Crossings = 0;
+		for (const FOrganicCorridor& Cor : Grid.Corridors)
+		{
+			const int32 AnchorRoomA = (Cor.AnchorA.Type == EOrganicAnchorType::Room) ? Cor.AnchorA.Index : INDEX_NONE;
+			const int32 AnchorRoomB = (Cor.AnchorB.Type == EOrganicAnchorType::Room) ? Cor.AnchorB.Index : INDEX_NONE;
+			for (int32 s = 0; s + 1 < Cor.Centerline.Num(); ++s)
+			{
+				const FVector2D& P0 = Cor.Centerline[s];
+				const FVector2D& P1 = Cor.Centerline[s + 1];
+				for (int32 r = 0; r < RoomQuads.Num(); ++r)
+				{
+					if (r == AnchorRoomA || r == AnchorRoomB)
+					{
+						continue; // a corridor legitimately enters its own endpoint rooms' doorways
+					}
+					if (SegmentCrossesRoomBody(P0, P1, RoomQuads[r].GetData()))
+					{
+						++Crossings;
+						break; // one crossing per segment is enough to flag it
+					}
+				}
+			}
+		}
+		return Crossings;
 	}
 } // namespace OrganicLayoutDebugImpl
 
@@ -71,14 +210,60 @@ FString FOrganicLayoutDebug::ToText(const FOrganicDungeonGridData& Grid)
 		LinkN += Cor.bIsLink ? 1 : 0;
 	}
 
+	// Achieved dead-ends = corridors with a Free-anchor endpoint (open alcove stubs).
+	int32 DeadEndN = 0;
+	for (const FOrganicCorridor& Cor : Grid.Corridors)
+	{
+		if (Cor.AnchorA.Type == EOrganicAnchorType::Free || Cor.AnchorB.Type == EOrganicAnchorType::Free)
+		{
+			++DeadEndN;
+		}
+	}
+
+	const int32 Crossings = CountCorridorRoomCrossings(Grid);
+
 	FString Out;
-	Out += TEXT("# OD layout dump v1\n");
+	Out += TEXT("# OD layout dump v2\n");
 	Out += FString::Printf(
 		TEXT("GRID %d %d %.1f %.1f %.1f\n"), Grid.GridWidth, Grid.GridHeight, Grid.CellSize, Grid.GridOriginWorld.X, Grid.GridOriginWorld.Y);
 	Out += FString::Printf(TEXT("START %d\n"), Grid.StartRoomIndex);
 	Out += FString::Printf(TEXT("END %d\n"), Grid.EndRoomIndex);
-	Out += FString::Printf(
-		TEXT("STATS rooms=%d corridors=%d spine=%d loops=%d links=%d\n"), Grid.Rooms.Num(), Grid.Corridors.Num(), SpineN, LoopN, LinkN);
+	Out += FString::Printf(TEXT("STATS rooms=%d corridors=%d junctions=%d spine=%d loops=%d links=%d deadEnds=%d\n"),
+		Grid.Rooms.Num(),
+		Grid.Corridors.Num(),
+		Grid.Junctions.Num(),
+		SpineN,
+		LoopN,
+		LinkN,
+		DeadEndN);
+
+	// VALID: achieved-vs-requested for each constraint plus the hard invariant crossings (must be 0). ok=1 only
+	// when every requested count was met (best-effort: a shortfall is logged by the generator, never a failure)
+	// AND no corridor crosses a room body. Format is one stable line so the e2e loop can grep regressions.
+	const int32 ReqRooms = Grid.RequestedRoomCount;
+	const int32 ReqLoops = Grid.RequestedLoopCount;
+	const int32 ReqLinks = Grid.RequestedLinkCount;
+	const int32 ReqDeadEnds = Grid.RequestedDeadEndCount;
+	const int32 ReqJunctions = Grid.RequestedJunctionCount;
+	const bool	bRoomsOk = Grid.Rooms.Num() >= ReqRooms;
+	const bool	bLoopsOk = LoopN >= ReqLoops;
+	const bool	bLinksOk = LinkN >= ReqLinks;
+	const bool	bDeadEndsOk = DeadEndN >= ReqDeadEnds;
+	const bool	bJunctionsOk = Grid.Junctions.Num() >= ReqJunctions;
+	const bool	bOk = bRoomsOk && bLoopsOk && bLinksOk && bDeadEndsOk && bJunctionsOk && Crossings == 0;
+	Out += FString::Printf(TEXT("VALID ok=%d rooms=%d/%d loops=%d/%d links=%d/%d deadEnds=%d/%d junctions=%d/%d crossings=%d\n"),
+		bOk ? 1 : 0,
+		Grid.Rooms.Num(),
+		ReqRooms,
+		LoopN,
+		ReqLoops,
+		LinkN,
+		ReqLinks,
+		DeadEndN,
+		ReqDeadEnds,
+		Grid.Junctions.Num(),
+		ReqJunctions,
+		Crossings);
 
 	for (int32 i = 0; i < Grid.Rooms.Num(); ++i)
 	{
@@ -107,6 +292,7 @@ FString FOrganicLayoutDebug::ToText(const FOrganicDungeonGridData& Grid)
 		}
 	}
 
+	// aType/bType are EOrganicAnchorType: 0=Room 1=Corridor 2=Free 3=Junction (Junction index -> JUNC lines below).
 	for (int32 i = 0; i < Grid.Corridors.Num(); ++i)
 	{
 		const FOrganicCorridor& Cor = Grid.Corridors[i];
@@ -122,6 +308,17 @@ FString FOrganicLayoutDebug::ToText(const FOrganicDungeonGridData& Grid)
 		{
 			const float R = Cor.Radii.IsValidIndex(p) ? Cor.Radii[p] : 0.0f;
 			Out += FString::Printf(TEXT("PT %d %d %.1f %.1f %.1f\n"), i, p, Cor.Centerline[p].X, Cor.Centerline[p].Y, R);
+		}
+	}
+
+	for (int32 i = 0; i < Grid.Junctions.Num(); ++i)
+	{
+		const FOrganicJunction& J = Grid.Junctions[i];
+		Out += FString::Printf(
+			TEXT("JUNC %d center=%.1f,%.1f radius=%.1f npts=%d loc=%d\n"), i, J.Center.X, J.Center.Y, J.Radius, J.Perimeter.Num(), J.LocationIndex);
+		for (int32 p = 0; p < J.Perimeter.Num(); ++p)
+		{
+			Out += FString::Printf(TEXT("JPT %d %d %.1f %.1f\n"), i, p, J.Perimeter[p].X, J.Perimeter[p].Y);
 		}
 	}
 
@@ -158,18 +355,39 @@ FString FOrganicLayoutDebug::ToSvg(const FOrganicDungeonGridData& Grid)
 		}
 		const TCHAR* Color = Cor.bIsLink ? TEXT("#4fa3ff") : (Cor.bIsLoop ? TEXT("#37c837") : (Cor.bIsSpine ? TEXT("#ff9d2e") : TEXT("#888")));
 		const float	 AvgR = Cor.Radii.Num() > 0 ? Cor.Radii[0] : Stroke;
-		FString		 Pts;
-		for (const FVector2D& P : Cor.Centerline)
-		{
-			Pts += FString::Printf(TEXT("%.0f,%.0f "), X(P.X), Y(P.Y));
-		}
-		Svg += FString::Printf(TEXT("<polyline points=\"%s\" fill=\"none\" stroke=\"%s\" stroke-width=\"%.0f\" stroke-opacity=\"0.5\" "
+		// Smoothed (Catmull-Rom) path so few-point wavy centerlines render as the visible curve, not a polyline.
+		const FString Path = CatmullRomSvgPath(Cor.Centerline, [&](const FVector2D& P) { return FVector2D(X(P.X), Y(P.Y)); });
+		Svg += FString::Printf(TEXT("<path d=\"%s\" fill=\"none\" stroke=\"%s\" stroke-width=\"%.0f\" stroke-opacity=\"0.5\" "
 									"stroke-linecap=\"round\" stroke-linejoin=\"round\"/>\n"),
-			*Pts,
+			*Path,
 			Color,
 			FMath::Max(Stroke, AvgR * 2.0f));
 		// Centerline overlay (thin) so the route is visible inside the width band.
-		Svg += FString::Printf(TEXT("<polyline points=\"%s\" fill=\"none\" stroke=\"%s\" stroke-width=\"%.0f\"/>\n"), *Pts, Color, Stroke);
+		Svg += FString::Printf(TEXT("<path d=\"%s\" fill=\"none\" stroke=\"%s\" stroke-width=\"%.0f\"/>\n"), *Path, Color, Stroke);
+	}
+
+	// Junctions (over corridors, under rooms): deformed-circle hubs. MakeJunction always builds a 16-vertex
+	// perimeter, so a junction is always drawn as a polygon (the radius-only circle fallback was dead code,
+	// and its unscaled r attribute was inconsistent with the X()/Y() world->canvas transform).
+	for (int32 j = 0; j < Grid.Junctions.Num(); ++j)
+	{
+		const FOrganicJunction& J = Grid.Junctions[j];
+		if (J.Perimeter.Num() < 3)
+		{
+			continue;
+		}
+		FString Pts;
+		for (const FVector2D& P : J.Perimeter)
+		{
+			Pts += FString::Printf(TEXT("%.0f,%.0f "), X(P.X), Y(P.Y));
+		}
+		Svg += FString::Printf(
+			TEXT("<polygon points=\"%s\" fill=\"#9b59b6\" fill-opacity=\"0.6\" stroke=\"#d2a8e8\" stroke-width=\"%.0f\"/>\n"), *Pts, Stroke);
+		Svg += FString::Printf(TEXT("<text x=\"%.0f\" y=\"%.0f\" fill=\"#e8d2f5\" font-size=\"%.0f\" text-anchor=\"middle\">J%d</text>\n"),
+			X(J.Center.X),
+			Y(J.Center.Y),
+			FMath::Max(100.0f, Stroke * 14.0f),
+			j);
 	}
 
 	// Rooms.

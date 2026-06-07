@@ -208,6 +208,7 @@ struct PROCEDURALGEOMETRY_API FOrganicDungeonResolvedParams
 	float				  MinThickness = 100.0f;
 	float				  MaxWidth = 300.0f;
 	float				  Waviness = 0.4f;
+	int32				  WavinessControlPoints = 0;
 	float				  CorridorLengthMin = 400.0f;
 	float				  CorridorLengthMax = 1200.0f;
 
@@ -219,6 +220,7 @@ struct PROCEDURALGEOMETRY_API FOrganicDungeonResolvedParams
 	float DeadEndLength = 500.0f;
 	int32 CorridorLinkCount = 0;
 	float LinkMaxDistance = 1200.0f;
+	int32 JunctionCount = 0; // free deformed-circle junction nodes that tap extra connectivity beyond room doorways
 
 	// Realization (note: rasterization grid cell size is an actor-level setting, not per-location)
 	int32 WallThickness = 1;
@@ -316,6 +318,13 @@ struct PROCEDURALGEOMETRY_API FOrganicDungeonConfig
 	UPROPERTY(EditAnywhere,
 		BlueprintReadWrite,
 		Category = "Organic Dungeon|Corridors",
+		meta = (ClampMin = 0,
+			ToolTip = "Number of intermediate control points on a corridor's wavy curve (0 = straight 2-point, 1 = single C bow, 2 = S, ...)."))
+	int32 WavinessControlPoints = 0;
+
+	UPROPERTY(EditAnywhere,
+		BlueprintReadWrite,
+		Category = "Organic Dungeon|Corridors",
 		meta = (ClampMin = 1.0, ToolTip = "Minimum corridor length between rooms, world units."))
 	float CorridorLengthMin = 400.0f;
 
@@ -370,6 +379,14 @@ struct PROCEDURALGEOMETRY_API FOrganicDungeonConfig
 		Category = "Organic Dungeon|Topology",
 		meta = (ClampMin = 1.0, ToolTip = "Maximum length of a corridor-link branch, world units."))
 	float LinkMaxDistance = 1200.0f;
+
+	UPROPERTY(EditAnywhere,
+		BlueprintReadWrite,
+		Category = "Organic Dungeon|Topology",
+		meta = (ClampMin = 0,
+			ToolTip =
+				"Number of free junction nodes (deformed circles) to add. Each junction taps extra connectivity into the network beyond room doorway budgets."))
+	int32 JunctionCount = 0;
 
 	// --- Realization ---
 	// NOTE: the rasterization grid cell size is configured on the GeneratedLevelActor (OrganicGridCellSize),

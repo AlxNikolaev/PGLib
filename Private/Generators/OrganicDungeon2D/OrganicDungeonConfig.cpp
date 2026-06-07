@@ -267,6 +267,7 @@ FOrganicDungeonResolvedParams FOrganicDungeonConfig::Resolve() const
 	Params.MinThickness = FMath::Max(1.0f, MinThickness);
 	Params.MaxWidth = FMath::Max(Params.MinThickness, MaxWidth);
 	Params.Waviness = FMath::Clamp(Waviness, 0.0f, 1.0f);
+	Params.WavinessControlPoints = FMath::Max(0, WavinessControlPoints);
 	Params.CorridorLengthMin = FMath::Max(1.0f, CorridorLengthMin);
 	Params.CorridorLengthMax = FMath::Max(Params.CorridorLengthMin, CorridorLengthMax);
 
@@ -277,6 +278,7 @@ FOrganicDungeonResolvedParams FOrganicDungeonConfig::Resolve() const
 	Params.DeadEndLength = FMath::Max(1.0f, DeadEndLength);
 	Params.CorridorLinkCount = FMath::Max(0, CorridorLinkCount);
 	Params.LinkMaxDistance = FMath::Max(1.0f, LinkMaxDistance);
+	Params.JunctionCount = FMath::Max(0, JunctionCount);
 
 	Params.WallThickness = FMath::Max(1, WallThickness);
 	Params.bSmoothCorridors = bSmoothCorridors;
