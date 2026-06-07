@@ -243,7 +243,8 @@ struct PROCEDURALGEOMETRY_API FOrganicDungeonConfig
 	UPROPERTY(EditAnywhere,
 		BlueprintReadWrite,
 		Category = "Organic Dungeon|Rooms",
-		meta = (ToolTip = "Optional entrance prefab, placed at the graph-diameter start endpoint. The cluster's single entrance portal is placed at this prefab's PortalTransitionMarker."))
+		meta = (ToolTip =
+					"Optional entrance prefab, placed at the graph-diameter start endpoint. The cluster's single entrance portal is placed at this prefab's PortalTransitionMarker."))
 	FOrganicRoomType StartRoom;
 
 	/**
@@ -254,7 +255,8 @@ struct PROCEDURALGEOMETRY_API FOrganicDungeonConfig
 	UPROPERTY(EditAnywhere,
 		BlueprintReadWrite,
 		Category = "Organic Dungeon|Rooms",
-		meta = (ToolTip = "Optional exit prefab, placed at the graph-diameter far endpoint. The cluster's single exit portal is placed at this prefab's PortalTransitionMarker."))
+		meta = (ToolTip =
+					"Optional exit prefab, placed at the graph-diameter far endpoint. The cluster's single exit portal is placed at this prefab's PortalTransitionMarker."))
 	FOrganicRoomType EndRoom;
 
 	UPROPERTY(EditAnywhere,

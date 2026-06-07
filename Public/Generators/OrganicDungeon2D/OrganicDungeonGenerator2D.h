@@ -3,7 +3,6 @@
 #include "CoreMinimal.h"
 #include "Generators/LayoutGenerator.h"
 #include "Generators/OrganicDungeon2D/OrganicDungeonConfig.h"
-#include "Generators/OrganicDungeon2D/OrganicFloorTypes.h"
 #include "OrganicDungeonGenerator2D.generated.h"
 
 /** Cell type constants for OrganicDungeon grid cells. */
@@ -121,25 +120,6 @@ struct PROCEDURALGEOMETRY_API FOrganicDungeonGridData
 	TArray<int32> LocationStartRoomIndex;
 
 	FLayoutDiagram2D Diagram; // full floor (rooms + corridors)
-
-	// ---- Floor/wall boundary data (populated by FOrganicFloorBuilder::BuildVectorContour) ----
-
-	/**
-	 * Walkable-region boundary contour for this cluster: corridor-ribbon ∪ room-OBB, computed by
-	 * 2D-polygon-union of smoothed corridor centerlines (offset by their radius) and room
-	 * rectangles — a smooth vector boundary, not a grid trace.
-	 * Populated at the end of UOrganicDungeonGenerator2D::GenerateWithGridData / RasterizeLayout.
-	 * Consumed by FOrganicFloorBuilder::BuildFoundationMesh (floor cap + walls) and persisted on
-	 * AGeneratedLevelActor for the wall-generation / wall-spline pass.
-	 */
-	FWalkableRegionContour WalkableContour;
-
-	/**
-	 * Wall thickness in GRID CELLS (copied from FOrganicDungeonResolvedParams::WallThickness).
-	 * World wall thickness = WallThicknessCells * CellSize.  Consumed by the runtime when building
-	 * the unified floor+wall foundation mesh (FOrganicFloorBuilder::BuildFoundationMesh).
-	 */
-	int32 WallThicknessCells = 1;
 };
 
 /**
@@ -167,8 +147,8 @@ class PROCEDURALGEOMETRY_API UOrganicDungeonGenerator2D final : public ULayoutGe
 {
 	GENERATED_BODY()
 
-	FOrganicDungeonResolvedParams		  Params;	  // first/only segment (back-compat)
-	TArray<FOrganicDungeonResolvedParams> Segments;	  // chained segments (>=1); each is one OD location
+	FOrganicDungeonResolvedParams		  Params;	// first/only segment (back-compat)
+	TArray<FOrganicDungeonResolvedParams> Segments; // chained segments (>=1); each is one OD location
 
 public:
 	UOrganicDungeonGenerator2D();

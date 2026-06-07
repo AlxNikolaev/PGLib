@@ -1,5 +1,4 @@
 #include "Generators/OrganicDungeon2D/OrganicDungeonGenerator2D.h"
-#include "Generators/OrganicDungeon2D/OrganicFloorBuilder.h"
 
 #include "Generators/WeightedDistribute.h"
 #include "ProceduralGeometry.h"
@@ -1925,16 +1924,8 @@ FOrganicDungeonGridData UOrganicDungeonGenerator2D::RasterizeLayout(const FOrgan
 	Result.LocationStartRoomIndex = Layout.LocationStartRoomIndex;
 	Result.Diagram = MoveTemp(Diagram);
 
-	// ---- Floor/wall boundary preparation ----
-	// The boundary geometry source is the VECTOR union of smoothed corridor ribbons and room
-	// OBBs (not the rasterized grid trace).  The grid (Grid/CellType/RegionIds/Regions) is
-	// retained above for flood-fill / region ids / cave smoothing; only the boundary contour
-	// comes from the vector path.  This is a pure-data pass (no UObject/world access).
-	const int32 SmoothIters = Params.bSmoothCorridors ? Params.SmoothIterations : 2;
-	FOrganicFloorBuilder::BuildVectorContour(Result.Corridors, Result.Rooms, SmoothIters, Result.WalkableContour);
-
-	// Carry wall thickness (in cells) through to the runtime foundation-mesh builder.
-	Result.WallThicknessCells = FMath::Max(1, Params.WallThickness);
+	// Floor/wall GEOMETRY is no longer built in C++: the runtime emits corridor-centerline and
+	// room-boundary splines from this grid data (Corridors/Rooms) and PCG produces the floor + walls.
 
 	return Result;
 }
