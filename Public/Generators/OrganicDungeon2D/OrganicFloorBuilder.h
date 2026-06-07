@@ -5,95 +5,123 @@
 #include "CoreMinimal.h"
 #include "Generators/OrganicDungeon2D/OrganicFloorTypes.h"
 
-struct FOrganicDungeonGridData;
+struct FOrganicCorridor;
 struct FOrganicRoom;
 struct FMeshData;
 
 /**
- * Static geometry builder for OD-cluster corridor floors.
+ * Static geometry builder for OD-cluster floors and walls.
  *
  * Stateless and free of UObject / actor / world access — mirrors the role
  * UProceduralMeshFactory plays for Voronoi-foundation clusters.  All inputs are
- * plain data structs; all outputs are FMeshData or FWalkableRegionContour values.
+ * plain data structs; all outputs are FMeshData / FWalkableRegionContour /
+ * FWalkableBoundaryLoop values.
  *
- * Two floor-mesh strategies are supported, selected via Grid.bUseGridContourFloor:
+ * The boundary geometry is derived from VECTOR layout primitives (smoothed corridor
+ * centerlines + room OBBs), NOT from the rasterized floor grid:
  *
- *   Ribbon (default, thin/clean corridors)
- *     Extrudes each FOrganicCorridor's centerline into a ribbon strip (one quad per
- *     segment) and adds a rectangle for each FOrganicRoom's footprint.  Very cheap;
- *     correct for corridors whose floor is close to the centerline ribbon.
+ *   1. Each FOrganicCorridor centerline is smoothed (Chaikin) into a few-point curve.
+ *   2. Each smoothed corridor becomes an offset "ribbon" polygon; each room becomes
+ *      an OBB rectangle.  All regions are 2D-polygon-UNIONed into walkable
+ *      polygon(s)-with-holes with a smooth boundary (BuildVectorContour).
+ *   3. Declared doorways cut gaps in the boundary loops, producing the OPEN loops the
+ *      walls / splines follow while the CLOSED loops still cap the floor across the
+ *      opening (CutDoorwayGaps).
+ *   4. The union boundary is extruded into a unified FLOOR + WALL mesh using the same
+ *      vertex/normal/UV conventions as UProceduralMeshFactory so OD geometry matches
+ *      the Voronoi foundation exactly (BuildFoundationMesh).
  *
- *   Grid-contour (cave / smoothed corridors)
- *     Triangulates Grid.WalkableContour (extracted by ComputeWalkableContour) into
- *     the floor mesh using ear-clipping.  Produces far fewer triangles than the
- *     per-cell-quad debug overlay while correctly covering blobs that diverge from
- *     the centerline (smoothed / wide cave corridors).
+ * The rasterized grid is retained by the generator for flood-fill / region ids / cave
+ * smoothing; only the boundary-geometry SOURCE is the vector union, not the grid trace.
  */
 struct PROCEDURALGEOMETRY_API FOrganicFloorBuilder
 {
 	/**
-	 * Extract the walkable-region boundary contour from the rasterized floor grid.
+	 * Smooth one corridor centerline into a few-point curve via Chaikin corner-cutting.
 	 *
-	 * Treats a cell as walkable when Grid.Grid[i] == true (Corridor or Room cells).
-	 * Runs a grid-edge boundary-tracing pass to produce closed directed loops, removes
-	 * collinear vertices from each loop, classifies loops as outer (CCW, positive signed
-	 * area) or hole (CW, negative signed area) via the 2D shoelace formula, groups holes
-	 * into their containing outer polygon via point-in-polygon, then converts all vertices
-	 * to world-space XY using Grid.GridOriginWorld and Grid.CellSize.
+	 * Endpoints are pinned (the first and last centerline points are preserved exactly)
+	 * so the smoothed curve still anchors to its room doorways.  Per-point radii are
+	 * resampled by arc-length-linear interpolation so each output point keeps a sensible
+	 * carve radius.
 	 *
-	 * Because rooms AND corridors are already unioned in the rasterized grid, the result
-	 * is the corridor-ribbon ∪ room-footprint contour with no polygon-clipping required.
-	 *
-	 * @param Grid  Fully rasterized grid (GridWidth, GridHeight, Grid, CellSize, GridOriginWorld
-	 *              must be valid).
-	 * @param Out   Receives the extracted contour.  Cleared before writing.
+	 * @param InCenterline  Source centerline (>= 2 points).
+	 * @param InRadii       Per-point radii parallel to InCenterline (same length).
+	 * @param Iterations    Chaikin iterations (clamped to [1, 4]; 2 matches SmoothIterations).
+	 * @param OutCenterline Smoothed centerline.
+	 * @param OutRadii      Resampled radii parallel to OutCenterline.
 	 */
-	static void ComputeWalkableContour(const FOrganicDungeonGridData& Grid, FWalkableRegionContour& Out);
+	static void SmoothCenterline(const TArray<FVector2D>& InCenterline,
+		const TArray<float>&							  InRadii,
+		int32											  Iterations,
+		TArray<FVector2D>&								  OutCenterline,
+		TArray<float>&									  OutRadii);
 
 	/**
-	 * Build a single merged floor FMeshData for one OD cluster.
+	 * Build the walkable-region boundary contour from vector primitives.
 	 *
-	 * The top surface is placed at Z = FloorHeight, coplanar with the prefab-room floor
-	 * plane (rooms spawn at ActorZ + FoundationHeight).  The mesh is a thin horizontal
-	 * cap (no bottom/side walls) — sufficient for collision and navmesh rasterisation.
+	 * Each corridor's smoothed centerline is offset by its (representative) radius into a
+	 * rounded ribbon polygon; each room becomes an OBB rectangle.  All polygons are
+	 * 2D-UNIONed (engine GeometryAlgorithms) into outer-with-holes polygons whose winding
+	 * is normalized to the FWalkablePolygon convention (CCW outer, CW holes).
 	 *
-	 * Chooses the build path via Grid.bUseGridContourFloor:
-	 *   false → ribbon extrusion from FOrganicCorridor centerlines + FOrganicRoom rectangles.
-	 *   true  → ear-clipping triangulation of Grid.WalkableContour polygons-with-holes.
-	 *
-	 * All mesh vertices share a flat upward normal (0,0,1) and a (1,0,0) tangent.  UVs are
-	 * world XY * 0.01 (same scale as the Voronoi foundation mesh).
-	 *
-	 * @param Grid         Rasterized grid data.  Corridors and Rooms must be valid for the
-	 *                     ribbon path; WalkableContour must be populated for the contour path.
-	 * @param FloorHeight  Z at which the top surface is placed (FoundationHeight from the level actor).
-	 * @param OutMesh      Receives the generated mesh data.  Cleared before writing.
-	 * @return true when at least one triangle was generated; false when there is no walkable content.
+	 * @param Corridors        World-space corridors (centerline + radii).
+	 * @param Rooms            World-space placed rooms (OBB footprints).
+	 * @param SmoothIterations Chaikin iterations applied to each centerline before offsetting.
+	 * @param Out              Receives the union contour.  Cleared before writing.
+	 * @return true when at least one non-degenerate polygon was produced.
 	 */
-	static bool BuildCorridorFloorMesh(const FOrganicDungeonGridData& Grid, float FloorHeight, FMeshData& OutMesh);
+	static bool BuildVectorContour(
+		const TArray<FOrganicCorridor>& Corridors, const TArray<FOrganicRoom>& Rooms, int32 SmoothIterations, FWalkableRegionContour& Out);
+
+	/**
+	 * Cut doorway gaps into the boundary rings of one walkable polygon.
+	 *
+	 * For each doorway, the boundary span nearest Position (projected along OutwardDir) is
+	 * removed over a Width-wide arc, splitting that closed ring into an OPEN polyline.
+	 * Rings untouched by any doorway are emitted as closed loops.
+	 *
+	 * @param Poly      Source polygon-with-holes (closed rings).
+	 * @param Doorways  World-space doorway openings to cut.
+	 * @param OutLoops  Receives the resulting boundary loops (closed or open).  Cleared first.
+	 */
+	static void CutDoorwayGaps(const FWalkablePolygon& Poly, const TArray<FWalkableDoorway>& Doorways, TArray<FWalkableBoundaryLoop>& OutLoops);
+
+	/**
+	 * Build a unified FLOOR + WALL FMeshData for one OD cluster region.
+	 *
+	 * The floor cap is triangulated from the CLOSED union polygon (outer + holes) via
+	 * ConstrainedDelaunay2 so it correctly fills concave regions and spans doorway
+	 * openings.  Walls are extruded from the (doorway-cut) boundary loops using the same
+	 * side-quad recipe as UProceduralMeshFactory::BuildSideGeometry (bottom/top vert
+	 * pairs, side normal = -cross(top-bottom, next-bottom), accumulated-length U UVs), so
+	 * OD walls match Voronoi walls visually.
+	 *
+	 * Top floor surface sits at Z = FloorHeight; walls rise from FloorHeight to
+	 * FloorHeight + WallHeight and are inset inward by WallThickness so they sit on the
+	 * floor cap rather than outside it.
+	 *
+	 * @param Poly           Closed union polygon (floor cap source).
+	 * @param WallLoops      Doorway-cut boundary loops (wall source); open loops skip their gap.
+	 * @param FloorHeight    Z of the floor top surface (FoundationHeight from the level actor).
+	 * @param WallHeight     Wall extrusion height, world units.
+	 * @param WallThickness  Wall thickness, world units (OD WallThickness * grid cell size).
+	 * @param OutMesh        Receives the merged floor+wall mesh.  Cleared before writing.
+	 * @return true when at least one triangle was generated.
+	 */
+	static bool BuildFoundationMesh(const FWalkablePolygon& Poly,
+		const TArray<FWalkableBoundaryLoop>&				WallLoops,
+		float												FloorHeight,
+		float												WallHeight,
+		float												WallThickness,
+		FMeshData&											OutMesh);
 
 private:
-	/**
-	 * Emit one floor quad (two CCW triangles) for a single corridor ribbon segment.
-	 * The quad spans from (P0 ± perp*R0) to (P1 ± perp*R1) at the given Z height.
-	 */
-	static void EmitRibbonQuad(const FVector2D& P0, float R0, const FVector2D& P1, float R1, float Z, FMeshData& OutMesh);
+	/** Triangulate one closed polygon-with-holes into a flat floor cap at Z (ConstrainedDelaunay2). */
+	static void TriangulateFloorCap(const FWalkablePolygon& Poly, float Z, FMeshData& OutMesh);
 
 	/**
-	 * Emit a flat rectangle (two CCW triangles) for a room's oriented footprint.
-	 * Uses the room's center + rotation + half-extents to derive the four OBB corners.
+	 * Extrude one boundary loop into wall side-quads from FloorHeight to FloorHeight+WallHeight.
+	 * When bClosed the implicit closing edge (last→first) is also walled.
 	 */
-	static void EmitRoomRect(const FOrganicRoom& Room, float Z, FMeshData& OutMesh);
-
-	/**
-	 * Triangulate a polygon-with-holes.
-	 *
-	 * For each hole, finds the rightmost vertex of the hole and the nearest visible outer-polygon
-	 * vertex reachable by a horizontal ray, then merges the hole into the outer ring via a
-	 * "bridge" duplicate pair.  The merged simple polygon is passed to EarClipSimple.
-	 *
-	 * Holes are processed in decreasing order of their rightmost-X coordinate so that each
-	 * bridge is inserted into an already-simplified outer ring.
-	 */
-	static void TriangulateWithHoles(const FWalkablePolygon& Poly, float Z, FMeshData& OutMesh);
+	static void ExtrudeWallLoop(const TArray<FVector2D>& Loop, bool bClosed, float FloorHeight, float WallHeight, FMeshData& OutMesh);
 };

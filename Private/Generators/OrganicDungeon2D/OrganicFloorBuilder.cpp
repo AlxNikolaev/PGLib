@@ -5,6 +5,13 @@
 #include "Factories/ProceduralMeshFactory.h"
 #include "ProceduralGeometry.h"
 
+#include "Algo/Reverse.h"
+#include "ConstrainedDelaunay2.h"
+#include "Curve/GeneralPolygon2.h"
+#include "Curve/PolygonIntersectionUtils.h"
+#include "Curve/PolygonOffsetUtils.h"
+#include "Polygon2.h"
+
 // ============================================================================
 // Internal helpers — local to this translation unit.
 // ============================================================================
@@ -14,18 +21,13 @@ namespace OrganicFloorBuilderImpl
 	/** Flat floor UV scale (world units → UV coords), matching the foundation mesh UVs. */
 	static constexpr float UVScale = 0.01f;
 
-	/** Maximum number of vertices per extracted loop before we cap iteration (degenerate guard). */
-	static constexpr int32 MaxLoopVerts = 65536;
+	using UE::Geometry::FGeneralPolygon2d;
+	using UE::Geometry::FPolygon2d;
+	using FVec2d = UE::Math::TVector2<double>;
 
 	// -------------------------------------------------------------------------
 	// Math helpers
 	// -------------------------------------------------------------------------
-
-	/** 2D signed cross product of vectors (A-O) and (B-O).  Positive = CCW turn. */
-	FORCEINLINE float Cross2D(const FVector2D& O, const FVector2D& A, const FVector2D& B)
-	{
-		return (A.X - O.X) * (B.Y - O.Y) - (A.Y - O.Y) * (B.X - O.X);
-	}
 
 	/**
 	 * Shoelace signed area for a polygon (world-space 2D).
@@ -44,43 +46,116 @@ namespace OrganicFloorBuilderImpl
 		return Area * 0.5f;
 	}
 
-	/**
-	 * Ray-casting point-in-polygon (world-space 2D).
-	 * Returns true when Point is strictly inside Polygon (winding order independent).
-	 */
-	bool IsPointInPolygon(const FVector2D& Point, const TArray<FVector2D>& Poly)
+	/** Force a ring to the requested winding (CCW when bWantCCW, else CW), reversing in place if needed. */
+	void EnsureWinding(TArray<FVector2D>& Ring, bool bWantCCW)
 	{
-		const int32 N = Poly.Num();
-		bool		bInside = false;
-		for (int32 i = 0, j = N - 1; i < N; j = i++)
+		if (Ring.Num() < 3)
 		{
-			const FVector2D& A = Poly[i];
-			const FVector2D& B = Poly[j];
-			if (((A.Y > Point.Y) != (B.Y > Point.Y)) && (Point.X < (B.X - A.X) * (Point.Y - A.Y) / (B.Y - A.Y) + A.X))
+			return;
+		}
+		const bool bIsCCW = SignedArea2D(Ring) > 0.0f;
+		if (bIsCCW != bWantCCW)
+		{
+			Algo::Reverse(Ring);
+		}
+	}
+
+	// -------------------------------------------------------------------------
+	// Conversions between engine geometry types and FWalkable* structs
+	// -------------------------------------------------------------------------
+
+	/** Convert a TPolygon2<double> ring to a world-space FVector2D ring. */
+	TArray<FVector2D> ToRing(const FPolygon2d& Poly)
+	{
+		TArray<FVector2D> Out;
+		Out.Reserve(Poly.VertexCount());
+		for (const FVec2d& V : Poly.GetVertices())
+		{
+			Out.Emplace(static_cast<float>(V.X), static_cast<float>(V.Y));
+		}
+		return Out;
+	}
+
+	/** Build a TPolygon2<double> from a world-space FVector2D ring. */
+	FPolygon2d ToPolygon2d(const TArray<FVector2D>& Ring)
+	{
+		FPolygon2d Poly;
+		for (const FVector2D& V : Ring)
+		{
+			Poly.AppendVertex(FVec2d(V.X, V.Y));
+		}
+		return Poly;
+	}
+
+	/**
+	 * Convert a union result (array of general-polygons-with-holes) into FWalkablePolygon(s),
+	 * normalizing winding to CCW outer / CW holes regardless of the source winding convention.
+	 */
+	void ToWalkableContour(const TArray<FGeneralPolygon2d>& Source, FWalkableRegionContour& Out)
+	{
+		Out.Polygons.Reset();
+		for (const FGeneralPolygon2d& GP : Source)
+		{
+			TArray<FVector2D> Outer = ToRing(GP.GetOuter());
+			if (Outer.Num() < 3)
 			{
-				bInside = !bInside;
+				continue;
+			}
+
+			FWalkablePolygon WP;
+			EnsureWinding(Outer, /*bWantCCW=*/true);
+			WP.Outer = MoveTemp(Outer);
+
+			for (const FPolygon2d& HolePoly : GP.GetHoles())
+			{
+				TArray<FVector2D> Hole = ToRing(HolePoly);
+				if (Hole.Num() < 3)
+				{
+					continue;
+				}
+				EnsureWinding(Hole, /*bWantCCW=*/false);
+				WP.Holes.Add(MoveTemp(Hole));
+			}
+
+			Out.Polygons.Add(MoveTemp(WP));
+		}
+	}
+
+	// -------------------------------------------------------------------------
+	// Mesh emission helpers (shared conventions with UProceduralMeshFactory)
+	// -------------------------------------------------------------------------
+
+	/**
+	 * Densify a closed ring by inserting points along each edge no farther apart than MaxSpacing.
+	 * Used before doorway cutting so a Width-wide gap always lands on existing vertices even on
+	 * long straight edges (e.g. a room rectangle's side has no vertex at the doorway center).
+	 */
+	TArray<FVector2D> DensifyRing(const TArray<FVector2D>& Ring, float MaxSpacing)
+	{
+		const int32 N = Ring.Num();
+		if (N < 3 || MaxSpacing <= KINDA_SMALL_NUMBER)
+		{
+			return Ring;
+		}
+
+		TArray<FVector2D> Out;
+		Out.Reserve(N * 2);
+		for (int32 i = 0; i < N; ++i)
+		{
+			const FVector2D& A = Ring[i];
+			const FVector2D& B = Ring[(i + 1) % N];
+			Out.Add(A);
+
+			const float EdgeLen = FVector2D::Distance(A, B);
+			const int32 Subdiv = FMath::FloorToInt(EdgeLen / MaxSpacing);
+			for (int32 k = 1; k <= Subdiv; ++k)
+			{
+				const float T = static_cast<float>(k) / static_cast<float>(Subdiv + 1);
+				Out.Add(FMath::Lerp(A, B, T));
 			}
 		}
-		return bInside;
+		return Out;
 	}
-
-	/**
-	 * Returns true when vertex k is strictly inside the triangle (A, B, C) —
-	 * using the sign-of-cross-product test (works for both CW and CCW triangles).
-	 */
-	bool IsPointInTriangle(const FVector2D& P, const FVector2D& A, const FVector2D& B, const FVector2D& C)
-	{
-		const float d1 = Cross2D(P, A, B);
-		const float d2 = Cross2D(P, B, C);
-		const float d3 = Cross2D(P, C, A);
-		const bool	bHasNeg = (d1 < 0.0f) || (d2 < 0.0f) || (d3 < 0.0f);
-		const bool	bHasPos = (d1 > 0.0f) || (d2 > 0.0f) || (d3 > 0.0f);
-		return !(bHasNeg && bHasPos); // all-same-sign → inside or on edge
-	}
-
-	// -------------------------------------------------------------------------
-	// Mesh emission helpers
-	// -------------------------------------------------------------------------
 
 	/** Append one flat-floor vertex (Z = FloorHeight, normal up, tangent +X). */
 	void AddFlatVert(const FVector2D& XY, float Z, FMeshData& Mesh)
@@ -92,648 +167,520 @@ namespace OrganicFloorBuilderImpl
 		Mesh.Tangents.Add(FProcMeshTangent(FVector(1.0f, 0.0f, 0.0f), false));
 	}
 
-	/** Append four flat-floor vertices and two CCW triangles forming a quad. */
-	void EmitQuad(const FVector2D& V0, const FVector2D& V1, const FVector2D& V2, const FVector2D& V3, float Z, FMeshData& Mesh)
-	{
-		const int32 Base = Mesh.Vertices.Num();
-		AddFlatVert(V0, Z, Mesh);
-		AddFlatVert(V1, Z, Mesh);
-		AddFlatVert(V2, Z, Mesh);
-		AddFlatVert(V3, Z, Mesh);
-		// Triangle 0: Base, Base+1, Base+2
-		Mesh.Triangles.Add(Base);
-		Mesh.Triangles.Add(Base + 1);
-		Mesh.Triangles.Add(Base + 2);
-		// Triangle 1: Base, Base+2, Base+3
-		Mesh.Triangles.Add(Base);
-		Mesh.Triangles.Add(Base + 2);
-		Mesh.Triangles.Add(Base + 3);
-	}
-
-	// -------------------------------------------------------------------------
-	// Collinear simplification
-	// -------------------------------------------------------------------------
-
-	/**
-	 * Remove collinear vertices from a closed polygon.
-	 * A vertex V[i] is collinear when Cross2D(V[i-1], V[i], V[i+1]) == 0.
-	 * Uses a small epsilon to tolerate floating-point grid noise.
-	 */
-	TArray<FVector2D> SimplifyCollinear(const TArray<FVector2D>& Poly)
-	{
-		TArray<FVector2D> Out;
-		const int32		  N = Poly.Num();
-		if (N < 3)
-			return Poly;
-
-		Out.Reserve(N);
-		for (int32 i = 0; i < N; ++i)
-		{
-			const FVector2D& Prev = Poly[(i + N - 1) % N];
-			const FVector2D& Curr = Poly[i];
-			const FVector2D& Next = Poly[(i + 1) % N];
-			// Keep vertex only when it is NOT collinear with its neighbours.
-			if (FMath::Abs(Cross2D(Prev, Curr, Next)) > KINDA_SMALL_NUMBER)
-			{
-				Out.Add(Curr);
-			}
-		}
-		return Out;
-	}
-
-	// -------------------------------------------------------------------------
-	// Ear-clipping triangulation (simple polygon, CCW winding)
-	// -------------------------------------------------------------------------
-
-	/**
-	 * Ear-clipping triangulation for a simple convex-or-concave polygon.
-	 *
-	 * Assumes CCW winding (positive signed area).  O(n²) per pass; for the grid-contour
-	 * polygons produced after collinear simplification, n is small even for large grids
-	 * because most runs of cells share straight edges that collapse to a single vertex.
-	 *
-	 * A degenerate guard (MaxIter = n²) prevents infinite loops on pathological input.
-	 */
-	void EarClipSimple(const TArray<FVector2D>& Poly, float Z, FMeshData& OutMesh)
-	{
-		const int32 N = Poly.Num();
-		if (N < 3)
-			return;
-
-		// Add all polygon vertices to the mesh once; triangles reference these by index offset.
-		const int32 BaseIdx = OutMesh.Vertices.Num();
-		for (const FVector2D& V : Poly)
-		{
-			AddFlatVert(V, Z, OutMesh);
-		}
-
-		// Working ring of indices into Poly (removed as ears are clipped).
-		TArray<int32> Ring;
-		Ring.SetNum(N);
-		for (int32 i = 0; i < N; ++i)
-			Ring[i] = i;
-
-		const int32 MaxIter = N * N + N;
-		int32		Iter = 0;
-
-		while (Ring.Num() > 3 && ++Iter <= MaxIter)
-		{
-			const int32 Cnt = Ring.Num();
-			bool		bFoundEar = false;
-
-			for (int32 i = 0; i < Cnt; ++i)
-			{
-				const int32 Pi = (i + Cnt - 1) % Cnt;
-				const int32 Ni = (i + 1) % Cnt;
-
-				const FVector2D& Pv = Poly[Ring[Pi]];
-				const FVector2D& Cv = Poly[Ring[i]];
-				const FVector2D& Nv = Poly[Ring[Ni]];
-
-				// For a CCW polygon a convex vertex has positive cross product.
-				if (Cross2D(Pv, Cv, Nv) <= KINDA_SMALL_NUMBER)
-				{
-					continue; // reflex or degenerate vertex — not an ear
-				}
-
-				// Verify no other ring vertex lies inside the candidate ear triangle.
-				bool bIsEar = true;
-				for (int32 k = 0; k < Cnt; ++k)
-				{
-					if (k == Pi || k == i || k == Ni)
-						continue;
-					if (IsPointInTriangle(Poly[Ring[k]], Pv, Cv, Nv))
-					{
-						bIsEar = false;
-						break;
-					}
-				}
-
-				if (bIsEar)
-				{
-					OutMesh.Triangles.Add(BaseIdx + Ring[Pi]);
-					OutMesh.Triangles.Add(BaseIdx + Ring[i]);
-					OutMesh.Triangles.Add(BaseIdx + Ring[Ni]);
-					Ring.RemoveAt(i);
-					bFoundEar = true;
-					break;
-				}
-			}
-
-			if (!bFoundEar)
-			{
-				// Degenerate polygon — no ear found in a full pass.
-				UE_LOG(LogRoguelikeGeometry,
-					Warning,
-					TEXT("[OrganicFloor] EarClipSimple: no ear found with %d ring vertices remaining; stopping"),
-					Ring.Num());
-				break;
-			}
-		}
-
-		// Emit the final triangle (Ring has exactly 3 vertices).
-		if (Ring.Num() == 3)
-		{
-			OutMesh.Triangles.Add(BaseIdx + Ring[0]);
-			OutMesh.Triangles.Add(BaseIdx + Ring[1]);
-			OutMesh.Triangles.Add(BaseIdx + Ring[2]);
-		}
-	}
-
 } // namespace OrganicFloorBuilderImpl
 
 // ============================================================================
-// FOrganicFloorBuilder — public API
+// FOrganicFloorBuilder — Chaikin smoothing (B1)
 // ============================================================================
 
-void FOrganicFloorBuilder::ComputeWalkableContour(const FOrganicDungeonGridData& Grid, FWalkableRegionContour& Out)
+void FOrganicFloorBuilder::SmoothCenterline(
+	const TArray<FVector2D>& InCenterline, const TArray<float>& InRadii, int32 Iterations, TArray<FVector2D>& OutCenterline, TArray<float>& OutRadii)
 {
+	OutCenterline.Reset();
+	OutRadii.Reset();
+
+	const int32 N = InCenterline.Num();
+	if (N < 2 || InRadii.Num() != N)
+	{
+		// Pass through unchanged when there is nothing to smooth.
+		OutCenterline = InCenterline;
+		OutRadii = InRadii;
+		return;
+	}
+
+	Iterations = FMath::Clamp(Iterations, 1, 4);
+
+	// Work on parallel point + radius arrays so radii follow the smoothed corners.
+	TArray<FVector2D> Pts = InCenterline;
+	TArray<float>	  Rad = InRadii;
+
+	for (int32 Pass = 0; Pass < Iterations; ++Pass)
+	{
+		const int32 M = Pts.Num();
+		if (M < 3)
+		{
+			break; // a 2-point segment has no interior corners to cut
+		}
+
+		TArray<FVector2D> NextPts;
+		TArray<float>	  NextRad;
+		NextPts.Reserve(M * 2);
+		NextRad.Reserve(M * 2);
+
+		// Pin the first endpoint (anchors to its room/doorway).
+		NextPts.Add(Pts[0]);
+		NextRad.Add(Rad[0]);
+
+		// Chaikin corner-cutting on each interior segment: emit Q (1/4) and R (3/4).
+		for (int32 i = 0; i + 1 < M; ++i)
+		{
+			const FVector2D& P0 = Pts[i];
+			const FVector2D& P1 = Pts[i + 1];
+			const float		 R0 = Rad[i];
+			const float		 R1 = Rad[i + 1];
+
+			const FVector2D Q = P0 * 0.75f + P1 * 0.25f;
+			const FVector2D R = P0 * 0.25f + P1 * 0.75f;
+
+			NextPts.Add(Q);
+			NextRad.Add(R0 * 0.75f + R1 * 0.25f);
+			NextPts.Add(R);
+			NextRad.Add(R0 * 0.25f + R1 * 0.75f);
+		}
+
+		// Pin the last endpoint.
+		NextPts.Add(Pts.Last());
+		NextRad.Add(Rad.Last());
+
+		Pts = MoveTemp(NextPts);
+		Rad = MoveTemp(NextRad);
+	}
+
+	OutCenterline = MoveTemp(Pts);
+	OutRadii = MoveTemp(Rad);
+}
+
+// ============================================================================
+// FOrganicFloorBuilder — vector contour union (B2)
+// ============================================================================
+
+bool FOrganicFloorBuilder::BuildVectorContour(
+	const TArray<FOrganicCorridor>& Corridors, const TArray<FOrganicRoom>& Rooms, int32 SmoothIterations, FWalkableRegionContour& Out)
+{
+	using namespace OrganicFloorBuilderImpl;
+	using namespace UE::Geometry;
+
 	Out.Polygons.Reset();
 
-	const int32 W = Grid.GridWidth;
-	const int32 H = Grid.GridHeight;
+	// Collect one closed general-polygon per region (corridor ribbon or room rect).
+	TArray<FGeneralPolygon2d> Regions;
+	Regions.Reserve(Corridors.Num() + Rooms.Num());
 
-	if (W <= 0 || H <= 0 || Grid.Grid.Num() != W * H)
+	// --- Corridor ribbons: variable-width offset of the smoothed centerline (per-vertex radius). ---
+	for (const FOrganicCorridor& Cor : Corridors)
+	{
+		if (Cor.Centerline.Num() < 2 || Cor.Radii.Num() != Cor.Centerline.Num())
+		{
+			continue;
+		}
+
+		TArray<FVector2D> Smoothed;
+		TArray<float>	  SmoothedRadii;
+		SmoothCenterline(Cor.Centerline, Cor.Radii, FMath::Max(1, SmoothIterations), Smoothed, SmoothedRadii);
+
+		if (Smoothed.Num() < 2)
+		{
+			continue;
+		}
+
+		// Variable-width ribbon: offset every centerline sample by its OWN radius so Cave-style
+		// width variation (waviness) survives; Clean-style corridors carry constant radii and
+		// yield a uniform ribbon. PolygonsUnion below absorbs the ribbon into the floor region.
+		const int32 N = Smoothed.Num();
+		if (SmoothedRadii.Num() != N)
+		{
+			continue;
+		}
+
+		// Per-vertex outward normals (average of the adjacent segment normals).
+		TArray<FVector2D> Normals;
+		Normals.SetNumZeroed(N);
+		for (int32 i = 0; i < N; ++i)
+		{
+			FVector2D NSum(0.0f, 0.0f);
+			if (i > 0)
+			{
+				const FVector2D D = (Smoothed[i] - Smoothed[i - 1]).GetSafeNormal();
+				NSum += FVector2D(-D.Y, D.X);
+			}
+			if (i + 1 < N)
+			{
+				const FVector2D D = (Smoothed[i + 1] - Smoothed[i]).GetSafeNormal();
+				NSum += FVector2D(-D.Y, D.X);
+			}
+			Normals[i] = NSum.GetSafeNormal();
+		}
+
+		// Closed ribbon: up the left side, back down the right side; each sample offset by its radius.
+		TArray<FVector2D> Ribbon;
+		Ribbon.Reserve(N * 2);
+		for (int32 i = 0; i < N; ++i)
+		{
+			Ribbon.Add(Smoothed[i] + Normals[i] * SmoothedRadii[i]);
+		}
+		for (int32 i = N - 1; i >= 0; --i)
+		{
+			Ribbon.Add(Smoothed[i] - Normals[i] * SmoothedRadii[i]);
+		}
+
+		// Normalize to CCW winding (positive signed area) for the union outer ring.
+		double Area2 = 0.0;
+		for (int32 i = 0, Count = Ribbon.Num(); i < Count; ++i)
+		{
+			const FVector2D& A = Ribbon[i];
+			const FVector2D& B = Ribbon[(i + 1) % Count];
+			Area2 += static_cast<double>(A.X) * B.Y - static_cast<double>(B.X) * A.Y;
+		}
+		if (Area2 < 0.0)
+		{
+			for (int32 i = 0, j = Ribbon.Num() - 1; i < j; ++i, --j)
+			{
+				Ribbon.Swap(i, j);
+			}
+		}
+
+		Regions.Add(FGeneralPolygon2d(ToPolygon2d(Ribbon)));
+	}
+
+	// --- Room rectangles: OBB → closed CCW polygon. ---
+	for (const FOrganicRoom& Room : Rooms)
+	{
+		const float DegRad = FMath::DegreesToRadians(Room.RotationDeg);
+		const float C = FMath::Cos(DegRad);
+		const float S = FMath::Sin(DegRad);
+
+		const FVector2D AxisX(C, S);
+		const FVector2D AxisY(-S, C);
+
+		const FVector2D BL = Room.Center - AxisX * Room.HalfExtent.X - AxisY * Room.HalfExtent.Y;
+		const FVector2D BR = Room.Center + AxisX * Room.HalfExtent.X - AxisY * Room.HalfExtent.Y;
+		const FVector2D TR = Room.Center + AxisX * Room.HalfExtent.X + AxisY * Room.HalfExtent.Y;
+		const FVector2D TL = Room.Center - AxisX * Room.HalfExtent.X + AxisY * Room.HalfExtent.Y;
+
+		TArray<FVector2D> Rect = { BL, BR, TR, TL };
+		FGeneralPolygon2d GP(ToPolygon2d(Rect));
+		Regions.Add(MoveTemp(GP));
+	}
+
+	if (Regions.IsEmpty())
+	{
+		UE_LOG(LogRoguelikeGeometry, Verbose, TEXT("[OrganicFloor] BuildVectorContour: no corridor/room regions to union"));
+		return false;
+	}
+
+	// --- Union all regions into outer-with-holes polygon(s). ---
+	TArray<FGeneralPolygon2d> Unioned;
+	const bool				  bUnionOk = PolygonsUnion(Regions, Unioned, /*bCopyInputOnFailure=*/true);
+	if (!bUnionOk)
 	{
 		UE_LOG(LogRoguelikeGeometry,
-			Verbose,
-			TEXT("[OrganicFloor] ComputeWalkableContour: empty/invalid grid (%dx%d grid=%d), returning empty contour"),
-			W,
-			H,
-			Grid.Grid.Num());
-		return;
+			Warning,
+			TEXT("[OrganicFloor] BuildVectorContour: PolygonsUnion failed; using copied input (%d region(s))"),
+			Unioned.Num());
 	}
 
-	UE_LOG(LogRoguelikeGeometry, Log, TEXT("[OrganicFloor] ComputeWalkableContour: grid=%dx%d cellSize=%.0f"), W, H, Grid.CellSize);
-
-	// -------------------------------------------------------------------------
-	// Step 1: Build directed boundary-edge map.
-	//
-	// Convention: floor cell is on the RIGHT of the directed edge.
-	//
-	// For each floor cell (cx, cy) with a non-floor or out-of-bounds neighbour:
-	//   West  non-floor: (cx,   cy+1) → (cx,   cy  )   [southward along left edge]
-	//   East  non-floor: (cx+1, cy  ) → (cx+1, cy+1)   [northward along right edge]
-	//   South non-floor: (cx,   cy  ) → (cx+1, cy  )   [eastward along bottom edge]
-	//   North non-floor: (cx+1, cy+1) → (cx,   cy+1)   [westward along top edge]
-	//
-	// This convention produces a polygon with POSITIVE signed area for an outer
-	// boundary (CCW in standard Y-up math coordinates).
-	// -------------------------------------------------------------------------
-
-	// Adjacency list for directed boundary edges (start → list of outgoing ends).
-	// Using a per-vertex array instead of a single-value TMap handles pinch-point topology:
-	// at a diagonal pinch (two floor cells touching only at a shared corner) the same vertex
-	// is the start of TWO outgoing boundary edges; a simple TMap would overwrite the first.
-	// TMap grows safely if the Reserve hint underestimates (worst case ≈ 4×FloorCells edges).
-	TMap<FIntPoint, TArray<FIntPoint>> EdgeMap;
-	EdgeMap.Reserve(2 * (W + H));
-
-	auto IsFloor = [&](int32 cx, int32 cy) -> bool {
-		if (cx < 0 || cx >= W || cy < 0 || cy >= H)
-			return false;
-		return Grid.Grid[cy * W + cx];
-	};
-
-	for (int32 cy = 0; cy < H; ++cy)
-	{
-		for (int32 cx = 0; cx < W; ++cx)
-		{
-			if (!Grid.Grid[cy * W + cx])
-				continue;
-
-			// West non-floor
-			if (!IsFloor(cx - 1, cy))
-				EdgeMap.FindOrAdd(FIntPoint(cx, cy + 1)).Add(FIntPoint(cx, cy));
-			// East non-floor
-			if (!IsFloor(cx + 1, cy))
-				EdgeMap.FindOrAdd(FIntPoint(cx + 1, cy)).Add(FIntPoint(cx + 1, cy + 1));
-			// South non-floor
-			if (!IsFloor(cx, cy - 1))
-				EdgeMap.FindOrAdd(FIntPoint(cx, cy)).Add(FIntPoint(cx + 1, cy));
-			// North non-floor
-			if (!IsFloor(cx, cy + 1))
-				EdgeMap.FindOrAdd(FIntPoint(cx + 1, cy + 1)).Add(FIntPoint(cx, cy + 1));
-		}
-	}
-
-	if (EdgeMap.IsEmpty())
-	{
-		UE_LOG(LogRoguelikeGeometry, Verbose, TEXT("[OrganicFloor] ComputeWalkableContour: no boundary edges — grid has no floor cells"));
-		return;
-	}
-
-	// -------------------------------------------------------------------------
-	// Step 2: Trace closed loops by following the directed edge chains.
-	// -------------------------------------------------------------------------
-
-	// Loops in GRID vertex coordinates (integer, before world-space conversion).
-	TArray<TArray<FIntPoint>> GridLoops;
-
-	while (!EdgeMap.IsEmpty())
-	{
-		// Pick the lexicographically smallest start key for deterministic output.
-		FIntPoint StartVert = EdgeMap.begin().Key();
-		for (auto& Kvp : EdgeMap)
-		{
-			if (Kvp.Value.IsEmpty())
-				continue;
-			if (Kvp.Key.X < StartVert.X || (Kvp.Key.X == StartVert.X && Kvp.Key.Y < StartVert.Y))
-			{
-				StartVert = Kvp.Key;
-			}
-		}
-
-		TArray<FIntPoint> Loop;
-		Loop.Reserve(64);
-
-		FIntPoint Current = StartVert;
-		int32	  Guard = 0;
-
-		while (true)
-		{
-			TArray<FIntPoint>* NextList = EdgeMap.Find(Current);
-			if (!NextList || NextList->IsEmpty())
-			{
-				// Dangling edge — should not happen for a valid closed loop.
-				// Can occur at pinch points if all outgoing edges were already consumed.
-				UE_LOG(LogRoguelikeGeometry,
-					Warning,
-					TEXT("[OrganicFloor] ComputeWalkableContour: dangling edge at (%d,%d); loop discarded"),
-					Current.X,
-					Current.Y);
-				break;
-			}
-
-			Loop.Add(Current);
-			// Take the last outgoing edge from this vertex; remove the entry when exhausted.
-			FIntPoint Next = NextList->Last();
-			NextList->Pop(EAllowShrinking::No);
-			if (NextList->IsEmpty())
-			{
-				EdgeMap.Remove(Current);
-			}
-			Current = Next;
-
-			if (Current == StartVert)
-			{
-				break; // closed loop
-			}
-
-			if (++Guard >= OrganicFloorBuilderImpl::MaxLoopVerts)
-			{
-				UE_LOG(LogRoguelikeGeometry,
-					Warning,
-					TEXT("[OrganicFloor] ComputeWalkableContour: loop exceeded %d vertices guard; truncated"),
-					OrganicFloorBuilderImpl::MaxLoopVerts);
-				break;
-			}
-		}
-
-		if (Loop.Num() >= 3)
-		{
-			GridLoops.Add(MoveTemp(Loop));
-		}
-	}
-
-	UE_LOG(LogRoguelikeGeometry, Log, TEXT("[OrganicFloor] ComputeWalkableContour: extracted %d raw loops"), GridLoops.Num());
-
-	// -------------------------------------------------------------------------
-	// Step 3: Convert to world-space, simplify collinear vertices, classify
-	//         outer (CCW) vs hole (CW) by signed area.
-	// -------------------------------------------------------------------------
-
-	struct FClassifiedLoop
-	{
-		TArray<FVector2D> Verts; // world-space
-		float			  SignedArea;
-	};
-
-	TArray<FClassifiedLoop> Classified;
-	Classified.Reserve(GridLoops.Num());
-
-	const FVector2D& Origin = Grid.GridOriginWorld;
-	const float		 Cell = Grid.CellSize;
-
-	for (const TArray<FIntPoint>& GLoop : GridLoops)
-	{
-		// Convert grid vertex coords to world XY.
-		TArray<FVector2D> WorldVerts;
-		WorldVerts.Reserve(GLoop.Num());
-		for (const FIntPoint& GV : GLoop)
-		{
-			WorldVerts.Add(Origin + FVector2D(GV.X * Cell, GV.Y * Cell));
-		}
-
-		// Remove collinear vertices (improves triangulation performance for axis-aligned shapes).
-		WorldVerts = OrganicFloorBuilderImpl::SimplifyCollinear(WorldVerts);
-		if (WorldVerts.Num() < 3)
-			continue;
-
-		FClassifiedLoop CL;
-		CL.Verts = MoveTemp(WorldVerts);
-		CL.SignedArea = OrganicFloorBuilderImpl::SignedArea2D(CL.Verts);
-		Classified.Add(MoveTemp(CL));
-	}
-
-	// -------------------------------------------------------------------------
-	// Step 4: Group holes into outer polygons via point-in-polygon.
-	// -------------------------------------------------------------------------
-
-	// Partition into outers and holes.
-	TArray<int32> OuterIndices;
-	TArray<int32> HoleIndices;
-	for (int32 i = 0; i < Classified.Num(); ++i)
-	{
-		if (Classified[i].SignedArea > 0.0f)
-			OuterIndices.Add(i);
-		else
-			HoleIndices.Add(i);
-	}
-
-	// Build one FWalkablePolygon per outer ring.
-	Out.Polygons.Reserve(OuterIndices.Num());
-	for (int32 OI : OuterIndices)
-	{
-		FWalkablePolygon WP;
-		WP.Outer = Classified[OI].Verts;
-		Out.Polygons.Add(MoveTemp(WP));
-	}
-
-	// Assign each hole to the first outer polygon that contains it.
-	for (int32 HI : HoleIndices)
-	{
-		if (Classified[HI].Verts.IsEmpty())
-			continue;
-		const FVector2D& TestPt = Classified[HI].Verts[0];
-
-		bool bAssigned = false;
-		for (FWalkablePolygon& WP : Out.Polygons)
-		{
-			if (OrganicFloorBuilderImpl::IsPointInPolygon(TestPt, WP.Outer))
-			{
-				WP.Holes.Add(Classified[HI].Verts);
-				bAssigned = true;
-				break;
-			}
-		}
-
-		if (!bAssigned && !Out.Polygons.IsEmpty())
-		{
-			// Fallback: attach to the first outer polygon (handles rare floating-point edge cases).
-			Out.Polygons[0].Holes.Add(Classified[HI].Verts);
-		}
-	}
+	ToWalkableContour(Unioned, Out);
 
 	int32 TotalHoles = 0;
 	for (const FWalkablePolygon& WP : Out.Polygons)
+	{
 		TotalHoles += WP.Holes.Num();
+	}
 
-	UE_LOG(LogRoguelikeGeometry, Log, TEXT("[OrganicFloor] ComputeWalkableContour: %d outer polygon(s), %d hole(s)"), Out.Polygons.Num(), TotalHoles);
+	UE_LOG(LogRoguelikeGeometry,
+		Log,
+		TEXT("[OrganicFloor] BuildVectorContour: %d region(s) → %d polygon(s), %d hole(s)"),
+		Regions.Num(),
+		Out.Polygons.Num(),
+		TotalHoles);
+
+	return !Out.Polygons.IsEmpty();
 }
 
 // ============================================================================
+// FOrganicFloorBuilder — doorway gap cutting (B3)
+// ============================================================================
 
-void FOrganicFloorBuilder::EmitRibbonQuad(const FVector2D& P0, float R0, const FVector2D& P1, float R1, float Z, FMeshData& OutMesh)
+void FOrganicFloorBuilder::CutDoorwayGaps(
+	const FWalkablePolygon& Poly, const TArray<FWalkableDoorway>& Doorways, TArray<FWalkableBoundaryLoop>& OutLoops)
 {
-	// Perpendicular direction to the segment P0→P1 (normalized, 90° CCW).
-	const FVector2D Dir = (P1 - P0);
-	const float		Len = Dir.Size();
-	if (Len < KINDA_SMALL_NUMBER)
-		return; // degenerate segment
+	using namespace OrganicFloorBuilderImpl;
 
-	// Perpendicular: rotate Dir by 90° CCW.
-	const FVector2D Perp = FVector2D(-Dir.Y, Dir.X) / Len;
+	OutLoops.Reset();
 
-	const FVector2D Left0 = P0 + Perp * R0;
-	const FVector2D Right0 = P0 - Perp * R0;
-	const FVector2D Left1 = P1 + Perp * R1;
-	const FVector2D Right1 = P1 - Perp * R1;
-
-	// Emit quad CCW when viewed from above (+Z): Right0 → Right1 → Left1 → Left0.
-	// This matches EmitRoomRect (BL→BR→TR→TL) and EarClipSimple (CCW outer ring) so all
-	// triangles in the merged section share the same winding and face up with one-sided materials.
-	OrganicFloorBuilderImpl::EmitQuad(Right0, Right1, Left1, Left0, Z, OutMesh);
-}
-
-void FOrganicFloorBuilder::EmitRoomRect(const FOrganicRoom& Room, float Z, FMeshData& OutMesh)
-{
-	const float DegRad = FMath::DegreesToRadians(Room.RotationDeg);
-	const float C = FMath::Cos(DegRad);
-	const float S = FMath::Sin(DegRad);
-
-	// OBB axes.
-	const FVector2D AxisX(C, S);
-	const FVector2D AxisY(-S, C);
-
-	// Four OBB corners.
-	const FVector2D BL = Room.Center - AxisX * Room.HalfExtent.X - AxisY * Room.HalfExtent.Y;
-	const FVector2D BR = Room.Center + AxisX * Room.HalfExtent.X - AxisY * Room.HalfExtent.Y;
-	const FVector2D TR = Room.Center + AxisX * Room.HalfExtent.X + AxisY * Room.HalfExtent.Y;
-	const FVector2D TL = Room.Center - AxisX * Room.HalfExtent.X + AxisY * Room.HalfExtent.Y;
-
-	// Emit quad: BL, BR, TR, TL — CCW when viewed from above.
-	OrganicFloorBuilderImpl::EmitQuad(BL, BR, TR, TL, Z, OutMesh);
-}
-
-void FOrganicFloorBuilder::TriangulateWithHoles(const FWalkablePolygon& Poly, float Z, FMeshData& OutMesh)
-{
-	if (Poly.Outer.Num() < 3)
-		return;
-
-	if (Poly.Holes.IsEmpty())
+	// Gather every ring (outer + holes) as a closed loop candidate.
+	TArray<TArray<FVector2D>> Rings;
+	if (Poly.Outer.Num() >= 3)
 	{
-		// Common case: no holes — triangulate the outer ring directly.
-		OrganicFloorBuilderImpl::EarClipSimple(Poly.Outer, Z, OutMesh);
-		return;
+		Rings.Add(Poly.Outer);
+	}
+	for (const TArray<FVector2D>& Hole : Poly.Holes)
+	{
+		if (Hole.Num() >= 3)
+		{
+			Rings.Add(Hole);
+		}
 	}
 
-	// --- Hole merging via horizontal bridge (right-most vertex of hole → outer ring) ---
-	//
-	// We merge all holes into one combined outer polygon, one hole at a time.
-	// Each hole is merged by:
-	//   1. Finding the hole vertex with maximum X  (the "bridge point" H).
-	//   2. Casting a +X ray from H to find the nearest outer-polygon edge intersection.
-	//   3. Identifying the outer vertex with the largest X on the intersected edge side.
-	//   4. Splicing the hole into the outer polygon at that vertex via duplicated bridge verts.
-	//
-	// After all holes are merged the result is one simple polygon, passed to EarClipSimple.
-
-	// Sort holes by decreasing rightmost-X so each successive bridge is added to an
-	// already-updated polygon (avoids incorrect visibility when bridges overlap).
-	// Pre-compute maxX per hole to avoid pointer-comparator template deduction issues.
-	TArray<TPair<float, int32>> HoleSortKeys;
-	HoleSortKeys.Reserve(Poly.Holes.Num());
-	for (int32 Hi = 0; Hi < Poly.Holes.Num(); ++Hi)
+	// Densify rings finely enough that any doorway gap lands on existing vertices.  Spacing is a
+	// fraction of the smallest doorway width (clamped) so even narrow openings cut cleanly.
+	float MinDoorWidth = MAX_FLT;
+	for (const FWalkableDoorway& Door : Doorways)
 	{
-		float MaxX = -MAX_FLT;
-		for (const FVector2D& V : Poly.Holes[Hi])
-			MaxX = FMath::Max(MaxX, (float)V.X);
-		HoleSortKeys.Add(TPair<float, int32>(MaxX, Hi));
+		MinDoorWidth = FMath::Min(MinDoorWidth, Door.Width);
 	}
-	HoleSortKeys.Sort([](const TPair<float, int32>& A, const TPair<float, int32>& B) { return A.Key > B.Key; });
+	const float DensifySpacing = Doorways.IsEmpty() ? 0.0f : FMath::Clamp(MinDoorWidth * 0.25f, 10.0f, 200.0f);
 
-	// Start with a copy of the outer polygon that we progressively splice holes into.
-	TArray<FVector2D> Merged = Poly.Outer;
-
-	for (const TPair<float, int32>& SortedEntry : HoleSortKeys)
+	for (const TArray<FVector2D>& SrcRing : Rings)
 	{
-		const TArray<FVector2D>& Hole = Poly.Holes[SortedEntry.Value];
-		if (Hole.Num() < 3)
-			continue;
+		const TArray<FVector2D> Ring = (DensifySpacing > 0.0f) ? DensifyRing(SrcRing, DensifySpacing) : SrcRing;
+		const int32				N = Ring.Num();
 
-		// 1. Find the hole vertex with maximum X.
-		int32 BridgeHoleIdx = 0;
-		for (int32 i = 1; i < Hole.Num(); ++i)
+		// Find the doorways that fall on this ring: the doorway center must be near the ring
+		// boundary, and the cut removes the arc of vertices within Width/2 of the doorway center.
+		TArray<bool> bRemove;
+		bRemove.Init(false, N);
+
+		bool bAnyCut = false;
+
+		for (const FWalkableDoorway& Door : Doorways)
 		{
-			if (Hole[i].X > Hole[BridgeHoleIdx].X)
-				BridgeHoleIdx = i;
-		}
-		const FVector2D& HoleVert = Hole[BridgeHoleIdx];
-
-		// 2. Find the nearest outer polygon vertex to the right of HoleVert.X that has a
-		//    Y coordinate closest to HoleVert.Y (simple nearest-right-vertex strategy).
-		int32 BridgeOuterIdx = -1;
-		float BestDist = MAX_FLT;
-
-		for (int32 i = 0; i < Merged.Num(); ++i)
-		{
-			const FVector2D& OV = Merged[i];
-			if (OV.X < HoleVert.X)
-				continue; // must be to the right or at same X
-			const float Dist = FVector2D::DistSquared(HoleVert, OV);
-			if (Dist < BestDist)
+			// Locate the nearest ring vertex to the doorway center.
+			int32 NearestIdx = INDEX_NONE;
+			float NearestDistSq = MAX_FLT;
+			for (int32 i = 0; i < N; ++i)
 			{
-				BestDist = Dist;
-				BridgeOuterIdx = i;
-			}
-		}
-
-		if (BridgeOuterIdx < 0)
-		{
-			// Fallback: no outer vertex to the right — just use the nearest overall.
-			for (int32 i = 0; i < Merged.Num(); ++i)
-			{
-				const float Dist = FVector2D::DistSquared(HoleVert, Merged[i]);
-				if (Dist < BestDist)
+				const float DistSq = FVector2D::DistSquared(Ring[i], Door.Position);
+				if (DistSq < NearestDistSq)
 				{
-					BestDist = Dist;
-					BridgeOuterIdx = i;
+					NearestDistSq = DistSq;
+					NearestIdx = i;
 				}
 			}
-		}
 
-		if (BridgeOuterIdx < 0)
-			continue; // empty outer ring — shouldn't happen
-
-		// 3. Splice the hole into Merged.
-		// New ring: Merged[0..BridgeOuterIdx], BridgeOuter, Hole[BridgeHoleIdx..N-1],
-		//           Hole[0..BridgeHoleIdx], BridgeHoleVert (duplicate), Merged[BridgeOuterIdx..end].
-		TArray<FVector2D> NewMerged;
-		NewMerged.Reserve(Merged.Num() + Hole.Num() + 2);
-
-		for (int32 i = 0; i <= BridgeOuterIdx; ++i)
-			NewMerged.Add(Merged[i]);
-
-		// Walk hole starting from BridgeHoleIdx, wrapping around.
-		for (int32 k = 0; k <= Hole.Num(); ++k)
-			NewMerged.Add(Hole[(BridgeHoleIdx + k) % Hole.Num()]);
-
-		// Duplicate bridge vertices to close the bridge seam.
-		NewMerged.Add(Merged[BridgeOuterIdx]);
-
-		for (int32 i = BridgeOuterIdx + 1; i < Merged.Num(); ++i)
-			NewMerged.Add(Merged[i]);
-
-		Merged = MoveTemp(NewMerged);
-	}
-
-	// Triangulate the merged simple polygon.
-	OrganicFloorBuilderImpl::EarClipSimple(Merged, Z, OutMesh);
-}
-
-// ============================================================================
-
-bool FOrganicFloorBuilder::BuildCorridorFloorMesh(const FOrganicDungeonGridData& Grid, float FloorHeight, FMeshData& OutMesh)
-{
-	OutMesh.Clear();
-
-	if (Grid.bUseGridContourFloor)
-	{
-		// --- Grid-contour path ---
-		// Triangulate the pre-computed walkable contour polygons.
-		if (Grid.WalkableContour.Polygons.IsEmpty())
-		{
-			UE_LOG(LogRoguelikeGeometry,
-				Warning,
-				TEXT("[OrganicFloor] BuildCorridorFloorMesh (contour): WalkableContour is empty; no floor mesh generated"));
-			return false;
-		}
-
-		UE_LOG(LogRoguelikeGeometry,
-			Log,
-			TEXT("[OrganicFloor] BuildCorridorFloorMesh (contour): triangulating %d polygon(s) at Z=%.1f"),
-			Grid.WalkableContour.Polygons.Num(),
-			FloorHeight);
-
-		for (const FWalkablePolygon& Poly : Grid.WalkableContour.Polygons)
-		{
-			TriangulateWithHoles(Poly, FloorHeight, OutMesh);
-		}
-	}
-	else
-	{
-		// --- Ribbon path ---
-		// Emit a quad strip per corridor + a rectangle per room.
-
-		const bool bHasContent = !Grid.Corridors.IsEmpty() || !Grid.Rooms.IsEmpty();
-		if (!bHasContent)
-		{
-			UE_LOG(LogRoguelikeGeometry, Verbose, TEXT("[OrganicFloor] BuildCorridorFloorMesh (ribbon): no corridors or rooms"));
-			return false;
-		}
-
-		UE_LOG(LogRoguelikeGeometry,
-			Log,
-			TEXT("[OrganicFloor] BuildCorridorFloorMesh (ribbon): corridors=%d rooms=%d at Z=%.1f"),
-			Grid.Corridors.Num(),
-			Grid.Rooms.Num(),
-			FloorHeight);
-
-		// Emit corridor ribbons.
-		for (const FOrganicCorridor& Cor : Grid.Corridors)
-		{
-			if (Cor.Centerline.Num() < 2 || Cor.Radii.Num() != Cor.Centerline.Num())
+			if (NearestIdx == INDEX_NONE)
 			{
-				UE_LOG(LogRoguelikeGeometry,
-					Verbose,
-					TEXT("[OrganicFloor] BuildCorridorFloorMesh: corridor has %d centerline pts / %d radii — skipped"),
-					Cor.Centerline.Num(),
-					Cor.Radii.Num());
 				continue;
 			}
 
-			for (int32 i = 0; i + 1 < Cor.Centerline.Num(); ++i)
+			// Reject doorways that are not actually on this ring (e.g. belong to another ring):
+			// the nearest vertex must be within roughly one opening-width of the doorway center.
+			const float Reach = FMath::Max(Door.Width, 50.0f);
+			if (NearestDistSq > Reach * Reach)
 			{
-				EmitRibbonQuad(Cor.Centerline[i], Cor.Radii[i], Cor.Centerline[i + 1], Cor.Radii[i + 1], FloorHeight, OutMesh);
+				continue;
+			}
+
+			// Mark all vertices within Width/2 (arc distance approximated by straight distance to
+			// the doorway center) for removal — this opens a gap centered on the doorway.
+			const float HalfWidth = Door.Width * 0.5f;
+			for (int32 i = 0; i < N; ++i)
+			{
+				if (FVector2D::Distance(Ring[i], Door.Position) <= HalfWidth)
+				{
+					bRemove[i] = true;
+					bAnyCut = true;
+				}
+			}
+
+			// Guarantee at least the nearest vertex is removed so a degenerate-narrow doorway
+			// still produces a visible opening.
+			if (!bAnyCut)
+			{
+				bRemove[NearestIdx] = true;
+				bAnyCut = true;
 			}
 		}
 
-		// Emit room rectangles.
-		for (const FOrganicRoom& Room : Grid.Rooms)
+		if (!bAnyCut)
 		{
-			EmitRoomRect(Room, FloorHeight, OutMesh);
+			// No doorway touched this ring — emit it as a closed loop.
+			FWalkableBoundaryLoop Loop;
+			Loop.Points = Ring;
+			Loop.bClosed = true;
+			OutLoops.Add(MoveTemp(Loop));
+			continue;
 		}
+
+		// Rotate the ring so it starts at a KEPT vertex following a removed vertex, then split into
+		// open runs of kept vertices (each run is one open boundary loop). This turns a closed ring
+		// with one or more gaps into one open polyline per surviving span.
+		int32 StartKept = INDEX_NONE;
+		for (int32 i = 0; i < N; ++i)
+		{
+			const int32 Prev = (i + N - 1) % N;
+			if (!bRemove[i] && bRemove[Prev])
+			{
+				StartKept = i;
+				break;
+			}
+		}
+
+		if (StartKept == INDEX_NONE)
+		{
+			// Every vertex removed (over-wide doorway) — drop the ring entirely.
+			continue;
+		}
+
+		TArray<FVector2D> CurrentRun;
+		for (int32 k = 0; k < N; ++k)
+		{
+			const int32 Idx = (StartKept + k) % N;
+			if (bRemove[Idx])
+			{
+				if (CurrentRun.Num() >= 2)
+				{
+					FWalkableBoundaryLoop Loop;
+					Loop.Points = MoveTemp(CurrentRun);
+					Loop.bClosed = false;
+					OutLoops.Add(MoveTemp(Loop));
+				}
+				CurrentRun.Reset();
+			}
+			else
+			{
+				CurrentRun.Add(Ring[Idx]);
+			}
+		}
+
+		// Flush the trailing run (the ring is open, so it does not wrap back to the start).
+		if (CurrentRun.Num() >= 2)
+		{
+			FWalkableBoundaryLoop Loop;
+			Loop.Points = MoveTemp(CurrentRun);
+			Loop.bClosed = false;
+			OutLoops.Add(MoveTemp(Loop));
+		}
+	}
+}
+
+// ============================================================================
+// FOrganicFloorBuilder — unified floor + wall mesh (B4)
+// ============================================================================
+
+void FOrganicFloorBuilder::TriangulateFloorCap(const FWalkablePolygon& Poly, float Z, FMeshData& OutMesh)
+{
+	using namespace OrganicFloorBuilderImpl;
+	using namespace UE::Geometry;
+
+	if (Poly.Outer.Num() < 3)
+	{
+		return;
+	}
+
+	// Build a general polygon with the FWalkablePolygon winding (CCW outer, CW holes).
+	// AddHole enforces opposite winding to the outer, which our normalized rings already satisfy.
+	FGeneralPolygon2d GP(ToPolygon2d(Poly.Outer));
+	for (const TArray<FVector2D>& Hole : Poly.Holes)
+	{
+		if (Hole.Num() >= 3)
+		{
+			GP.AddHole(ToPolygon2d(Hole), /*bCheckContainment=*/false, /*bCheckOrientation=*/false);
+		}
+	}
+
+	// Triangulate with bOutputCCW so every cap triangle is emitted CCW in XY; combined with the
+	// +Z flat normal this makes the floor cap front-facing for one-sided materials (matching the
+	// up-facing top cap UProceduralMeshFactory produces for Voronoi foundations).
+	FConstrainedDelaunay2d Triangulation;
+	Triangulation.FillRule = FConstrainedDelaunay2d::EFillRule::Positive;
+	Triangulation.bOutputCCW = true;
+	Triangulation.Add(GP);
+	Triangulation.Triangulate();
+
+	const TArray<FIndex3i>& Tris = Triangulation.Triangles;
+	const TArray<FVec2d>&	Verts = Triangulation.Vertices;
+
+	if (Tris.IsEmpty() || Verts.IsEmpty())
+	{
+		UE_LOG(LogRoguelikeGeometry, Warning, TEXT("[OrganicFloor] TriangulateFloorCap: CDT produced no triangles"));
+		return;
+	}
+
+	const int32 BaseIdx = OutMesh.Vertices.Num();
+	for (const FVec2d& V : Verts)
+	{
+		AddFlatVert(FVector2D(static_cast<float>(V.X), static_cast<float>(V.Y)), Z, OutMesh);
+	}
+
+	for (const FIndex3i& T : Tris)
+	{
+		OutMesh.Triangles.Add(BaseIdx + T.A);
+		OutMesh.Triangles.Add(BaseIdx + T.B);
+		OutMesh.Triangles.Add(BaseIdx + T.C);
+	}
+}
+
+void FOrganicFloorBuilder::ExtrudeWallLoop(const TArray<FVector2D>& Loop, bool bClosed, float FloorHeight, float WallHeight, FMeshData& OutMesh)
+{
+	using namespace OrganicFloorBuilderImpl;
+
+	const int32 N = Loop.Num();
+	if (N < 2)
+	{
+		return;
+	}
+
+	// One side-quad per consecutive point pair, matching UProceduralMeshFactory::BuildSideGeometry:
+	//   four verts (bottom_i, bottom_next, top_i, top_next), accumulated-length U, height V,
+	//   side normal = -cross(top_i - bottom_i, bottom_next - bottom_i), winding {0,3,1, 0,2,3}.
+	const float TopZ = FloorHeight + WallHeight;
+	const int32 SegCount = bClosed ? N : (N - 1);
+	float		AccumulatedLength = 0.0f;
+
+	for (int32 i = 0; i < SegCount; ++i)
+	{
+		const int32 NextIndex = (i + 1) % N;
+
+		const FVector Bottom0(Loop[i].X, Loop[i].Y, FloorHeight);
+		const FVector Bottom1(Loop[NextIndex].X, Loop[NextIndex].Y, FloorHeight);
+		const FVector Top0(Loop[i].X, Loop[i].Y, TopZ);
+		const FVector Top1(Loop[NextIndex].X, Loop[NextIndex].Y, TopZ);
+
+		const int32 Base = OutMesh.Vertices.Num();
+		OutMesh.Vertices.Append({ Bottom0, Bottom1, Top0, Top1 });
+
+		const float EdgeLength = FVector2D::Distance(Loop[i], Loop[NextIndex]);
+		const float UStart = AccumulatedLength * UVScale;
+		const float UEnd = (AccumulatedLength + EdgeLength) * UVScale;
+		AccumulatedLength += EdgeLength;
+
+		OutMesh.UVs.Append(
+			{ FVector2D(UStart, 0.0f), FVector2D(UEnd, 0.0f), FVector2D(UStart, WallHeight * UVScale), FVector2D(UEnd, WallHeight * UVScale) });
+
+		const FVector SideNormal =
+			-FVector::CrossProduct(OutMesh.Vertices[Base + 2] - OutMesh.Vertices[Base], OutMesh.Vertices[Base + 1] - OutMesh.Vertices[Base])
+				 .GetSafeNormal();
+
+		for (int32 j = 0; j < 4; ++j)
+		{
+			OutMesh.Normals.Add(SideNormal);
+			OutMesh.VertexColors.Add(FLinearColor::White);
+			OutMesh.Tangents.Add(FProcMeshTangent(FVector(1.0f, 0.0f, 0.0f), false));
+		}
+
+		OutMesh.Triangles.Append({ Base, Base + 3, Base + 1, Base, Base + 2, Base + 3 });
+	}
+}
+
+bool FOrganicFloorBuilder::BuildFoundationMesh(const FWalkablePolygon& Poly,
+	const TArray<FWalkableBoundaryLoop>&							   WallLoops,
+	float															   FloorHeight,
+	float															   WallHeight,
+	float															   WallThickness,
+	FMeshData&														   OutMesh)
+{
+	OutMesh.Clear();
+
+	// Floor cap from the CLOSED polygon (spans doorway openings).
+	TriangulateFloorCap(Poly, FloorHeight, OutMesh);
+
+	// Walls from the (doorway-cut) boundary loops.
+	const float SafeWallHeight = FMath::Max(WallHeight, 1.0f);
+	for (const FWalkableBoundaryLoop& Loop : WallLoops)
+	{
+		ExtrudeWallLoop(Loop.Points, Loop.bClosed, FloorHeight, SafeWallHeight, OutMesh);
 	}
 
 	const bool bHasGeometry = !OutMesh.Triangles.IsEmpty();
 
 	UE_LOG(LogRoguelikeGeometry,
 		Log,
-		TEXT("[OrganicFloor] BuildCorridorFloorMesh: result — vertices=%d triangles=%d (path=%s)"),
+		TEXT("[OrganicFloor] BuildFoundationMesh: vertices=%d triangles=%d (wallLoops=%d, wallThickness=%.0f)"),
 		OutMesh.Vertices.Num(),
 		OutMesh.Triangles.Num() / 3,
-		Grid.bUseGridContourFloor ? TEXT("contour") : TEXT("ribbon"));
+		WallLoops.Num(),
+		WallThickness);
 
 	return bHasGeometry;
 }

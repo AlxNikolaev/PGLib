@@ -136,28 +136,33 @@ struct PROCEDURALGEOMETRY_API FOrganicDungeonGridData
 
 	FLayoutDiagram2D Diagram; // full floor (rooms + corridors)
 
-	// ---- Floor-mesh data (populated by FOrganicFloorBuilder::ComputeWalkableContour) ----
+	// ---- Floor/wall boundary data (populated by FOrganicFloorBuilder::BuildVectorContour) ----
 
 	/**
-	 * Walkable-region boundary contour for this cluster: corridor-ribbon ∪ room-footprint,
-	 * derived from the rasterized floor grid so the union is exact.
+	 * Walkable-region boundary contour for this cluster: corridor-ribbon ∪ room-OBB, computed by
+	 * 2D-polygon-union of smoothed corridor centerlines (offset by their radius) and room
+	 * rectangles — a smooth vector boundary, not a grid trace.
 	 * Populated at the end of UOrganicDungeonGenerator2D::GenerateWithGridData / RasterizeLayout.
-	 * Consumed by FOrganicFloorBuilder::BuildCorridorFloorMesh (grid-contour path) and persisted
-	 * on AGeneratedLevelActor for the future wall-generation pass.
+	 * Consumed by FOrganicFloorBuilder::BuildFoundationMesh (floor cap + walls) and persisted on
+	 * AGeneratedLevelActor for the wall-generation / wall-spline pass.
 	 */
 	FWalkableRegionContour WalkableContour;
 
 	/**
-	 * Generator's recommendation for which floor-mesh strategy the runtime should use.
-	 * true  → use the grid-contour path (marching-squares triangulation of WalkableContour).
-	 * false → use the ribbon-extrusion path (corridor centerlines + room rectangles).
-	 *
-	 * Set by the generator to true when corridor smoothing is enabled OR when cave-style
-	 * corridors are used (variable-width discs that diverge significantly from centerlines).
-	 * Decouples the runtime from generator parameters.
+	 * Wall thickness in GRID CELLS (copied from FOrganicDungeonResolvedParams::WallThickness).
+	 * World wall thickness = WallThicknessCells * CellSize.  Consumed by the runtime when building
+	 * the unified floor+wall foundation mesh (FOrganicFloorBuilder::BuildFoundationMesh).
 	 */
-	bool bUseGridContourFloor = false;
+	int32 WallThicknessCells = 1;
 };
+
+/**
+ * Mutable working state for a single GenerateLocationSubgraph build. Holds the rooms/corridors and
+ * the bookkeeping (open list, queue cursor, spine/diameter indices, MST data, per-build stat counters)
+ * that the placement → connectivity → dead-end → link phases thread through in order. Defined in the
+ * .cpp; only the subgraph phase helpers of UOrganicDungeonGenerator2D touch it.
+ */
+struct FOrgSubgraphBuild;
 
 /** Continuous-space layout (rooms + corridors + entrance + exit anchors) produced before rasterization. Internal. */
 struct PROCEDURALGEOMETRY_API FOrganicLayout
@@ -335,4 +340,74 @@ private:
 		int32&										  OutStartRoomIdx,
 		int32&										  OutEndRoomIdx,
 		TSet<uint64>&								  OutSpineEdges);
+
+	// --- GenerateLocationSubgraph phase helpers (instance; share RandomStream/GridSize through `this`) ---
+	// These are a behavior-preserving decomposition of GenerateLocationSubgraph: each consumes the build
+	// context in place and is invoked in a fixed order so the FRandomStream draw sequence is unchanged.
+
+	/**
+	 * Generates a room's doorways from its current Center/RotationDeg. Declared-doorway rooms transform
+	 * each baked opening local→world; legacy rooms fall back to one synthetic centered punch-point per
+	 * footprint edge. Room.RotationDeg must already be set.
+	 */
+	void GenerateDoorways(FOrganicRoom& Room, const FOrganicDungeonResolvedParams& Params) const;
+
+	/** Builds a fully-populated room (type/center/rotation/footprint + doorways) for the given type. */
+	FOrganicRoom MakeRoom(const FOrganicDungeonResolvedParams& Params, int32 TypeIdx, const FVector2D& Center, float RotDeg) const;
+
+	/**
+	 * Layer 2 — continuous placement. Seeds the first room at CenterPoint (pushed clear of Obstacles),
+	 * then grows rooms from open-list doorways while avoiding all placed rooms and obstacles. Mutates
+	 * Ctx.Rooms/OpenList/QueueIdx and the retry/backtrack/placed stat counters. Draws RandomStream in the
+	 * existing order (source doorway pick, corridor length, branch test, room rotation).
+	 */
+	void PlaceRooms(FOrgSubgraphBuild&		 Ctx,
+		const FOrganicDungeonResolvedParams& Params,
+		const FVector2D&					 CenterPoint,
+		const TArray<FOrganicRoom>&			 Obstacles,
+		const TArray<int32>&				 Queue,
+		int32								 RequestedRoomCount);
+
+	/**
+	 * Layer 1 — connectivity. Builds the proximity MST + spine, runs the declared-doorway orientation
+	 * solve (re-roll/drop + MST rebuild), carves the backbone corridors (spine widened) and budgeted
+	 * loops. Mutates the rooms/corridors/MST/spine working state, the start/end diameter indices, and the
+	 * loop/spine stat counters. Only runs its body when Ctx.Rooms has at least two rooms.
+	 */
+	void ConnectRooms(
+		FOrgSubgraphBuild& Ctx, const FOrganicDungeonResolvedParams& Params, const FVector2D& CenterPoint, const TArray<FOrganicRoom>& Obstacles);
+
+	/**
+	 * Computes the chain-leaf exit anchor (the diameter endpoint opposite the entrance) used for
+	 * inter-location stitching, and performs the entrance-room prefab swap when bHasStartRoom is set.
+	 * The chain-leaf doorway is NOT reserved here.
+	 */
+	FOrganicExitAnchor ComputeChainLeaf(FOrgSubgraphBuild& Ctx, const FOrganicDungeonResolvedParams& Params, const FVector2D& CenterPoint);
+
+	/**
+	 * Layer 1b — dead-end stubs. Adds up to DeadEndCount free-doorway corridor stubs ending in open
+	 * (Free-anchor) alcoves. Draws RandomStream (room pick, doorway pick) in the existing order.
+	 */
+	void AddDeadEnds(FOrgSubgraphBuild& Ctx, const FOrganicDungeonResolvedParams& Params);
+
+	/**
+	 * Layer 1b — corridor links. Adds up to CorridorLinkCount branches from a random corridor to the
+	 * nearest free room doorway or other corridor. Draws RandomStream (source corridor, branch point,
+	 * branch side) in the existing order.
+	 */
+	void AddCorridorLinks(FOrgSubgraphBuild& Ctx, const FOrganicDungeonResolvedParams& Params);
+
+	/**
+	 * Carves a corridor between two rooms via their best-facing doorways, consuming those doorways and
+	 * appending to Ctx.Corridors. When bRejectIfClipsRoom is set the corridor is discarded if its curve
+	 * would clip a third room. Returns true if a corridor was carved.
+	 */
+	bool MakeRoomCorridor(FOrgSubgraphBuild& Ctx,
+		const FOrganicDungeonResolvedParams& Params,
+		int32								 A,
+		int32								 B,
+		bool								 bLoop,
+		bool								 bSpine,
+		float								 RadiusScale,
+		bool								 bRejectIfClipsRoom);
 };

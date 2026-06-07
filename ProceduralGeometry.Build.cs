@@ -20,7 +20,15 @@ public class ProceduralGeometry : ModuleRules
             [
                 "CoreUObject",
                 "Engine",
-                "ProceduralMeshComponent"
+                "ProceduralMeshComponent",
+                // Vector floor/wall geometry for OrganicDungeon clusters:
+                //   GeometryCore       — FGeneralPolygon2d / TPolygon2 / TVector2 interchange types.
+                //   GeometryAlgorithms — PolygonsOffset (corridor ribbons), PolygonsUnion (region merge),
+                //                        ConstrainedDelaunay2 (concave-with-holes floor cap triangulation).
+                // GeometryAlgorithms is a Runtime module of the GeometryProcessing plugin (enabled in the
+                // .uproject for all targets); GeometryCore is an engine Runtime module.
+                "GeometryCore",
+                "GeometryAlgorithms"
             ]
         );
     }

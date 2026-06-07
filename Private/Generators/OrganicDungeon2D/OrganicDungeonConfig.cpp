@@ -1,5 +1,11 @@
 #include "Generators/OrganicDungeon2D/OrganicDungeonConfig.h"
 
+#include "Components/ArrowComponent.h"
+#include "Components/BillboardComponent.h"
+#include "Components/PrimitiveComponent.h"
+#include "Components/ShapeComponent.h"
+#include "Components/SplineComponent.h"
+#include "Components/TextRenderComponent.h"
 #include "Engine/Level.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
@@ -21,6 +27,43 @@ namespace
 	};
 	FCriticalSection						GFootprintCacheLock;
 	TMap<FSoftObjectPath, FCachedFootprint> GFootprintCache;
+
+	/**
+	 * Decides whether a single primitive component contributes to a prefab's measured XY footprint.
+	 * Pure (no world access) so it can be unit-tested without loading a level.
+	 *
+	 * Excluded (do not contribute to the playable footprint):
+	 *   - editor-only components — never part of the runtime room geometry;
+	 *   - UShapeComponent (box/sphere/capsule) — spawner trigger volumes, not floor;
+	 *   - USplineComponent — corridor/path authoring guides, not floor;
+	 *   - UArrowComponent / UBillboardComponent / UTextRenderComponent — editor markers and visualization only
+	 *     (basement / doorway / transition markers and their gizmos).
+	 * Everything else (static / instanced / procedural meshes that make up the actual room) contributes.
+	 */
+	bool ShouldComponentContributeToFootprint(const UPrimitiveComponent* Comp)
+	{
+		if (!Comp || Comp->IsEditorOnly())
+		{
+			return false;
+		}
+
+		// Class-level exclusion (triggers / splines / marker gizmos) — shared with the unit-tested static helper.
+		return !FOrganicDungeonConfig::IsFootprintExcludedComponentClass(Comp->GetClass());
+	}
+
+	/** Removes one cached footprint entry. Caller must NOT hold GFootprintCacheLock; this takes it. */
+	void RemoveFootprintCacheEntry(const FSoftObjectPath& LevelPath)
+	{
+		FScopeLock Lock(&GFootprintCacheLock);
+		GFootprintCache.Remove(LevelPath);
+	}
+
+	/** Clears all cached footprints. Caller must NOT hold GFootprintCacheLock; this takes it. */
+	void ClearFootprintCache()
+	{
+		FScopeLock Lock(&GFootprintCacheLock);
+		GFootprintCache.Empty();
+	}
 
 	/** Loads a level asset and measures its XY footprint (size + center offset) from its actors' bounds. Cached. */
 	bool MeasureLevelFootprintXY(const TSoftObjectPtr<UWorld>& LevelRef, float& OutW, float& OutH, FVector2D& OutCenter)
@@ -45,19 +88,47 @@ namespace
 		FCachedFootprint Result;
 		if (UWorld* World = LevelRef.LoadSynchronous(); World && World->PersistentLevel)
 		{
-			FBox Box(ForceInit);
-			bool bAny = false;
+			// Union only the components that make up the playable room geometry. Editor-only marker actors
+			// (basement / doorway / transition) and trigger / spline / visualization components are excluded
+			// so they cannot inflate the footprint. Mirrors AClusterActorBase::ComputeWorldBounds: world-space
+			// registered-component Bounds.GetBox(), not the actor-level GetComponentsBoundingBox().
+			FBox  Box(ForceInit);
+			bool  bAny = false;
+			int32 ContribCount = 0;
 			for (AActor* Actor : World->PersistentLevel->Actors)
 			{
-				if (!Actor)
+				if (!Actor || Actor->IsEditorOnly())
 				{
 					continue;
 				}
-				const FBox ActorBox = Actor->GetComponentsBoundingBox(true);
-				if (ActorBox.IsValid)
+
+				TArray<UPrimitiveComponent*> Primitives;
+				Actor->GetComponents<UPrimitiveComponent>(Primitives, /*bIncludeFromChildActors=*/true);
+				for (const UPrimitiveComponent* Primitive : Primitives)
 				{
-					Box += ActorBox;
-					bAny = true;
+					if (!ShouldComponentContributeToFootprint(Primitive))
+					{
+						continue;
+					}
+
+					// A prefab loaded as an asset (not instanced) often has UNREGISTERED components whose cached
+					// Bounds are stale/empty — this silently under-measured walled prefabs. Compute fresh bounds
+					// from the component transform when the component is not registered.
+					FBox PrimBox;
+					if (Primitive->IsRegistered())
+					{
+						PrimBox = Primitive->Bounds.GetBox();
+					}
+					else
+					{
+						PrimBox = Primitive->CalcBounds(Primitive->GetComponentTransform()).GetBox();
+					}
+					if (PrimBox.GetSize().SizeSquared() > 1.0f)
+					{
+						Box += PrimBox;
+						bAny = true;
+						++ContribCount;
+					}
 				}
 			}
 			if (bAny)
@@ -68,6 +139,15 @@ namespace
 				Result.H = static_cast<float>(Size.Y);
 				Result.Center = FVector2D(Center.X, Center.Y);
 				Result.bValid = Result.W > 1.0f && Result.H > 1.0f;
+				UE_LOG(LogRoguelikeGeometry,
+					Log,
+					TEXT("[OrganicFloor] Measured footprint '%s': %.0f x %.0f (center %.0f, %.0f) from %d component(s)"),
+					*Key.GetAssetName(),
+					Result.W,
+					Result.H,
+					Result.Center.X,
+					Result.Center.Y,
+					ContribCount);
 			}
 		}
 
@@ -258,4 +338,27 @@ FOrganicDungeonResolvedParams FOrganicDungeonConfig::ResolveForTotal(const int32
 		TotalWeight);
 
 	return Params;
+}
+
+void FOrganicDungeonConfig::InvalidateFootprintCache(const FSoftObjectPath& LevelPath)
+{
+	RemoveFootprintCacheEntry(LevelPath);
+}
+
+void FOrganicDungeonConfig::InvalidateAllFootprints()
+{
+	ClearFootprintCache();
+}
+
+bool FOrganicDungeonConfig::IsFootprintExcludedComponentClass(const UClass* ComponentClass)
+{
+	if (!ComponentClass)
+	{
+		return false;
+	}
+
+	// One UShapeComponent check covers UBoxComponent / USphereComponent / UCapsuleComponent trigger volumes.
+	return ComponentClass->IsChildOf(UShapeComponent::StaticClass()) || ComponentClass->IsChildOf(USplineComponent::StaticClass())
+		|| ComponentClass->IsChildOf(UArrowComponent::StaticClass()) || ComponentClass->IsChildOf(UBillboardComponent::StaticClass())
+		|| ComponentClass->IsChildOf(UTextRenderComponent::StaticClass());
 }

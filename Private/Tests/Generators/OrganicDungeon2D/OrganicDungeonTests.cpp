@@ -6,6 +6,13 @@
 #include "Factories/ProceduralMeshFactory.h"
 #include "../../ProceduralGeometryTestFlags.h"
 
+#include "Components/ArrowComponent.h"
+#include "Components/BillboardComponent.h"
+#include "Components/BoxComponent.h"
+#include "Components/SplineComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Components/TextRenderComponent.h"
+
 #if WITH_DEV_AUTOMATION_TESTS
 
 namespace
@@ -572,88 +579,106 @@ bool FODConfigResolveForTotalMaxRespectedTest::RunTest(const FString& Parameters
 }
 
 // ============================================================
-// FloorBuilder Test Helpers
+// FloorBuilder (vector path) Test Helpers
 // ============================================================
 
 namespace
 {
-	/**
-	 * Build a minimal FOrganicDungeonGridData with a rectangular floor blob
-	 * covering cells (StartX..EndX, StartY..EndY) inclusive.
-	 * CellSize=100, GridOriginWorld=(0,0).
-	 */
-	FOrganicDungeonGridData MakeRectGrid(int32 GridW, int32 GridH, int32 StartX, int32 EndX, int32 StartY, int32 EndY, float CellSz = 100.0f)
+	/** Build a straight 2-sample corridor (P0 → P1, constant radius). */
+	FOrganicCorridor MakeCorridor(const FVector2D& P0, const FVector2D& P1, float Radius)
 	{
-		FOrganicDungeonGridData Data;
-		Data.GridWidth = GridW;
-		Data.GridHeight = GridH;
-		Data.CellSize = CellSz;
-		Data.GridOriginWorld = FVector2D::ZeroVector;
-		Data.Grid.Init(false, GridW * GridH);
-		Data.CellType.Init(EOrganicCellType::Empty, GridW * GridH);
-
-		for (int32 cy = StartY; cy <= EndY && cy < GridH; ++cy)
-		{
-			for (int32 cx = StartX; cx <= EndX && cx < GridW; ++cx)
-			{
-				const int32 Idx = cy * GridW + cx;
-				Data.Grid[Idx] = true;
-				Data.CellType[Idx] = EOrganicCellType::Corridor;
-			}
-		}
-		return Data;
+		FOrganicCorridor Cor;
+		Cor.Centerline.Add(P0);
+		Cor.Centerline.Add(P1);
+		Cor.Radii.Add(Radius);
+		Cor.Radii.Add(Radius);
+		return Cor;
 	}
 
-	/** Build a 2-sample corridor (P0 → P1, constant radius) plus one room. */
-	FOrganicDungeonGridData MakeRibbonGrid(float Radius = 50.0f)
+	/** Build an axis-aligned room OBB centered at Center with the given half-extent. */
+	FOrganicRoom MakeRoom(const FVector2D& Center, const FVector2D& HalfExtent, float RotationDeg = 0.0f)
 	{
-		FOrganicDungeonGridData Data;
-		Data.bUseGridContourFloor = false;
-		Data.GridWidth = 0;
-		Data.GridHeight = 0;
-		Data.CellSize = 100.0f;
-		Data.GridOriginWorld = FVector2D::ZeroVector;
-
-		FOrganicCorridor Cor;
-		Cor.Centerline.Add(FVector2D(0.0f, 0.0f));
-		Cor.Centerline.Add(FVector2D(500.0f, 0.0f));
-		Cor.Radii.Add(Radius);
-		Cor.Radii.Add(Radius);
-		Data.Corridors.Add(Cor);
-
 		FOrganicRoom Room;
-		Room.Center = FVector2D(700.0f, 0.0f);
-		Room.RotationDeg = 0.0f;
-		Room.HalfExtent = FVector2D(100.0f, 100.0f);
-		Data.Rooms.Add(Room);
+		Room.Center = Center;
+		Room.RotationDeg = RotationDeg;
+		Room.HalfExtent = HalfExtent;
+		return Room;
+	}
 
-		return Data;
+	/** 2D shoelace signed area; positive = CCW. */
+	float TestSignedArea(const TArray<FVector2D>& Ring)
+	{
+		float		Area = 0.0f;
+		const int32 N = Ring.Num();
+		for (int32 i = 0; i < N; ++i)
+		{
+			const FVector2D& A = Ring[i];
+			const FVector2D& B = Ring[(i + 1) % N];
+			Area += A.X * B.Y - B.X * A.Y;
+		}
+		return Area * 0.5f;
 	}
 } // namespace
 
 // ============================================================
-// Test 19: ComputeWalkableContour — single rectangular blob → one CCW outer polygon.
+// Test 19: SmoothCenterline — Chaikin adds points and preserves endpoints.
 // ============================================================
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FOrganicFloorContourRectTest, "ProceduralGeometry.OrganicFloor.ComputeWalkableContour_RectBlob", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FOrganicFloorSmoothTest, "ProceduralGeometry.OrganicFloor.SmoothCenterline_Chaikin", DefaultTestFlags)
 
-bool FOrganicFloorContourRectTest::RunTest(const FString& /*Parameters*/)
+bool FOrganicFloorSmoothTest::RunTest(const FString& /*Parameters*/)
 {
-	// 5×4 grid with a filled 3×2 rectangle at (1,1)–(3,2).
-	FOrganicDungeonGridData Data = MakeRectGrid(/*W=*/5, /*H=*/4, 1, 3, 1, 2, /*CellSz=*/100.0f);
+	// A 3-point dog-leg centerline with matching radii.
+	TArray<FVector2D> In = { FVector2D(0.0f, 0.0f), FVector2D(500.0f, 0.0f), FVector2D(500.0f, 500.0f) };
+	TArray<float>	  InRadii = { 50.0f, 80.0f, 50.0f };
+
+	TArray<FVector2D> OutPts;
+	TArray<float>	  OutRadii;
+	FOrganicFloorBuilder::SmoothCenterline(In, InRadii, /*Iterations=*/2, OutPts, OutRadii);
+
+	// Chaikin refines interior corners → more points than the input (a few-point smooth curve).
+	TestTrue("Smooth: output has more points than input", OutPts.Num() > In.Num());
+	TestEqual("Smooth: radii parallel to points", OutRadii.Num(), OutPts.Num());
+
+	// Endpoints are pinned (anchored to room doorways).
+	TestTrue("Smooth: first endpoint preserved", OutPts[0].Equals(In[0], 0.01f));
+	TestTrue("Smooth: last endpoint preserved", OutPts.Last().Equals(In.Last(), 0.01f));
+
+	// Resampled radii stay within the input radius range.
+	for (const float R : OutRadii)
+	{
+		TestTrue("Smooth: resampled radius within [50,80]", R >= 50.0f - 0.01f && R <= 80.0f + 0.01f);
+	}
+
+	return true;
+}
+
+// ============================================================
+// Test 20: BuildVectorContour — corridor ribbon ∪ room OBB → one smooth outer polygon, CCW.
+// ============================================================
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FOrganicFloorVectorUnionTest, "ProceduralGeometry.OrganicFloor.BuildVectorContour_CorridorRoomUnion", DefaultTestFlags)
+
+bool FOrganicFloorVectorUnionTest::RunTest(const FString& /*Parameters*/)
+{
+	// A corridor running into an overlapping room — one connected walkable region.
+	TArray<FOrganicCorridor> Corridors = { MakeCorridor(FVector2D(0.0f, 0.0f), FVector2D(600.0f, 0.0f), /*Radius=*/60.0f) };
+	TArray<FOrganicRoom>	 Rooms = { MakeRoom(FVector2D(700.0f, 0.0f), FVector2D(200.0f, 200.0f)) };
 
 	FWalkableRegionContour Contour;
-	FOrganicFloorBuilder::ComputeWalkableContour(Data, Contour);
+	const bool			   bOk = FOrganicFloorBuilder::BuildVectorContour(Corridors, Rooms, /*SmoothIterations=*/2, Contour);
 
-	if (!TestEqual("RectBlob: exactly one outer polygon", Contour.Polygons.Num(), 1))
+	TestTrue("VectorUnion: builder returns true", bOk);
+	if (!TestEqual("VectorUnion: exactly one outer polygon", Contour.Polygons.Num(), 1))
 		return false;
 
 	const FWalkablePolygon& Poly = Contour.Polygons[0];
-	TestTrue("RectBlob: outer ring has >= 4 vertices", Poly.Outer.Num() >= 4);
-	TestTrue("RectBlob: no holes", Poly.Holes.IsEmpty());
+	TestTrue("VectorUnion: outer ring has >= 4 vertices", Poly.Outer.Num() >= 4);
+	TestTrue("VectorUnion: no holes (connected region)", Poly.Holes.IsEmpty());
 
-	// Verify world-coordinate extents match the expected rectangle.
-	// The floor rectangle occupies cells (1,1)–(3,2) with CellSize=100.
-	// Vertex coords should span [1*100, 4*100] × [1*100, 3*100] = [100,400] × [100,300].
+	// Winding adapter invariant: outer ring is CCW (positive signed area).
+	TestTrue("VectorUnion: outer ring is CCW", TestSignedArea(Poly.Outer) > 0.0f);
+
+	// The union must span the corridor start and reach into the room.
 	FVector2D MinPt(MAX_FLT, MAX_FLT), MaxPt(-MAX_FLT, -MAX_FLT);
 	for (const FVector2D& V : Poly.Outer)
 	{
@@ -662,251 +687,181 @@ bool FOrganicFloorContourRectTest::RunTest(const FString& /*Parameters*/)
 		MaxPt.X = FMath::Max(MaxPt.X, V.X);
 		MaxPt.Y = FMath::Max(MaxPt.Y, V.Y);
 	}
-	TestTrue("RectBlob: outer.MinX == 100", FMath::IsNearlyEqual(MinPt.X, 100.0f, 1.0f));
-	TestTrue("RectBlob: outer.MinY == 100", FMath::IsNearlyEqual(MinPt.Y, 100.0f, 1.0f));
-	TestTrue("RectBlob: outer.MaxX == 400", FMath::IsNearlyEqual(MaxPt.X, 400.0f, 1.0f));
-	TestTrue("RectBlob: outer.MaxY == 300", FMath::IsNearlyEqual(MaxPt.Y, 300.0f, 1.0f));
+	TestTrue("VectorUnion: spans corridor start (X near 0 or less)", MinPt.X <= 5.0f);
+	TestTrue("VectorUnion: reaches room far edge (X near 900)", MaxPt.X >= 850.0f);
 
 	return true;
 }
 
 // ============================================================
-// Test 20: ComputeWalkableContour — corridor + overlapping room → exactly one outer polygon,
-//          zero holes (union correctness).
-//
-// Grid layout (10×6, CellSize=100):
-//   Corridor cells: rows 2-3, cols 1-7  (horizontal strip)
-//   Room cells:     rows 1-4, cols 5-9  (vertical block)
-//   Overlap:        rows 2-3, cols 5-7  (shared cells)
-//
-// The corridor and room form ONE connected region after union — the contour must yield
-// exactly one outer polygon with no holes and no spurious duplicate loops.
+// Test 21: BuildVectorContour winding adapter — holes are CW when an interior void exists.
 // ============================================================
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FOrganicFloorContourUnionTest, "ProceduralGeometry.OrganicFloor.ComputeWalkableContour_CorridorRoomUnion", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FOrganicFloorVectorHoleTest, "ProceduralGeometry.OrganicFloor.BuildVectorContour_HoleWinding", DefaultTestFlags)
 
-bool FOrganicFloorContourUnionTest::RunTest(const FString& /*Parameters*/)
+bool FOrganicFloorVectorHoleTest::RunTest(const FString& /*Parameters*/)
 {
-	// Hand-built deterministic grid: 10 wide × 6 tall.
-	FOrganicDungeonGridData Data;
-	Data.GridWidth = 10;
-	Data.GridHeight = 6;
-	Data.CellSize = 100.0f;
-	Data.GridOriginWorld = FVector2D::ZeroVector;
-	Data.Grid.Init(false, 10 * 6);
-	Data.CellType.Init(EOrganicCellType::Empty, 10 * 6);
-
-	auto SetCell = [&](int32 cx, int32 cy, uint8 Type) {
-		const int32 Idx = cy * 10 + cx;
-		Data.Grid[Idx] = true;
-		Data.CellType[Idx] = Type;
+	// Four corridors forming a closed square ring around an empty interior → one outer + one hole.
+	const float				 R = 60.0f;
+	TArray<FOrganicCorridor> Corridors = {
+		MakeCorridor(FVector2D(0.0f, 0.0f), FVector2D(1000.0f, 0.0f), R),
+		MakeCorridor(FVector2D(1000.0f, 0.0f), FVector2D(1000.0f, 1000.0f), R),
+		MakeCorridor(FVector2D(1000.0f, 1000.0f), FVector2D(0.0f, 1000.0f), R),
+		MakeCorridor(FVector2D(0.0f, 1000.0f), FVector2D(0.0f, 0.0f), R),
 	};
-
-	// Corridor: rows 2-3, cols 1-7
-	for (int32 cy = 2; cy <= 3; ++cy)
-		for (int32 cx = 1; cx <= 7; ++cx)
-			SetCell(cx, cy, EOrganicCellType::Corridor);
-
-	// Room: rows 1-4, cols 5-9 (overlaps corridor at rows 2-3, cols 5-7)
-	for (int32 cy = 1; cy <= 4; ++cy)
-		for (int32 cx = 5; cx <= 9; ++cx)
-			SetCell(cx, cy, EOrganicCellType::Room);
+	TArray<FOrganicRoom> Rooms;
 
 	FWalkableRegionContour Contour;
-	FOrganicFloorBuilder::ComputeWalkableContour(Data, Contour);
+	const bool			   bOk = FOrganicFloorBuilder::BuildVectorContour(Corridors, Rooms, /*SmoothIterations=*/1, Contour);
 
-	// The union of corridor + overlapping room is ONE connected region.
-	// Union correctness: exactly one outer polygon (no duplicate loops).
-	if (!TestEqual("UnionTest: exactly one outer polygon", Contour.Polygons.Num(), 1))
+	TestTrue("HoleWinding: builder returns true", bOk);
+	if (!TestTrue("HoleWinding: at least one polygon", Contour.Polygons.Num() >= 1))
 		return false;
 
-	const FWalkablePolygon& Poly = Contour.Polygons[0];
-	TestTrue("UnionTest: outer ring has >= 4 vertices", Poly.Outer.Num() >= 4);
-	TestTrue("UnionTest: no holes (connected L/T-shape, no enclosed pockets)", Poly.Holes.IsEmpty());
-
-	return true;
-}
-
-// ============================================================
-// Test 21: ComputeWalkableContour — floor with an interior pocket → one outer + one hole.
-// ============================================================
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FOrganicFloorContourHoleTest, "ProceduralGeometry.OrganicFloor.ComputeWalkableContour_InteriorHole", DefaultTestFlags)
-
-bool FOrganicFloorContourHoleTest::RunTest(const FString& /*Parameters*/)
-{
-	// 7×7 grid: ring of floor cells around a 3×3 hollow interior.
-	// Floor ring: all cells except the 3×3 center (2..4, 2..4).
-	FOrganicDungeonGridData Data;
-	Data.GridWidth = 7;
-	Data.GridHeight = 7;
-	Data.CellSize = 100.0f;
-	Data.GridOriginWorld = FVector2D::ZeroVector;
-	Data.Grid.Init(false, 49);
-	Data.CellType.Init(EOrganicCellType::Empty, 49);
-
-	for (int32 cy = 1; cy <= 5; ++cy)
-	{
-		for (int32 cx = 1; cx <= 5; ++cx)
-		{
-			// Leave (2,2)–(4,4) empty (the interior hole).
-			if (cx >= 2 && cx <= 4 && cy >= 2 && cy <= 4)
-				continue;
-			const int32 Idx = cy * 7 + cx;
-			Data.Grid[Idx] = true;
-			Data.CellType[Idx] = EOrganicCellType::Corridor;
-		}
-	}
-
-	FWalkableRegionContour Contour;
-	FOrganicFloorBuilder::ComputeWalkableContour(Data, Contour);
-
-	if (!TestTrue("InteriorHole: at least one polygon", Contour.Polygons.Num() >= 1))
-		return false;
-
-	// The ring should produce exactly one outer polygon with exactly one hole.
 	int32 TotalHoles = 0;
 	for (const FWalkablePolygon& Poly : Contour.Polygons)
 	{
-		TotalHoles += Poly.Holes.Num();
+		TestTrue("HoleWinding: outer ring CCW", TestSignedArea(Poly.Outer) > 0.0f);
+		for (const TArray<FVector2D>& Hole : Poly.Holes)
+		{
+			++TotalHoles;
+			TestTrue("HoleWinding: hole ring CW", TestSignedArea(Hole) < 0.0f);
+		}
 	}
-	TestEqual("InteriorHole: exactly one hole", TotalHoles, 1);
+	TestTrue("HoleWinding: at least one interior hole", TotalHoles >= 1);
 
 	return true;
 }
 
 // ============================================================
-// Test 22: BuildCorridorFloorMesh ribbon path — 2-sample corridor + 1 room.
+// Test 22: CutDoorwayGaps — a doorway opens a closed ring into an open loop.
 // ============================================================
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FOrganicFloorMeshRibbonTest, "ProceduralGeometry.OrganicFloor.BuildCorridorFloorMesh_Ribbon", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FOrganicFloorDoorwayCutTest, "ProceduralGeometry.OrganicFloor.CutDoorwayGaps_OpensLoop", DefaultTestFlags)
 
-bool FOrganicFloorMeshRibbonTest::RunTest(const FString& /*Parameters*/)
+bool FOrganicFloorDoorwayCutTest::RunTest(const FString& /*Parameters*/)
 {
-	FOrganicDungeonGridData Data = MakeRibbonGrid();
-	// bUseGridContourFloor is already false from MakeRibbonGrid.
+	// A single room rect; one doorway on its right edge.
+	TArray<FOrganicRoom>	 Rooms = { MakeRoom(FVector2D(0.0f, 0.0f), FVector2D(300.0f, 300.0f)) };
+	TArray<FOrganicCorridor> Corridors;
+
+	FWalkableRegionContour Contour;
+	FOrganicFloorBuilder::BuildVectorContour(Corridors, Rooms, /*SmoothIterations=*/1, Contour);
+	if (!TestEqual("DoorwayCut: one polygon from one room", Contour.Polygons.Num(), 1))
+		return false;
+
+	// Doorway on the +X edge, width 200.
+	TArray<FWalkableDoorway> Doorways;
+	{
+		FWalkableDoorway Door;
+		Door.Position = FVector2D(300.0f, 0.0f);
+		Door.OutwardDir = FVector2D(1.0f, 0.0f);
+		Door.Width = 200.0f;
+		Doorways.Add(Door);
+	}
+
+	TArray<FWalkableBoundaryLoop> Loops;
+	FOrganicFloorBuilder::CutDoorwayGaps(Contour.Polygons[0], Doorways, Loops);
+
+	TestTrue("DoorwayCut: produced at least one loop", Loops.Num() >= 1);
+
+	bool bAnyOpen = false;
+	for (const FWalkableBoundaryLoop& Loop : Loops)
+	{
+		if (!Loop.bClosed)
+		{
+			bAnyOpen = true;
+			TestTrue("DoorwayCut: open loop has >= 2 points", Loop.Points.Num() >= 2);
+		}
+	}
+	TestTrue("DoorwayCut: at least one open (gapped) loop", bAnyOpen);
+
+	// Without doorways the ring stays closed.
+	TArray<FWalkableBoundaryLoop> ClosedLoops;
+	FOrganicFloorBuilder::CutDoorwayGaps(Contour.Polygons[0], {}, ClosedLoops);
+	TestEqual("DoorwayCut: no doorways → one closed loop", ClosedLoops.Num(), 1);
+	if (ClosedLoops.Num() == 1)
+	{
+		TestTrue("DoorwayCut: untouched ring is closed", ClosedLoops[0].bClosed);
+	}
+
+	return true;
+}
+
+// ============================================================
+// Test 23: BuildFoundationMesh — unified floor cap + wall geometry, correct normals.
+// ============================================================
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FOrganicFloorFoundationMeshTest, "ProceduralGeometry.OrganicFloor.BuildFoundationMesh_FloorAndWalls", DefaultTestFlags)
+
+bool FOrganicFloorFoundationMeshTest::RunTest(const FString& /*Parameters*/)
+{
+	TArray<FOrganicRoom>	 Rooms = { MakeRoom(FVector2D(0.0f, 0.0f), FVector2D(300.0f, 300.0f)) };
+	TArray<FOrganicCorridor> Corridors;
+
+	FWalkableRegionContour Contour;
+	FOrganicFloorBuilder::BuildVectorContour(Corridors, Rooms, /*SmoothIterations=*/1, Contour);
+	if (!TestEqual("FoundationMesh: one polygon", Contour.Polygons.Num(), 1))
+		return false;
+
+	const FWalkablePolygon& Poly = Contour.Polygons[0];
+
+	// Closed-ring walls (no doorways).
+	TArray<FWalkableBoundaryLoop> WallLoops;
+	FOrganicFloorBuilder::CutDoorwayGaps(Poly, {}, WallLoops);
 
 	constexpr float FloorH = 100.0f;
-	FMeshData		Mesh;
-	const bool		bBuilt = FOrganicFloorBuilder::BuildCorridorFloorMesh(Data, FloorH, Mesh);
-
-	TestTrue("Ribbon: BuildCorridorFloorMesh returns true", bBuilt);
-	TestTrue("Ribbon: non-empty vertices", Mesh.Vertices.Num() > 0);
-	TestTrue("Ribbon: non-empty triangles", Mesh.Triangles.Num() > 0);
-
-	// A 2-sample corridor (1 segment → 1 quad = 4 verts, 2 tris) + 1 room (1 quad = 4 verts, 2 tris)
-	// → 8 vertices, 4 triangles (12 triangle indices).
-	TestEqual("Ribbon: 8 vertices (1 corridor quad + 1 room quad)", Mesh.Vertices.Num(), 8);
-	TestEqual("Ribbon: 4 triangles", Mesh.Triangles.Num() / 3, 4);
-
-	// All top vertices must be at Z == FloorHeight.
-	for (const FVector& V : Mesh.Vertices)
-	{
-		TestTrue("Ribbon: vertex Z == FloorHeight", FMath::IsNearlyEqual(V.Z, FloorH, KINDA_SMALL_NUMBER));
-	}
-
-	// Verify corridor ribbon width == 2*radius (acceptance criterion #7: floor width = corridor thickness).
-	// The corridor runs from (0,0) to (500,0) with constant radius=50 (see MakeRibbonGrid).
-	// Corridor ribbon vertices have X in [0,500]; the Y extent must span exactly [-50, +50].
-	// (The room rect at (700,0) with HalfExtent=(100,100) has vertices outside X=500 so does not
-	// contaminate the corridor-region Y measurement.)
-	float CorridorMinY = MAX_FLT, CorridorMaxY = -MAX_FLT;
-	for (const FVector& V : Mesh.Vertices)
-	{
-		if (V.X <= 500.0f + 1.0f) // corridor region
-		{
-			CorridorMinY = FMath::Min(CorridorMinY, V.Y);
-			CorridorMaxY = FMath::Max(CorridorMaxY, V.Y);
-		}
-	}
-	TestTrue("Ribbon: corridor Y-min == -radius (-50.0)", FMath::IsNearlyEqual(CorridorMinY, -50.0f, 1.0f));
-	TestTrue("Ribbon: corridor Y-max == +radius (+50.0)", FMath::IsNearlyEqual(CorridorMaxY, 50.0f, 1.0f));
-
-	return true;
-}
-
-// ============================================================
-// Test 23: BuildCorridorFloorMesh grid-contour path — filled grid → fewer tris than per-cell.
-// ============================================================
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FOrganicFloorMeshContourTest, "ProceduralGeometry.OrganicFloor.BuildCorridorFloorMesh_GridContour", DefaultTestFlags)
-
-bool FOrganicFloorMeshContourTest::RunTest(const FString& /*Parameters*/)
-{
-	// 6×6 fully-filled grid of floor cells (36 cells → 72 per-cell-quad triangles).
-	FOrganicDungeonGridData Data = MakeRectGrid(6, 6, 0, 5, 0, 5, 100.0f);
-	Data.bUseGridContourFloor = true;
-	FOrganicFloorBuilder::ComputeWalkableContour(Data, Data.WalkableContour);
-
-	constexpr float FloorH = 50.0f;
-	FMeshData		Mesh;
-	const bool		bBuilt = FOrganicFloorBuilder::BuildCorridorFloorMesh(Data, FloorH, Mesh);
-
-	TestTrue("Contour: BuildCorridorFloorMesh returns true", bBuilt);
-	TestTrue("Contour: non-empty mesh", Mesh.Vertices.Num() > 0);
-
-	// Per-cell-quad count would be 36×2 = 72 triangles. The contour path should produce far fewer.
-	const int32 PerCellTris = Data.GridWidth * Data.GridHeight * 2; // 72
-	const int32 ContourTris = Mesh.Triangles.Num() / 3;
-	TestTrue("Contour: fewer triangles than per-cell quads", ContourTris < PerCellTris);
-
-	// Verify the XY extent of the mesh matches the contour bounding box.
-	if (!Data.WalkableContour.Polygons.IsEmpty())
-	{
-		FVector2D ContourMin(MAX_FLT, MAX_FLT), ContourMax(-MAX_FLT, -MAX_FLT);
-		for (const FVector2D& V : Data.WalkableContour.Polygons[0].Outer)
-		{
-			ContourMin.X = FMath::Min(ContourMin.X, V.X);
-			ContourMin.Y = FMath::Min(ContourMin.Y, V.Y);
-			ContourMax.X = FMath::Max(ContourMax.X, V.X);
-			ContourMax.Y = FMath::Max(ContourMax.Y, V.Y);
-		}
-
-		FVector MeshMin(MAX_FLT, MAX_FLT, MAX_FLT), MeshMax(-MAX_FLT, -MAX_FLT, -MAX_FLT);
-		for (const FVector& V : Mesh.Vertices)
-		{
-			MeshMin.X = FMath::Min(MeshMin.X, V.X);
-			MeshMin.Y = FMath::Min(MeshMin.Y, V.Y);
-			MeshMax.X = FMath::Max(MeshMax.X, V.X);
-			MeshMax.Y = FMath::Max(MeshMax.Y, V.Y);
-		}
-
-		TestTrue("Contour: mesh XMin matches contour", FMath::IsNearlyEqual(MeshMin.X, ContourMin.X, 1.0f));
-		TestTrue("Contour: mesh YMin matches contour", FMath::IsNearlyEqual(MeshMin.Y, ContourMin.Y, 1.0f));
-		TestTrue("Contour: mesh XMax matches contour", FMath::IsNearlyEqual(MeshMax.X, ContourMax.X, 1.0f));
-		TestTrue("Contour: mesh YMax matches contour", FMath::IsNearlyEqual(MeshMax.Y, ContourMax.Y, 1.0f));
-	}
-
-	return true;
-}
-
-// ============================================================
-// Test 24: BuildCorridorFloorMesh — empty/no-floor grid → returns false, empty mesh.
-// ============================================================
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FOrganicFloorMeshEmptyTest, "ProceduralGeometry.OrganicFloor.BuildCorridorFloorMesh_EmptyGrid", DefaultTestFlags)
-
-bool FOrganicFloorMeshEmptyTest::RunTest(const FString& /*Parameters*/)
-{
-	// Empty grid — no corridors, no rooms, no floor cells.
-	FOrganicDungeonGridData Data;
-	Data.GridWidth = 5;
-	Data.GridHeight = 5;
-	Data.CellSize = 100.0f;
-	Data.GridOriginWorld = FVector2D::ZeroVector;
-	Data.Grid.Init(false, 25);
-	Data.CellType.Init(EOrganicCellType::Empty, 25);
-	Data.bUseGridContourFloor = false;
+	constexpr float WallHeight = 400.0f;
+	constexpr float WallThickness = 500.0f;
 
 	FMeshData  Mesh;
-	const bool bBuilt = FOrganicFloorBuilder::BuildCorridorFloorMesh(Data, 100.0f, Mesh);
+	const bool bBuilt = FOrganicFloorBuilder::BuildFoundationMesh(Poly, WallLoops, FloorH, WallHeight, WallThickness, Mesh);
 
-	TestFalse("EmptyGrid: BuildCorridorFloorMesh returns false", bBuilt);
-	TestTrue("EmptyGrid: vertices empty", Mesh.Vertices.IsEmpty());
-	TestTrue("EmptyGrid: triangles empty", Mesh.Triangles.IsEmpty());
+	TestTrue("FoundationMesh: builder returns true", bBuilt);
+	TestTrue("FoundationMesh: non-empty vertices", Mesh.Vertices.Num() > 0);
+	TestTrue("FoundationMesh: non-empty triangles", Mesh.Triangles.Num() > 0);
 
-	// Grid-contour path with empty contour should also return false.
-	Data.bUseGridContourFloor = true;
-	FMeshData  Mesh2;
-	const bool bBuilt2 = FOrganicFloorBuilder::BuildCorridorFloorMesh(Data, 100.0f, Mesh2);
-	TestFalse("EmptyGrid(contour): returns false", bBuilt2);
+	// Parallel attribute arrays must all match the vertex count.
+	TestEqual("FoundationMesh: normals match verts", Mesh.Normals.Num(), Mesh.Vertices.Num());
+	TestEqual("FoundationMesh: UVs match verts", Mesh.UVs.Num(), Mesh.Vertices.Num());
+	TestEqual("FoundationMesh: colors match verts", Mesh.VertexColors.Num(), Mesh.Vertices.Num());
+	TestEqual("FoundationMesh: tangents match verts", Mesh.Tangents.Num(), Mesh.Vertices.Num());
+
+	// At least one up-facing floor-cap vertex at the floor plane and one wall vertex above it.
+	bool bHasUpFloor = false;
+	bool bHasWallTop = false;
+	for (int32 i = 0; i < Mesh.Vertices.Num(); ++i)
+	{
+		if (FMath::IsNearlyEqual(Mesh.Vertices[i].Z, FloorH, 0.1f) && Mesh.Normals[i].Z > 0.9f)
+		{
+			bHasUpFloor = true;
+		}
+		if (Mesh.Vertices[i].Z > FloorH + 1.0f)
+		{
+			bHasWallTop = true;
+			// Wall side normals are roughly horizontal (no strong +Z/-Z component).
+			TestTrue("FoundationMesh: wall normal roughly horizontal", FMath::Abs(Mesh.Normals[i].Z) < 0.5f);
+		}
+	}
+	TestTrue("FoundationMesh: has up-facing floor cap", bHasUpFloor);
+	TestTrue("FoundationMesh: has wall geometry above floor", bHasWallTop);
+
+	return true;
+}
+
+// ============================================================
+// Test 24: BuildVectorContour — empty input → returns false, empty contour.
+// ============================================================
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FOrganicFloorVectorEmptyTest, "ProceduralGeometry.OrganicFloor.BuildVectorContour_Empty", DefaultTestFlags)
+
+bool FOrganicFloorVectorEmptyTest::RunTest(const FString& /*Parameters*/)
+{
+	TArray<FOrganicCorridor> Corridors;
+	TArray<FOrganicRoom>	 Rooms;
+
+	FWalkableRegionContour Contour;
+	const bool			   bOk = FOrganicFloorBuilder::BuildVectorContour(Corridors, Rooms, /*SmoothIterations=*/2, Contour);
+
+	TestFalse("VectorEmpty: builder returns false", bOk);
+	TestTrue("VectorEmpty: contour has no polygons", Contour.Polygons.IsEmpty());
 
 	return true;
 }
@@ -1722,6 +1677,41 @@ bool FODSelectExitAnchors_DeterminismTest::RunTest(const FString& Parameters)
 		TestEqual(FString::Printf(TEXT("Determinism: anchor[%d] same room"), i), Anchors1[i].RoomIndex, Anchors2[i].RoomIndex);
 		TestEqual(FString::Printf(TEXT("Determinism: anchor[%d] same GraphDistance"), i), Anchors1[i].GraphDistance, Anchors2[i].GraphDistance);
 	}
+
+	return true;
+}
+
+// ============================================================
+// Footprint component-classification test — FOrganicDungeonConfig::IsFootprintExcludedComponentClass.
+// Drives the pure class-level footprint filter directly (no UWorld / level load): mesh components must
+// contribute to a prefab's measured footprint, while trigger volumes, spline guides, and editor marker
+// gizmos must be excluded so they cannot inflate it.
+// ============================================================
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FOrganicFootprintComponentFilterTest, "ProceduralGeometry.OrganicDungeon.Config.FootprintComponentFilter", DefaultTestFlags)
+
+bool FOrganicFootprintComponentFilterTest::RunTest(const FString& Parameters)
+{
+	// Mesh geometry forms the playable room → must contribute (not excluded).
+	TestFalse("FootprintComponentFilter: StaticMeshComponent contributes",
+		FOrganicDungeonConfig::IsFootprintExcludedComponentClass(UStaticMeshComponent::StaticClass()));
+
+	// Trigger volume (a UShapeComponent subclass) → excluded.
+	TestTrue("FootprintComponentFilter: BoxComponent (trigger) excluded",
+		FOrganicDungeonConfig::IsFootprintExcludedComponentClass(UBoxComponent::StaticClass()));
+
+	// Path/authoring guides and editor marker gizmos → excluded.
+	TestTrue("FootprintComponentFilter: SplineComponent excluded",
+		FOrganicDungeonConfig::IsFootprintExcludedComponentClass(USplineComponent::StaticClass()));
+	TestTrue("FootprintComponentFilter: ArrowComponent excluded",
+		FOrganicDungeonConfig::IsFootprintExcludedComponentClass(UArrowComponent::StaticClass()));
+	TestTrue("FootprintComponentFilter: BillboardComponent excluded",
+		FOrganicDungeonConfig::IsFootprintExcludedComponentClass(UBillboardComponent::StaticClass()));
+	TestTrue("FootprintComponentFilter: TextRenderComponent excluded",
+		FOrganicDungeonConfig::IsFootprintExcludedComponentClass(UTextRenderComponent::StaticClass()));
+
+	// Null class is not classified as excluded (defensive).
+	TestFalse("FootprintComponentFilter: null class not excluded", FOrganicDungeonConfig::IsFootprintExcludedComponentClass(nullptr));
 
 	return true;
 }

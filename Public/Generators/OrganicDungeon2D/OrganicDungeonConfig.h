@@ -383,4 +383,33 @@ struct PROCEDURALGEOMETRY_API FOrganicDungeonConfig
 	 * manually set per-type counts.
 	 */
 	FOrganicDungeonResolvedParams ResolveForTotal(int32 TotalRooms) const;
+
+	/**
+	 * Drops the cached footprint for a single prefab level so the next Resolve() re-measures it from the
+	 * level's current bounds. Measuring a footprint loads the prefab UWorld synchronously, so results are
+	 * cached per level path; this clears one stale entry. Thread-safe.
+	 *
+	 * Safe to call from editor modules (which depend on ProceduralGeometry) on prefab save, asset reimport,
+	 * or preview re-roll, so designers see footprint changes take effect without an editor restart.
+	 *
+	 * @param LevelPath  Soft object path of the prefab UWorld (FOrganicRoomType::RoomLevel.ToSoftObjectPath()).
+	 */
+	static void InvalidateFootprintCache(const FSoftObjectPath& LevelPath);
+
+	/**
+	 * Drops every cached footprint so all prefab levels are re-measured on the next Resolve(). Thread-safe.
+	 * Safe to call from editor modules on bulk reimport or when many prefabs may have changed.
+	 */
+	static void InvalidateAllFootprints();
+
+	/**
+	 * Pure class-level test: true if a primitive of this component class is excluded from a prefab's measured
+	 * footprint regardless of its runtime state. Excludes trigger shapes (UShapeComponent and subclasses),
+	 * spline path guides (USplineComponent), and editor markers / visualization gizmos
+	 * (UArrowComponent / UBillboardComponent / UTextRenderComponent). Everything else (meshes) is included.
+	 *
+	 * This is the class portion of the footprint filter, exposed so it can be unit-tested without loading a
+	 * UWorld. The full per-component filter additionally drops unregistered and editor-only instances.
+	 */
+	static bool IsFootprintExcludedComponentClass(const UClass* ComponentClass);
 };
