@@ -7,14 +7,19 @@
 struct FOrganicDungeonGridData;
 
 /**
- * Seed-deterministic layout diagnostics for the OrganicDungeon generator.
+ * Seed-deterministic layout diagnostics for the gridless OrganicDungeon generator.
  *
- * Produces a machine-readable TEXT dump (rooms, corridor centerline splines, doorways, layout stats)
- * and an SVG render of the 2D layout (rooms as oriented rects, corridors as polylines colored by
- * role, start/end rooms marked). Intended for two workflows:
+ * Produces a machine-readable TEXT dump (rooms, junctions, few-point corridor centerlines, doorways) and an SVG
+ * render of the 2D vector layout — rooms as oriented rects, junctions as deformed-circle hubs, and corridors as
+ * smooth Catmull-Rom curves through their few control points. There is no rasterized grid and no per-corridor
+ * role: every corridor draws as one wavy curve. Intended for two workflows:
  *   - A designer hits a bad layout, sends the seed + config; the exact layout is regenerated and dumped.
  *   - Headless e2e testing: a test/commandlet generates from a config + seed and writes the dump so the
  *     resulting layout can be inspected (and rendered) without opening the editor.
+ *
+ * The TEXT dump's "VALID " line carries the gridless invariants (rooms placed vs requested, connected-region
+ * count, and corridor↔room-body crossings) for the e2e loop to grep. Connectivity is corridor adjacency over the
+ * room-cell network (rooms + junctions), mirroring the runtime room-cell diagram — not a grid flood-fill.
  *
  * Pure data → string; no UObject / world access. File writing uses the Engine file helpers.
  */

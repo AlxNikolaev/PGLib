@@ -196,74 +196,165 @@ namespace OrganicLayoutDebugImpl
 		}
 		return Crossings;
 	}
+
+	// Counts the connected components of the room-cell network. OrganicDungeon is gridless: connectivity is
+	// corridor adjacency, not a grid flood-fill. The network nodes are {rooms ∪ junctions} and an edge joins two
+	// nodes whenever a corridor (or a junction's host-corridor record) ties them together.
+	//
+	// Preferred source: the room-cell diagram's FLayoutCell2D.Neighbors — this is exactly the adjacency the runtime
+	// ConvertLayoutToGridDiagram copies into the FVoronoiGridDiagram, so the diagnostic measures the SAME
+	// connectivity the transition / portal path relies on. When the diagram has not been built yet (cells empty),
+	// fall back to a BFS over corridor anchors + junction host-corridor records so the stat still works on the raw
+	// vector layout.
+	//
+	// Returns the number of connected components over the occupied node set; an empty layout returns 0. A correct
+	// gridless layout — every room joined via a free/aligned doorway or an on-demand junction — returns 1.
+	int32 CountConnectedRegions(const FOrganicDungeonGridData& Grid)
+	{
+		// --- Preferred: the room-cell diagram (rooms first, then junctions), adjacency = Cell.Neighbors. ---
+		const int32 NumCells = Grid.Diagram.Cells.Num();
+		if (NumCells > 0)
+		{
+			TArray<bool> Visited;
+			Visited.Init(false, NumCells);
+			int32		  Components = 0;
+			TArray<int32> Queue;
+			for (int32 Seed = 0; Seed < NumCells; ++Seed)
+			{
+				if (Visited[Seed])
+				{
+					continue;
+				}
+				++Components;
+				Queue.Reset();
+				Queue.Add(Seed);
+				Visited[Seed] = true;
+				for (int32 Head = 0; Head < Queue.Num(); ++Head)
+				{
+					const int32 U = Queue[Head];
+					for (const int32 V : Grid.Diagram.Cells[U].Neighbors)
+					{
+						if (V >= 0 && V < NumCells && !Visited[V])
+						{
+							Visited[V] = true;
+							Queue.Add(V);
+						}
+					}
+				}
+			}
+			return Components;
+		}
+
+		// --- Fallback (pre-diagram): BFS over the raw vector layout. Node ids are [0, Rooms.Num()) for rooms and a
+		//     disjoint block [Rooms.Num(), Rooms.Num()+Junctions.Num()) for junctions. A corridor joins its two
+		//     Room/Junction anchors; a Free anchor (open dead-end stub) is a non-joining endpoint. Junction
+		//     host-corridor records additionally bridge the junction into the corridor it was tapped onto. ---
+		const int32 NumRooms = Grid.Rooms.Num();
+		const int32 NumJunctions = Grid.Junctions.Num();
+		const int32 NumNodes = NumRooms + NumJunctions;
+		if (NumNodes == 0)
+		{
+			return 0;
+		}
+
+		TArray<TArray<int32>> Adj;
+		Adj.SetNum(NumNodes);
+		auto NodeOf = [&](const FOrganicAnchor& A) -> int32 {
+			if (A.Type == EOrganicAnchorType::Room && A.Index >= 0 && A.Index < NumRooms)
+			{
+				return A.Index;
+			}
+			if (A.Type == EOrganicAnchorType::Junction && A.Index >= 0 && A.Index < NumJunctions)
+			{
+				return NumRooms + A.Index;
+			}
+			return INDEX_NONE; // Free / Corridor / out-of-range — not a network node here
+		};
+		auto Join = [&](int32 U, int32 V) {
+			if (U != INDEX_NONE && V != INDEX_NONE && U != V)
+			{
+				Adj[U].AddUnique(V);
+				Adj[V].AddUnique(U);
+			}
+		};
+		for (const FOrganicCorridor& Cor : Grid.Corridors)
+		{
+			Join(NodeOf(Cor.AnchorA), NodeOf(Cor.AnchorB));
+		}
+		// Bridge each junction into the host corridor it was tapped onto (its two endpoint rooms/junctions).
+		for (int32 j = 0; j < NumJunctions; ++j)
+		{
+			const int32 JNode = NumRooms + j;
+			for (const FOrganicAnchor& Host : Grid.Junctions[j].HostCorridorAnchors)
+			{
+				Join(JNode, NodeOf(Host));
+			}
+		}
+
+		TArray<bool> Visited;
+		Visited.Init(false, NumNodes);
+		int32		  Components = 0;
+		TArray<int32> Queue;
+		for (int32 Seed = 0; Seed < NumNodes; ++Seed)
+		{
+			if (Visited[Seed])
+			{
+				continue;
+			}
+			++Components;
+			Queue.Reset();
+			Queue.Add(Seed);
+			Visited[Seed] = true;
+			for (int32 Head = 0; Head < Queue.Num(); ++Head)
+			{
+				const int32 U = Queue[Head];
+				for (const int32 V : Adj[U])
+				{
+					if (!Visited[V])
+					{
+						Visited[V] = true;
+						Queue.Add(V);
+					}
+				}
+			}
+		}
+		return Components;
+	}
 } // namespace OrganicLayoutDebugImpl
 
 FString FOrganicLayoutDebug::ToText(const FOrganicDungeonGridData& Grid)
 {
 	using namespace OrganicLayoutDebugImpl;
 
-	int32 SpineN = 0, LoopN = 0, LinkN = 0;
-	for (const FOrganicCorridor& Cor : Grid.Corridors)
-	{
-		SpineN += Cor.bIsSpine ? 1 : 0;
-		LoopN += Cor.bIsLoop ? 1 : 0;
-		LinkN += Cor.bIsLink ? 1 : 0;
-	}
-
-	// Achieved dead-ends = corridors with a Free-anchor endpoint (open alcove stubs).
-	int32 DeadEndN = 0;
-	for (const FOrganicCorridor& Cor : Grid.Corridors)
-	{
-		if (Cor.AnchorA.Type == EOrganicAnchorType::Free || Cor.AnchorB.Type == EOrganicAnchorType::Free)
-		{
-			++DeadEndN;
-		}
-	}
-
+	// The three gridless invariants the dump reports: corridors never cross a room body (must be 0), the room-cell
+	// network is ONE connected region (corridor adjacency), and every requested room was placed.
 	const int32 Crossings = CountCorridorRoomCrossings(Grid);
+	const int32 Regions = CountConnectedRegions(Grid);
 
 	FString Out;
-	Out += TEXT("# OD layout dump v2\n");
-	Out += FString::Printf(
-		TEXT("GRID %d %d %.1f %.1f %.1f\n"), Grid.GridWidth, Grid.GridHeight, Grid.CellSize, Grid.GridOriginWorld.X, Grid.GridOriginWorld.Y);
+	Out += TEXT("# OD layout dump v3\n");
 	Out += FString::Printf(TEXT("START %d\n"), Grid.StartRoomIndex);
 	Out += FString::Printf(TEXT("END %d\n"), Grid.EndRoomIndex);
-	Out += FString::Printf(TEXT("STATS rooms=%d corridors=%d junctions=%d spine=%d loops=%d links=%d deadEnds=%d\n"),
+	// Gridless STATS: node/edge counts only (no grid dims, no loop/link/spine — loop/link generation is gone and
+	// junctions are an on-demand connectivity fallback, not a requested count). CellSize is carried for the
+	// runtime zone-allocation length threshold.
+	Out += FString::Printf(TEXT("STATS rooms=%d corridors=%d junctions=%d cellSize=%.1f\n"),
 		Grid.Rooms.Num(),
 		Grid.Corridors.Num(),
 		Grid.Junctions.Num(),
-		SpineN,
-		LoopN,
-		LinkN,
-		DeadEndN);
+		Grid.CellSize);
 
-	// VALID: achieved-vs-requested for each constraint plus the hard invariant crossings (must be 0). ok=1 only
-	// when every requested count was met (best-effort: a shortfall is logged by the generator, never a failure)
-	// AND no corridor crosses a room body. Format is one stable line so the e2e loop can grep regressions.
+	// VALID: the gridless invariants on one stable, greppable line (the e2e loop greps "VALID " / "crossings=0").
+	//   rooms=<placed>/<requested>  every requested room placed,
+	//   regions=<n>                 the room-cell network is ONE connected component (corridor adjacency),
+	//   crossings=<n>               no corridor crosses a room body (hard invariant — must be 0).
+	// ok=1 only when all three hold. A room shortfall is logged by the generator (best-effort placement), so it is
+	// surfaced here but the on-demand-junction fallback still guarantees regions==1 for whatever was placed.
 	const int32 ReqRooms = Grid.RequestedRoomCount;
-	const int32 ReqLoops = Grid.RequestedLoopCount;
-	const int32 ReqLinks = Grid.RequestedLinkCount;
-	const int32 ReqDeadEnds = Grid.RequestedDeadEndCount;
-	const int32 ReqJunctions = Grid.RequestedJunctionCount;
 	const bool	bRoomsOk = Grid.Rooms.Num() >= ReqRooms;
-	const bool	bLoopsOk = LoopN >= ReqLoops;
-	const bool	bLinksOk = LinkN >= ReqLinks;
-	const bool	bDeadEndsOk = DeadEndN >= ReqDeadEnds;
-	const bool	bJunctionsOk = Grid.Junctions.Num() >= ReqJunctions;
-	const bool	bOk = bRoomsOk && bLoopsOk && bLinksOk && bDeadEndsOk && bJunctionsOk && Crossings == 0;
-	Out += FString::Printf(TEXT("VALID ok=%d rooms=%d/%d loops=%d/%d links=%d/%d deadEnds=%d/%d junctions=%d/%d crossings=%d\n"),
-		bOk ? 1 : 0,
-		Grid.Rooms.Num(),
-		ReqRooms,
-		LoopN,
-		ReqLoops,
-		LinkN,
-		ReqLinks,
-		DeadEndN,
-		ReqDeadEnds,
-		Grid.Junctions.Num(),
-		ReqJunctions,
-		Crossings);
+	const bool	bRegionsOk = (Grid.Rooms.Num() == 0) ? (Regions == 0) : (Regions == 1);
+	const bool	bOk = bRoomsOk && bRegionsOk && Crossings == 0;
+	Out += FString::Printf(TEXT("VALID ok=%d rooms=%d/%d regions=%d crossings=%d\n"), bOk ? 1 : 0, Grid.Rooms.Num(), ReqRooms, Regions, Crossings);
 
 	for (int32 i = 0; i < Grid.Rooms.Num(); ++i)
 	{
@@ -296,13 +387,12 @@ FString FOrganicLayoutDebug::ToText(const FOrganicDungeonGridData& Grid)
 	for (int32 i = 0; i < Grid.Corridors.Num(); ++i)
 	{
 		const FOrganicCorridor& Cor = Grid.Corridors[i];
-		Out += FString::Printf(TEXT("CORR %d spine=%d loop=%d link=%d aType=%d bType=%d npts=%d\n"),
+		Out += FString::Printf(TEXT("CORR %d aType=%d aIdx=%d bType=%d bIdx=%d npts=%d\n"),
 			i,
-			Cor.bIsSpine ? 1 : 0,
-			Cor.bIsLoop ? 1 : 0,
-			Cor.bIsLink ? 1 : 0,
 			static_cast<int32>(Cor.AnchorA.Type),
+			Cor.AnchorA.Index,
 			static_cast<int32>(Cor.AnchorB.Type),
+			Cor.AnchorB.Index,
 			Cor.Centerline.Num());
 		for (int32 p = 0; p < Cor.Centerline.Num(); ++p)
 		{
@@ -346,24 +436,24 @@ FString FOrganicLayoutDebug::ToSvg(const FOrganicDungeonGridData& Grid)
 	Svg += FString::Printf(TEXT("<rect x=\"0\" y=\"0\" width=\"%.0f\" height=\"%.0f\" fill=\"#1b1b1f\"/>\n"), W, H);
 	const float Stroke = FMath::Max(8.0f, (W + H) * 0.0015f);
 
-	// Corridors (under rooms): color by role.
+	// Corridors (under rooms): gridless model has no per-corridor role — one wavy curve, one color. Drawn as a
+	// smoothed (Catmull-Rom) curve so the few-point wavy centerline renders as the visible curve, not a polyline.
+	const TCHAR* const CorridorColor = TEXT("#888");
 	for (const FOrganicCorridor& Cor : Grid.Corridors)
 	{
 		if (Cor.Centerline.Num() < 2)
 		{
 			continue;
 		}
-		const TCHAR* Color = Cor.bIsLink ? TEXT("#4fa3ff") : (Cor.bIsLoop ? TEXT("#37c837") : (Cor.bIsSpine ? TEXT("#ff9d2e") : TEXT("#888")));
-		const float	 AvgR = Cor.Radii.Num() > 0 ? Cor.Radii[0] : Stroke;
-		// Smoothed (Catmull-Rom) path so few-point wavy centerlines render as the visible curve, not a polyline.
+		const float	  AvgR = Cor.Radii.Num() > 0 ? Cor.Radii[0] : Stroke;
 		const FString Path = CatmullRomSvgPath(Cor.Centerline, [&](const FVector2D& P) { return FVector2D(X(P.X), Y(P.Y)); });
 		Svg += FString::Printf(TEXT("<path d=\"%s\" fill=\"none\" stroke=\"%s\" stroke-width=\"%.0f\" stroke-opacity=\"0.5\" "
 									"stroke-linecap=\"round\" stroke-linejoin=\"round\"/>\n"),
 			*Path,
-			Color,
+			CorridorColor,
 			FMath::Max(Stroke, AvgR * 2.0f));
 		// Centerline overlay (thin) so the route is visible inside the width band.
-		Svg += FString::Printf(TEXT("<path d=\"%s\" fill=\"none\" stroke=\"%s\" stroke-width=\"%.0f\"/>\n"), *Path, Color, Stroke);
+		Svg += FString::Printf(TEXT("<path d=\"%s\" fill=\"none\" stroke=\"%s\" stroke-width=\"%.0f\"/>\n"), *Path, CorridorColor, Stroke);
 	}
 
 	// Junctions (over corridors, under rooms): deformed-circle hubs. MakeJunction always builds a 16-vertex

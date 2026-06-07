@@ -267,18 +267,12 @@ FOrganicDungeonResolvedParams FOrganicDungeonConfig::Resolve() const
 	Params.MinThickness = FMath::Max(1.0f, MinThickness);
 	Params.MaxWidth = FMath::Max(Params.MinThickness, MaxWidth);
 	Params.Waviness = FMath::Clamp(Waviness, 0.0f, 1.0f);
-	Params.WavinessControlPoints = FMath::Max(0, WavinessControlPoints);
 	Params.CorridorLengthMin = FMath::Max(1.0f, CorridorLengthMin);
 	Params.CorridorLengthMax = FMath::Max(Params.CorridorLengthMin, CorridorLengthMax);
 
-	Params.LoopCount = FMath::Max(0, LoopCount);
-	Params.LoopMaxDistance = FMath::Max(0.0f, LoopMaxDistance);
 	Params.SpineWidthScale = FMath::Max(1.0f, SpineWidthScale);
 	Params.DeadEndCount = FMath::Max(0, DeadEndCount);
 	Params.DeadEndLength = FMath::Max(1.0f, DeadEndLength);
-	Params.CorridorLinkCount = FMath::Max(0, CorridorLinkCount);
-	Params.LinkMaxDistance = FMath::Max(1.0f, LinkMaxDistance);
-	Params.JunctionCount = FMath::Max(0, JunctionCount);
 
 	Params.WallThickness = FMath::Max(1, WallThickness);
 	Params.bSmoothCorridors = bSmoothCorridors;
@@ -287,7 +281,7 @@ FOrganicDungeonResolvedParams FOrganicDungeonConfig::Resolve() const
 	UE_LOG(LogRoguelikeGeometry,
 		Verbose,
 		TEXT("[ORG] Resolve: %d room types (%d rooms), style=%d, thickness=[%.0f,%.0f], wav=%.2f, corridorLen=[%.0f,%.0f], branch=%.2f, "
-			 "loops=%d/%.0f spine=%.2f deadEnds=%d links=%d wall=%d smooth=%s"),
+			 "spine=%.2f deadEnds=%d wall=%d smooth=%s"),
 		Params.RoomTypes.Num(),
 		TotalRooms,
 		static_cast<int32>(Params.CorridorStyle),
@@ -297,11 +291,8 @@ FOrganicDungeonResolvedParams FOrganicDungeonConfig::Resolve() const
 		Params.CorridorLengthMin,
 		Params.CorridorLengthMax,
 		Params.BranchProbability,
-		Params.LoopCount,
-		Params.LoopMaxDistance,
 		Params.SpineWidthScale,
 		Params.DeadEndCount,
-		Params.CorridorLinkCount,
 		Params.WallThickness,
 		Params.bSmoothCorridors ? TEXT("true") : TEXT("false"));
 

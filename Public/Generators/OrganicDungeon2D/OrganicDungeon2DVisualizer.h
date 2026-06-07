@@ -31,10 +31,7 @@ class PROCEDURALGEOMETRY_API AOrganicDungeon2DVisualizer : public AActor
 	FOrganicDungeonConfig Config;
 
 	// --- Layer toggles ---
-	UPROPERTY(EditInstanceOnly, Category = "Visualization Layers", meta = (ToolTip = "Wall/corridor/room cell fill."))
-	bool bShowGridCells = true;
-
-	UPROPERTY(EditInstanceOnly, Category = "Visualization Layers", meta = (ToolTip = "Corridor centerline splines."))
+	UPROPERTY(EditInstanceOnly, Category = "Visualization Layers", meta = (ToolTip = "Corridor centerline splines + junction perimeters."))
 	bool bShowCorridorSplines = true;
 
 	UPROPERTY(EditInstanceOnly, Category = "Visualization Layers", meta = (ToolTip = "Doorway (punch-point) markers used by corridors."))

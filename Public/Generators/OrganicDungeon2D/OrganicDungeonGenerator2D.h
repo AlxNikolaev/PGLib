@@ -45,21 +45,6 @@ struct PROCEDURALGEOMETRY_API FOrganicRoom
 	TArray<FOrganicDoorway> Doorways;
 };
 
-/**
- * A junction — a free network node represented as a slightly-deformed circle in continuous world space.
- * Unlike a room it has no fixed doorways: a corridor attaches at the perimeter point facing its other
- * endpoint (see AttachCorridorToJunction). Junctions are part of the WALKABLE network and are never
- * obstacles for room/corridor collision tests; they are carved into the grid as a disc and emitted as a
- * closed deformed-circle boundary spline. Plain C++ struct (never a USTRUCT) — mirrors FOrganicRoom.
- */
-struct PROCEDURALGEOMETRY_API FOrganicJunction
-{
-	FVector2D		  Center;			 // disc center, world space
-	float			  Radius = 0.0f;	 // disc radius (world units); clamped >= CellSize so it is never degenerate
-	TArray<FVector2D> Perimeter;		 // jittered closed CCW polygon (world space) — the deformed-circle boundary
-	int32			  LocationIndex = 0; // which cluster location (subgraph) this junction belongs to
-};
-
 /** What a corridor endpoint attaches to. */
 enum class EOrganicAnchorType : uint8
 {
@@ -78,6 +63,30 @@ struct PROCEDURALGEOMETRY_API FOrganicAnchor
 	FVector2D		   Normal; // outward direction at this endpoint
 };
 
+/**
+ * A junction — a free network node represented as a slightly-deformed circle in continuous world space.
+ * Unlike a room it has no fixed doorways: a corridor attaches at the perimeter point facing its other
+ * endpoint (see AttachCorridorToJunction). Junctions are part of the WALKABLE network and are never
+ * obstacles for room/corridor collision tests; each junction is one cell in the room-cell diagram and is
+ * emitted as a closed deformed-circle boundary spline. Plain C++ struct (never a USTRUCT) — mirrors FOrganicRoom.
+ */
+struct PROCEDURALGEOMETRY_API FOrganicJunction
+{
+	FVector2D		  Center;			 // disc center, world space
+	float			  Radius = 0.0f;	 // disc radius (world units); clamped >= CellSize so it is never degenerate
+	TArray<FVector2D> Perimeter;		 // jittered closed CCW polygon (world space) — the deformed-circle boundary
+	int32			  LocationIndex = 0; // which cluster location (subgraph) this junction belongs to
+
+	/**
+	 * The two endpoint anchors of the existing corridor this junction was inserted ON (ConnectRoomViaJunction /
+	 * StitchRoomViaJunction tap a junction onto a host corridor's curve and branch from it to an otherwise
+	 * unreachable room). The junction physically overlaps that host corridor, so in the room-cell diagram it is
+	 * adjacent to the host corridor's endpoint nodes as well as to its branched room. BuildDiagramFromLayout uses
+	 * these to bridge the junction into the connected component. Empty for unit-test-built junctions (no host).
+	 */
+	TArray<FOrganicAnchor> HostCorridorAnchors;
+};
+
 /** A corridor as a sampled world-space centerline between two anchors. */
 struct PROCEDURALGEOMETRY_API FOrganicCorridor
 {
@@ -85,7 +94,7 @@ struct PROCEDURALGEOMETRY_API FOrganicCorridor
 	TArray<float>	  Radii; // per-sample carve radius (world units), parallel to Centerline
 	FOrganicAnchor	  AnchorA;
 	FOrganicAnchor	  AnchorB;
-	bool			  bIsLoop = false;
+	bool			  bIsLoop = false;	// loop generation is removed; kept (permanently false) for cross-module visualizers
 	bool			  bIsLink = false;	// a branch that springs from another corridor
 	bool			  bIsSpine = false; // part of the critical path (start -> farthest room)
 };
@@ -109,32 +118,25 @@ struct PROCEDURALGEOMETRY_API FOrganicEndRoomAnchor
 
 /**
  * Debug/visualization data from the organic dungeon pipeline. NOT a stable production API.
- * Exposes raw intermediate state (world-space rooms/corridors + the rasterized fine grid).
+ * Exposes the gridless vector layout (world-space rooms / corridors / junctions) plus the room-cell diagram
+ * built directly from it. The OrganicDungeon generator is gridless: there is no rasterized fine grid — each
+ * room and junction is one FLayoutCell2D, and adjacency is corridor adjacency (Neighbors), not shared edges.
  */
 struct PROCEDURALGEOMETRY_API FOrganicDungeonGridData
 {
-	TArray<bool>			  Grid;		 // true = floor
-	TArray<uint8>			  CellType;	 // EOrganicCellType per cell
-	TArray<int32>			  RegionIds; // per-cell region id (-1 = non-floor)
-	TArray<TArray<FIntPoint>> Regions;	 // cell coords per region
-	int32					  CenterRegionId = -1;
-	int32					  GridWidth = 0;
-	int32					  GridHeight = 0;
-	float					  CellSize = 0.0f;
-	FVector2D				  GridOriginWorld;	  // world position of grid cell (0,0) min corner
-	TArray<FOrganicRoom>	  Rooms;			  // world-space placed rooms
-	TArray<FOrganicCorridor>  Corridors;		  // world-space corridors
-	TArray<FOrganicJunction>  Junctions;		  // world-space free junction nodes (deformed-circle network hubs)
-	TArray<TArray<FIntPoint>> RoomFootprintCells; // per-room rasterized cells (array coords) for the visualizer
+	// Cell size in world units (the generator's GridSize). Retained because the runtime plumbs it into
+	// ConvertLayoutToGridDiagram as FVoronoiGridDiagram::GridCellSize, which drives the zone-allocation length
+	// threshold AND the synthetic corridor-mouth length in FVoronoiGridDiagram::GetSharedEdge.
+	float					 CellSize = 0.0f;
+	TArray<FOrganicRoom>	 Rooms;		// world-space placed rooms
+	TArray<FOrganicCorridor> Corridors; // world-space corridors
+	TArray<FOrganicJunction> Junctions; // world-space free junction nodes (deformed-circle network hubs)
 
 	// Requested constraint counts (what the location asset asked for), carried alongside the achieved geometry
 	// so the diagnostics dump can compute achieved-vs-requested without re-resolving the config. Each mirrors the
 	// RequestedRoomCount precedent and is summed across chained segments at the merge site.
 	int32 RequestedRoomCount = 0;
-	int32 RequestedLoopCount = 0;	  // total LoopCount requested across segments
-	int32 RequestedLinkCount = 0;	  // total CorridorLinkCount requested across segments
-	int32 RequestedDeadEndCount = 0;  // total DeadEndCount requested across segments
-	int32 RequestedJunctionCount = 0; // total JunctionCount requested across segments
+	int32 RequestedDeadEndCount = 0; // total DeadEndCount requested across segments
 
 	// Transition metadata: the single entrance room and the single exit room (graph-diameter endpoints).
 	int32 StartRoomIndex = -1;
@@ -144,18 +146,18 @@ struct PROCEDURALGEOMETRY_API FOrganicDungeonGridData
 	// location's zone allocation / debug label inside its own start room instead of the shared cluster center.
 	TArray<int32> LocationStartRoomIndex;
 
-	FLayoutDiagram2D Diagram; // full floor (rooms + corridors)
+	FLayoutDiagram2D Diagram; // room-cell diagram: one cell per room/junction, adjacency = corridors
 };
 
 /**
- * Mutable working state for a single GenerateLocationSubgraph build. Holds the rooms/corridors and
+ * Mutable working state for a single GenerateLocationSubgraph build. Holds the rooms/corridors/junctions and
  * the bookkeeping (open list, queue cursor, spine/diameter indices, placement-spawn-tree edges/adjacency,
- * per-build stat counters) that the placement → connectivity → dead-end → link phases thread through in
- * order. Defined in the .cpp; only the subgraph phase helpers of UOrganicDungeonGenerator2D touch it.
+ * per-build stat counters) that the placement → connectivity phases thread through in order. Defined in the
+ * .cpp; only the subgraph phase helpers of UOrganicDungeonGenerator2D touch it.
  */
 struct FOrgSubgraphBuild;
 
-/** Continuous-space layout (rooms + corridors + entrance + exit anchors) produced before rasterization. Internal. */
+/** Continuous-space layout (rooms + corridors + entrance + exit anchors) — the vector layout the diagram is built from. Internal. */
 struct PROCEDURALGEOMETRY_API FOrganicLayout
 {
 	TArray<FOrganicRoom>	 Rooms;
@@ -164,10 +166,7 @@ struct PROCEDURALGEOMETRY_API FOrganicLayout
 	int32					 StartRoomIdx = -1;
 	int32					 EndRoomIdx = -1; // chain-leaf / cluster exit room (far endpoint opposite StartRoomIdx)
 	int32					 RequestedRoomCount = 0;
-	int32					 RequestedLoopCount = 0;	 // LoopCount requested for this segment
-	int32					 RequestedLinkCount = 0;	 // CorridorLinkCount requested for this segment
-	int32					 RequestedDeadEndCount = 0;	 // DeadEndCount requested for this segment
-	int32					 RequestedJunctionCount = 0; // JunctionCount requested for this segment
+	int32					 RequestedDeadEndCount = 0; // DeadEndCount requested for this segment
 	int32					 PlacedCount = 0;
 	TArray<int32>			 LocationStartRoomIndex; // per chained segment: global index of its start room
 };
@@ -198,7 +197,7 @@ public:
 	// Generation
 	virtual FLayoutDiagram2D Generate() override;
 
-	/** Returns full intermediate data (rooms, corridors, grid). For visualization/testing only. */
+	/** Returns full intermediate data (rooms, corridors, junctions + the room-cell diagram). For visualization/testing only. */
 	FOrganicDungeonGridData GenerateWithGridData();
 
 	/**
@@ -230,8 +229,8 @@ public:
 
 	/**
 	 * Densely samples a corridor's few-point centerline into a smooth polyline on demand (Catmull-Rom
-	 * through the control points, doorway-normal phantom endpoints). Used by rasterization and collision
-	 * so the carved grid follows the visible curve while the stored Centerline stays few-point.
+	 * through the control points, doorway-normal phantom endpoints). Used by collision and the spline
+	 * emitters so they follow the visible curve while the stored Centerline stays few-point.
 	 *
 	 * For two control points this returns a straight evenly-stepped lerp identical to the legacy dense
 	 * centerline. Pure math: no UObject, no FRandomStream draws (deterministic).
@@ -253,11 +252,13 @@ public:
 	 * Diameter is drawn from RandomStream.FRandRange(MinThickness, MaxWidth); Radius is clamped to at least
 	 * one grid cell so the disc/spline are never degenerate. The Perimeter is a closed CCW polygon whose
 	 * vertices sit at Radius scaled by a small per-vertex jitter, so PCG can build a wobbly junction floor.
-	 * Draws RandomStream (one diameter draw + one jitter draw per perimeter vertex) — call only inside the
-	 * count-gated junction phase so determinism at zero junctions is preserved.
+	 * Draws RandomStream (one diameter draw + one jitter draw per perimeter vertex) — call only on the
+	 * connectivity fallback path so the draw sequence stays deterministic.
 	 *
 	 * Exposed publicly (mirroring SampleCorridorCurve/SolveRoomOrientation) so the junction unit tests can
-	 * build a deterministic junction directly; the pipeline calls it only from the count-gated AddJunctions phase.
+	 * build a deterministic junction directly. The pipeline calls it from ConnectRoomViaJunction /
+	 * StitchRoomViaJunction to insert an on-demand junction on an existing corridor and branch to an otherwise
+	 * unreachable room.
 	 */
 	FOrganicJunction MakeJunction(const FOrganicDungeonResolvedParams& Params, const FVector2D& Center);
 
@@ -294,6 +295,20 @@ private:
 		TArray<FOrganicRoom>& AllRooms, int32 FromIdx, int32 ToIdx, const FOrganicDungeonResolvedParams& LinkParams, bool& bOutProduced);
 
 	/**
+	 * Cluster-scope junction-on-demand fallback for the inter-location stitch: when BuildInterLocationCorridor
+	 * drops (its single-waypoint reroute still clipped a room), this guarantees the dropped location still joins
+	 * the cluster region by inserting a junction on the nearest existing merged corridor and branching a
+	 * room-avoiding corridor to ToRoom's best outward doorway. Mirrors ConnectRoomViaJunction but works on the
+	 * merged cluster arrays (AllRooms / Corridors / Junctions). Honors T5 room-avoidance. Returns true on
+	 * success; false if no merged corridor could host a clean junction branch.
+	 */
+	bool StitchRoomViaJunction(TArray<FOrganicRoom>& AllRooms,
+		TArray<FOrganicCorridor>&					 Corridors,
+		TArray<FOrganicJunction>&					 Junctions,
+		int32										 ToRoomIdx,
+		const FOrganicDungeonResolvedParams&		 LinkParams);
+
+	/**
 	 * Shared Bezier corridor builder — called by both GenerateLocationSubgraph (via a thin BuildCorridor
 	 * wrapper lambda) and BuildInterLocationCorridor. Callers are responsible for pre-computing
 	 * MinRadius/MaxRadius from their own param context (e.g. inter-location links clamp MinRadius to
@@ -305,10 +320,12 @@ private:
 	 * @param MinRadius  Minimum corridor half-width (world units).
 	 * @param MaxRadius  Maximum corridor half-width (world units).
 	 * @param Style      Clean (constant width) or Cave (variable noise width).
-	 * @param WavinessControlPoints  Number of intermediate perpendicular control points on the stored
-	 *                   centerline (0 = straight 2-point, 1 = single C bow, 2 = S, ...). The stored
-	 *                   Centerline/Radii stay few-point; rasterization/collision sample the curve on demand.
 	 * @param RadiusScale Uniform multiplier applied to every radius sample (used for spine widening).
+	 *
+	 * The number of intermediate perpendicular control points is drawn internally per corridor from this
+	 * generator's RandomStream (a single RandRange(2, 3) per call) — every corridor randomly bows with 2 or 3
+	 * intermediate points for variety. The stored Centerline/Radii stay few-point; collision and the spline
+	 * emitters sample the curve on demand. The draw keeps run-to-run determinism (same seed -> same output).
 	 */
 	FOrganicCorridor BuildBezierCorridor(const FVector2D& AP,
 		const FVector2D&								  AN,
@@ -318,11 +335,17 @@ private:
 		float											  MinRadius,
 		float											  MaxRadius,
 		EOrganicCorridorStyle							  Style,
-		int32											  WavinessControlPoints,
 		float											  RadiusScale = 1.0f);
 
-	/** Rasterizes the merged cluster layout into the final grid + diagram. */
-	FOrganicDungeonGridData RasterizeLayout(const FOrganicLayout& Layout);
+	/**
+	 * Builds the room-cell diagram DIRECTLY from the merged cluster's vector layout (gridless — no rasterization).
+	 * Each room becomes one FLayoutCell2D (Vertices = its 4 OBB corners) and each junction becomes one cell
+	 * (Vertices = its deformed-circle perimeter). Cell Neighbors are corridor adjacency (the indices of the nodes a
+	 * cell shares a corridor with), so the disjoint cells still drive FLocation zone allocation / transitions via
+	 * FVoronoiGridDiagram::GetSharedEdge's corridor-aware synthetic-mouth fallback. Pure geometry — no RandomStream
+	 * draws, so the diagram step is deterministic.
+	 */
+	FOrganicDungeonGridData BuildDiagramFromLayout(const FOrganicLayout& Layout);
 
 	// --- Isolated algorithmic stages (stateless; can be called and tested independently) ---
 
@@ -387,14 +410,47 @@ private:
 	/**
 	 * Layer 1 — connectivity. Uses the placement-spawn tree recorded by PlaceRooms as the connectivity
 	 * backbone (no geometric MST, no room drops): builds the spawn-tree adjacency, runs FindSpine over it
-	 * for start/end endpoints + spine edges, carves one backbone corridor per spawn edge (spine widened),
-	 * then adds the budgeted loops. A backbone corridor that cannot carve (doorways exhausted/misaligned)
-	 * is logged as a best-effort shortfall and the room is kept. Mutates the rooms/corridors/spawn-adjacency
-	 * working state, the start/end diameter indices, and the loop/spine stat counters. Only runs its body
-	 * when Ctx.Rooms has at least two rooms.
+	 * for start/end endpoints + spine edges, then carves one backbone corridor per spawn edge (spine widened).
+	 *
+	 * Connectivity is then GUARANTEED count-free: a connected set is seeded from the entrance room and grown
+	 * over the carved corridors. Every room not yet in the set (iterated in fixed ascending index order) is
+	 * reconnected — first by retrying a free/aligned-doorway corridor to its spawn parent or the nearest
+	 * connected room, and, failing that, by INSERTING an on-demand junction onto the nearest existing corridor
+	 * and branching a corridor from the junction to the room (junctions have unlimited ports, so this always
+	 * succeeds). The result is ONE connected walkable region — the all-single-door "star" connects. No loop /
+	 * link / dead-end / junction COUNTS drive any of this. Mutates the rooms/corridors/junctions/spawn-adjacency
+	 * working state, the start/end diameter indices, and the spine stat counter. Honors T5 room-avoidance on
+	 * every carve (backbone, reconnection, and junction branch). Only runs its body when Ctx.Rooms has >= 1 room.
 	 */
 	void ConnectRooms(
 		FOrgSubgraphBuild& Ctx, const FOrganicDungeonResolvedParams& Params, const FVector2D& CenterPoint, const TArray<FOrganicRoom>& Obstacles);
+
+	/**
+	 * Junction-on-demand fallback used by ConnectRooms (and the inter-location stitch) when a room cannot reach
+	 * the connected network through a free/aligned doorway. Scans every existing corridor's sampled curve for the
+	 * point nearest RoomIdx's best outward doorway (pure geometry, deterministic ascending tie-break), inserts a
+	 * junction there via MakeJunction, and branches a room-avoiding corridor (BuildBezierCorridor +
+	 * CorridorClearsRooms) from the junction perimeter to the room doorway. The tapped corridor is NOT physically
+	 * split — the junction is recorded as a first-class FOrganicJunction node and the new branch anchors to it
+	 * (EOrganicAnchorType::Junction), which is sufficient for corridor-adjacency connectivity. MakeJunction is the
+	 * lone FRandomStream draw on this path. Returns true on success (room joined the network); false only if no
+	 * existing corridor could host a clean junction branch (the caller then leaves the room logged but kept).
+	 */
+	bool ConnectRoomViaJunction(FOrgSubgraphBuild& Ctx, const FOrganicDungeonResolvedParams& Params, int32 RoomIdx);
+
+	/**
+	 * Bootstrap connectivity fallback for the all-single-door "star": connects an orphan room to an already
+	 * connected room by inserting a free junction in the open space BETWEEN their two outward doorways and
+	 * branching BOTH rooms to it (ConnectedRoom→Junction and Orphan→Junction). Unlike ConnectRoomViaJunction —
+	 * which taps an EXISTING corridor — this needs no prior corridor, so it succeeds even when ConnectRooms has
+	 * carved nothing yet (every room-to-room carve failed because the single doorways are misaligned). The
+	 * junction's two branch corridors anchor as Junction↔Room, so BuildDiagramFromLayout's corridor-adjacency
+	 * pass wires ConnectedRoom—Junction—Orphan directly. Branches prefer to clear third rooms but, since this is
+	 * the guaranteed-connectivity last resort, are accepted (with a logged shortfall) rather than dropped if a
+	 * tight cluster leaves no clean path. MakeJunction is the lone FRandomStream draw. Returns true unless the
+	 * orphan has no usable doorway (degenerate room).
+	 */
+	bool ConnectRoomsViaSharedJunction(FOrgSubgraphBuild& Ctx, const FOrganicDungeonResolvedParams& Params, int32 ConnectedRoom, int32 Orphan);
 
 	/**
 	 * Computes the chain-leaf end-room anchor (the diameter endpoint opposite the entrance) used for
@@ -402,31 +458,6 @@ private:
 	 * bHasStartRoom is set and the exit-room prefab swap when bHasEndRoom is set. The doorway is NOT reserved.
 	 */
 	FOrganicEndRoomAnchor ComputeChainLeaf(FOrgSubgraphBuild& Ctx, const FOrganicDungeonResolvedParams& Params, const FVector2D& CenterPoint);
-
-	/**
-	 * Layer 1b — dead-end stubs. Adds up to DeadEndCount free-doorway corridor stubs ending in open
-	 * (Free-anchor) alcoves. Draws RandomStream (room pick, doorway pick) in the existing order.
-	 */
-	void AddDeadEnds(FOrgSubgraphBuild& Ctx, const FOrganicDungeonResolvedParams& Params);
-
-	/**
-	 * Layer 1b — corridor links. Adds up to CorridorLinkCount branches that spring from a random corridor.
-	 * Each link primarily joins the nearest other corridor (a corridor-to-corridor connection that forms
-	 * independent of room-doorway capacity), falling back to the nearest free room doorway only when no
-	 * corridor target exists. A link whose curve would cross a room body it does not connect is dropped.
-	 * Draws RandomStream (source corridor, branch point, branch side) in the existing order.
-	 */
-	void AddCorridorLinks(FOrgSubgraphBuild& Ctx, const FOrganicDungeonResolvedParams& Params);
-
-	/**
-	 * Final phase — junction nodes. Adds up to Params.JunctionCount free deformed-circle junctions and a
-	 * corridor tapping each junction into the existing network (nearest free room doorway, else nearest
-	 * corridor). Junctions absorb connectivity the room doorway budget cannot. The whole body early-outs
-	 * when JunctionCount == 0, so no RandomStream draw happens and the zero-junction layout is byte-identical
-	 * to the legacy pipeline. Draws RandomStream (junction placement angle, MakeJunction diameter/jitter) in
-	 * a fixed order after AddCorridorLinks.
-	 */
-	void AddJunctions(FOrgSubgraphBuild& Ctx, const FOrganicDungeonResolvedParams& Params);
 
 	/**
 	 * Carves a corridor between two rooms via their best-facing doorways, consuming those doorways and

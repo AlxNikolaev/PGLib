@@ -2,23 +2,13 @@
 
 #include "DrawDebugHelpers.h"
 #include "Generators/OrganicDungeon2D/OrganicDungeonGenerator2D.h"
-#include "Generators/VisualizerCellMesh.h"
 #include "LevelInstance/LevelInstanceActor.h"
+#include "ProceduralMeshComponent.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogOrganicViz, Log, All);
 
 namespace
 {
-	const FLinearColor WallLinearColor(0.016f, 0.016f, 0.018f);
-	const FLinearColor CorridorLinearColor(0.28f, 0.30f, 0.38f);
-
-	/** Distinct, saturated color per placed room. */
-	FLinearColor GetRoomDistinctColor(int32 RoomIndex)
-	{
-		const float Hue = FMath::Fmod(RoomIndex * 0.618033988749895f + 0.15f, 1.0f) * 360.0f;
-		return FLinearColor(Hue, 0.85f, 1.0f).HSVToLinearRGB();
-	}
-
 	FVector2D RotateDeg2D(const FVector2D& V, float Deg)
 	{
 		const float R = FMath::DegreesToRadians(Deg);
@@ -55,81 +45,17 @@ void AOrganicDungeon2DVisualizer::OnConstruction(const FTransform& Transform)
 	FlushDebugStrings(GetWorld());
 	GridMeshComponent->ClearAllMeshSections();
 
-	if (!DebugMaterial)
+	if (GridData.Rooms.Num() == 0)
 	{
-		DebugMaterial = LoadObject<UMaterialInterface>(nullptr, TEXT("/Engine/EngineDebugMaterials/VertexColorMaterial.VertexColorMaterial"));
-		if (!DebugMaterial)
-		{
-			UE_LOG(LogOrganicViz, Warning, TEXT("OnConstruction: could not load vertex color material; assign one in the Visualization category."));
-		}
-	}
-
-	if (GridData.GridWidth <= 0 || GridData.GridHeight <= 0)
-	{
-		UE_LOG(LogOrganicViz, Warning, TEXT("OnConstruction: invalid grid (%dx%d), skipping."), GridData.GridWidth, GridData.GridHeight);
+		UE_LOG(LogOrganicViz, Warning, TEXT("OnConstruction: empty layout (no rooms), skipping."));
 		return;
 	}
 
 	const float CS = GridData.CellSize;
-	// Grid origin in world; mesh vertices are local (relative to actor).
-	const FVector2D GridOriginLocal = GridData.GridOriginWorld - Center2D;
-	int32			SectionIndex = 0;
 
-	if (bShowGridCells)
-	{
-		// Walls (Z=0)
-		{
-			TArray<FIntPoint> WallCells;
-			for (int32 i = 0; i < GridData.CellType.Num(); ++i)
-			{
-				if (GridData.CellType[i] == EOrganicCellType::Wall)
-				{
-					WallCells.Add(FIntPoint(i % GridData.GridWidth, i / GridData.GridWidth));
-				}
-			}
-			if (WallCells.Num() > 0)
-			{
-				ProcGen_BuildCellMeshSection(GridMeshComponent, DebugMaterial, SectionIndex++, WallCells, CS, GridOriginLocal, WallLinearColor, 0.0f);
-			}
-		}
-
-		// Corridors (Z=1)
-		{
-			TArray<FIntPoint> CorridorCells;
-			for (int32 i = 0; i < GridData.CellType.Num(); ++i)
-			{
-				if (GridData.CellType[i] == EOrganicCellType::Corridor)
-				{
-					CorridorCells.Add(FIntPoint(i % GridData.GridWidth, i / GridData.GridWidth));
-				}
-			}
-			if (CorridorCells.Num() > 0)
-			{
-				ProcGen_BuildCellMeshSection(
-					GridMeshComponent, DebugMaterial, SectionIndex++, CorridorCells, CS, GridOriginLocal, CorridorLinearColor, 1.0f);
-			}
-		}
-
-		// Rooms (Z=1.5) — Start = green, End = red, others distinct.
-		for (int32 r = 0; r < GridData.RoomFootprintCells.Num(); ++r)
-		{
-			if (GridData.RoomFootprintCells[r].Num() == 0)
-			{
-				continue;
-			}
-			FLinearColor RoomColor = GetRoomDistinctColor(r);
-			if (r == GridData.StartRoomIndex)
-			{
-				RoomColor = FLinearColor(0.05f, 0.9f, 0.1f); // entrance = green
-			}
-			else if (r == GridData.EndRoomIndex)
-			{
-				RoomColor = FLinearColor(0.9f, 0.05f, 0.05f); // exit room = red
-			}
-			ProcGen_BuildCellMeshSection(
-				GridMeshComponent, DebugMaterial, SectionIndex++, GridData.RoomFootprintCells[r], CS, GridOriginLocal, RoomColor, 1.5f);
-		}
-	}
+	// OrganicDungeon is gridless: there is no rasterized cell mesh. The room/junction floor is built by PCG
+	// from the room-boundary + junction-perimeter splines. The in-editor debug draw below shows only the
+	// smooth corridor centerlines, the room footprints/doorways, and the junction perimeters.
 
 	// Corridor centerline splines (world space, Z=3)
 	if (bShowCorridorSplines)
@@ -160,6 +86,28 @@ void AOrganicDungeon2DVisualizer::OnConstruction(const FTransform& Transform)
 				const FVector P1(Cor.Centerline[i].X, Cor.Centerline[i].Y, ActorLoc.Z + 3.0f);
 				const FVector P2(Cor.Centerline[i + 1].X, Cor.Centerline[i + 1].Y, ActorLoc.Z + 3.0f);
 				DrawDebugLine(GetWorld(), P1, P2, LineColor, true, -1.f, 0, LineThickness);
+			}
+		}
+	}
+
+	// Junction hubs (deformed-circle network nodes, world space, Z=3) — magenta closed perimeter polylines.
+	if (bShowCorridorSplines)
+	{
+		for (const FOrganicJunction& Junction : GridData.Junctions)
+		{
+			const int32 NumPts = Junction.Perimeter.Num();
+			for (int32 i = 0; i < NumPts; ++i)
+			{
+				const FVector2D A = Junction.Perimeter[i];
+				const FVector2D B = Junction.Perimeter[(i + 1) % NumPts];
+				DrawDebugLine(GetWorld(),
+					FVector(A.X, A.Y, ActorLoc.Z + 3.0f),
+					FVector(B.X, B.Y, ActorLoc.Z + 3.0f),
+					FColor(155, 89, 182),
+					true,
+					-1.f,
+					0,
+					3.0f);
 			}
 		}
 	}
@@ -271,7 +219,7 @@ void AOrganicDungeon2DVisualizer::OnConstruction(const FTransform& Transform)
 		}
 
 		const float LineSpacing = CS * 1.5f;
-		FVector		Anchor(GridData.GridOriginWorld.X, GridData.GridOriginWorld.Y - LineSpacing, ActorLoc.Z + 15.0f);
+		FVector		Anchor(ActorLoc.X, ActorLoc.Y - LineSpacing, ActorLoc.Z + 15.0f);
 		int32		LineIndex = 0;
 		auto		DrawLine = [&](const FString& Text) {
 			   DrawDebugString(GetWorld(), Anchor + FVector(0.0f, -LineSpacing * LineIndex, 0.0f), Text, nullptr, FColor::White, -1.0f, true);
@@ -279,7 +227,7 @@ void AOrganicDungeon2DVisualizer::OnConstruction(const FTransform& Transform)
 		};
 
 		DrawLine(TEXT("[Organic Dungeon]"));
-		DrawLine(FString::Printf(TEXT("Grid: %d x %d (cell %.0f)"), GridData.GridWidth, GridData.GridHeight, CS));
+		DrawLine(FString::Printf(TEXT("Cell: %.0f | Cells: %d"), CS, GridData.Diagram.Cells.Num()));
 		DrawLine(FString::Printf(TEXT("Rooms: %d/%d | Corridors: %d (spine %d, loops %d, deadEnds %d, links %d)"),
 			GridData.Rooms.Num(),
 			GridData.RequestedRoomCount,
@@ -288,18 +236,17 @@ void AOrganicDungeon2DVisualizer::OnConstruction(const FTransform& Transform)
 			Loops,
 			DeadEnds,
 			Links));
-		DrawLine(FString::Printf(TEXT("Regions: %d | Gen: %.2f ms"), GridData.Regions.Num(), GenMs));
+		DrawLine(FString::Printf(TEXT("Junctions: %d | Gen: %.2f ms"), GridData.Junctions.Num(), GenMs));
 		DrawLine(FString::Printf(TEXT("Seed: \"%s\""), *Seed));
 	}
 
 	UE_LOG(LogOrganicViz,
 		Verbose,
-		TEXT("OnConstruction: %dx%d grid, %d rooms, %d corridors, %d sections."),
-		GridData.GridWidth,
-		GridData.GridHeight,
+		TEXT("OnConstruction: %d cells, %d rooms, %d corridors, %d junctions."),
+		GridData.Diagram.Cells.Num(),
 		GridData.Rooms.Num(),
 		GridData.Corridors.Num(),
-		SectionIndex);
+		GridData.Junctions.Num());
 }
 
 void AOrganicDungeon2DVisualizer::SpawnLevelInstances()

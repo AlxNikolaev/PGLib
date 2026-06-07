@@ -93,7 +93,8 @@ bool FOrganicDungeonDeterminismTest::RunTest(const FString& Parameters)
 }
 
 // ============================================================
-// Test 3: Parallel array size invariants.
+// Test 3: Diagram cell invariants — gridless room-cell diagram.
+// One FLayoutCell2D per room AND per junction; corridor Radii parallel to Centerline.
 // ============================================================
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FOrganicDungeonParallelArraySizesTest, "ProceduralGeometry.OrganicDungeon.ParallelArraySizes", DefaultTestFlags)
 
@@ -102,19 +103,23 @@ bool FOrganicDungeonParallelArraySizesTest::RunTest(const FString& Parameters)
 	UOrganicDungeonGenerator2D*	  Gen = MakeOrganicGenerator(TEXT("ParallelTest"), 4);
 	const FOrganicDungeonGridData Data = Gen->GenerateWithGridData();
 
-	if (Data.GridWidth == 0 || Data.GridHeight == 0)
+	if (Data.Rooms.Num() == 0)
 	{
-		AddWarning(TEXT("ParallelArraySizes: empty grid, skipping"));
+		AddWarning(TEXT("ParallelArraySizes: empty layout, skipping"));
 		return true;
 	}
 
-	const int32 ExpectedGridSize = Data.GridWidth * Data.GridHeight;
-	TestEqual("ParallelArraySizes: Grid.Num() == GridWidth * GridHeight", Data.Grid.Num(), ExpectedGridSize);
-	TestEqual("ParallelArraySizes: CellType.Num() == Grid.Num()", Data.CellType.Num(), Data.Grid.Num());
-	TestEqual("ParallelArraySizes: RegionIds.Num() == Grid.Num()", Data.RegionIds.Num(), Data.Grid.Num());
+	// Gridless: exactly one diagram cell per room plus one per junction.
+	TestEqual("ParallelArraySizes: Diagram.Cells.Num() == Rooms.Num() + Junctions.Num()",
+		Data.Diagram.Cells.Num(),
+		Data.Rooms.Num() + Data.Junctions.Num());
 
-	// RoomFootprintCells is parallel to Rooms.
-	TestEqual("ParallelArraySizes: RoomFootprintCells.Num() == Rooms.Num()", Data.RoomFootprintCells.Num(), Data.Rooms.Num());
+	// Cell indices are contiguous: rooms first [0,Rooms.Num()), then junctions.
+	for (int32 i = 0; i < Data.Diagram.Cells.Num(); ++i)
+	{
+		TestEqual(FString::Printf(TEXT("ParallelArraySizes: Cell[%d].CellIndex == %d"), i, i), Data.Diagram.Cells[i].CellIndex, i);
+		TestTrue(FString::Printf(TEXT("ParallelArraySizes: Cell[%d] has >= 3 boundary vertices"), i), Data.Diagram.Cells[i].Vertices.Num() >= 3);
+	}
 
 	// Each corridor's Radii must be parallel to its Centerline.
 	for (int32 i = 0; i < Data.Corridors.Num(); ++i)
@@ -150,38 +155,32 @@ bool FOrganicDungeonRoomCountBoundsTest::RunTest(const FString& Parameters)
 }
 
 // ============================================================
-// Test 5: OOM guard — GridSize=10 (the minimum after clamping) with a 21000×21000
-// world-unit footprint. At GridSize=10, the rasterized grid is roughly:
-//   GWidth  = ceil(21000/10) + 2*Pad = 2100 + 4 = 2104   (Pad = max(1,WallThickness)+1 = 2)
-//   GHeight = 2104
-//   Total   = 2104 × 2104 = 4,426,816  >  4,194,304 (OOM limit) ✓
-// The generator logs an Error when the guard fires; register it as expected so the
-// automation framework does not auto-fail the test on the Error-level log.
+// Test 5: Large footprint — gridless. The OrganicDungeon generator no longer rasterizes a fine grid, so a
+// huge room footprint no longer triggers any OOM guard; it simply produces one room cell. This regression-tests
+// that a footprint that would have blown the old grid limit now generates cleanly (exactly one cell, no error).
 // ============================================================
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FOrganicDungeonOOMGuardTest, "ProceduralGeometry.OrganicDungeon.OOMGuard", DefaultTestFlags)
 
 bool FOrganicDungeonOOMGuardTest::RunTest(const FString& Parameters)
 {
-	// Register the expected Error log so the automation runner does not auto-fail this test.
-	AddExpectedError(TEXT("OOM guard triggered"), EAutomationExpectedErrorFlags::Contains);
-
 	FOrganicResolvedRoomType BigRoom;
-	BigRoom.FootprintWidth = 21000.0f; // at GridSize=10: 2100 cells/axis + padding > 4M total
+	BigRoom.FootprintWidth = 21000.0f; // would have exceeded the old 4M-cell grid limit at GridSize=10
 	BigRoom.FootprintHeight = 21000.0f;
 	BigRoom.Count = 1;
 
 	FOrganicDungeonResolvedParams Params;
 	Params.RoomTypes.Add(BigRoom);
-	Params.WallThickness = 1; // explicit: Pad = max(1,1)+1 = 2 → GWidth = 2104
+	Params.WallThickness = 1;
 
 	UOrganicDungeonGenerator2D* Gen = NewObject<UOrganicDungeonGenerator2D>();
 	Gen->SetSeed(TEXT("OOMTest"));
-	Gen->SetGridSize(10); // minimum after clamp — sets CellSizeVal = 10
+	Gen->SetGridSize(10);
 	Gen->ApplyResolvedParams(Params);
 
 	const FOrganicDungeonGridData Data = Gen->GenerateWithGridData();
 
-	TestEqual("OOMGuard: Diagram.Cells.Num() == 0", Data.Diagram.Cells.Num(), 0);
+	// Gridless: one room -> exactly one cell, no OOM, no error.
+	TestEqual("OOMGuard: gridless build yields one cell for one room", Data.Diagram.Cells.Num(), 1);
 
 	return true;
 }
@@ -264,8 +263,8 @@ bool FOrganicDungeonSingleRoomExitTest::RunTest(const FString& Parameters)
 }
 
 // ============================================================
-// Test 8: Cell type consistency — floor cells are Room or Corridor;
-//         non-floor cells are Wall or Empty.
+// Test 8: Diagram connectivity — the gridless room-cell diagram is ONE connected component over corridor
+//         adjacency (Neighbors), and every room cell has at least one neighbour (the all-single-door star).
 // ============================================================
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FOrganicDungeonCellTypeConsistencyTest, "ProceduralGeometry.OrganicDungeon.CellTypeConsistency", DefaultTestFlags)
 
@@ -274,37 +273,59 @@ bool FOrganicDungeonCellTypeConsistencyTest::RunTest(const FString& Parameters)
 	UOrganicDungeonGenerator2D*	  Gen = MakeOrganicGenerator(TEXT("CellTypeTest"), 4);
 	const FOrganicDungeonGridData Data = Gen->GenerateWithGridData();
 
-	if (Data.Grid.Num() == 0)
+	const int32 NumCells = Data.Diagram.Cells.Num();
+	if (NumCells == 0)
 	{
-		AddWarning(TEXT("CellTypeConsistency: empty grid, skipping"));
+		AddWarning(TEXT("CellTypeConsistency: empty diagram, skipping"));
 		return true;
 	}
 
-	const int32 Total = Data.Grid.Num();
-	for (int32 i = 0; i < Total; ++i)
+	// Neighbor indices must be in range and symmetric (undirected corridor adjacency).
+	for (int32 i = 0; i < NumCells; ++i)
 	{
-		const bool	bFloor = Data.Grid[i];
-		const uint8 Type = Data.CellType[i];
-
-		if (bFloor)
+		for (const int32 N : Data.Diagram.Cells[i].Neighbors)
 		{
-			const bool bValidFloorType = (Type == EOrganicCellType::Corridor || Type == EOrganicCellType::Room);
-			if (!bValidFloorType)
+			if (N < 0 || N >= NumCells)
 			{
-				AddError(FString::Printf(TEXT("CellTypeConsistency: floor cell[%d] has non-floor type %d"), i, (int32)Type));
-				break;
+				AddError(FString::Printf(TEXT("CellTypeConsistency: Cell[%d] has out-of-range neighbour %d (NumCells=%d)"), i, N, NumCells));
+				return true;
 			}
+			TestTrue(
+				FString::Printf(TEXT("CellTypeConsistency: adjacency symmetric for (%d,%d)"), i, N), Data.Diagram.Cells[N].Neighbors.Contains(i));
 		}
-		else
+	}
+
+	// Every room cell (index < Rooms.Num()) must have >= 1 corridor neighbour when more than one cell exists.
+	if (NumCells > 1)
+	{
+		for (int32 r = 0; r < Data.Rooms.Num(); ++r)
 		{
-			const bool bValidNonFloorType = (Type == EOrganicCellType::Wall || Type == EOrganicCellType::Empty);
-			if (!bValidNonFloorType)
+			TestTrue(FString::Printf(TEXT("CellTypeConsistency: room cell[%d] has >= 1 neighbour"), r), Data.Diagram.Cells[r].Neighbors.Num() >= 1);
+		}
+	}
+
+	// Single connected component: BFS over Neighbors from cell 0 must reach every cell.
+	TArray<bool> Visited;
+	Visited.Init(false, NumCells);
+	TArray<int32> Queue;
+	Queue.Add(0);
+	Visited[0] = true;
+	int32 Head = 0;
+	int32 Reached = 1;
+	while (Head < Queue.Num())
+	{
+		const int32 U = Queue[Head++];
+		for (const int32 V : Data.Diagram.Cells[U].Neighbors)
+		{
+			if (!Visited[V])
 			{
-				AddError(FString::Printf(TEXT("CellTypeConsistency: non-floor cell[%d] has unexpected type %d"), i, (int32)Type));
-				break;
+				Visited[V] = true;
+				++Reached;
+				Queue.Add(V);
 			}
 		}
 	}
+	TestEqual("CellTypeConsistency: diagram is ONE connected component", Reached, NumCells);
 
 	return true;
 }
@@ -1199,6 +1220,39 @@ bool FOrganicMismatchNeverDropTest::RunTest(const FString& Parameters)
 	//     The spawn-tree backbone keeps every placed room; survivors never exceed the 5 requested rooms.
 	TestTrue("MismatchNeverDrop: survivors do not exceed the 5 requested rooms", Data.Rooms.Num() <= 5);
 
+	// (a2) StarConnected contract: with the junction-on-demand fallback every placed room joins the network.
+	//      OrganicDungeon is gridless, so connectivity is verified over the room-cell diagram's corridor
+	//      adjacency (Neighbors): a BFS from cell 0 must reach every cell — exactly ONE connected component.
+	//      This is the all-single-door "star" the old loop/link/junction-count phases could not guarantee.
+	{
+		const int32 NumCells = Data.Diagram.Cells.Num();
+		TestTrue("MismatchNeverDrop: diagram has cells", NumCells > 0);
+		if (NumCells > 0)
+		{
+			TArray<bool> Visited;
+			Visited.Init(false, NumCells);
+			TArray<int32> Queue;
+			Queue.Add(0);
+			Visited[0] = true;
+			int32 Head = 0;
+			int32 Reached = 1;
+			while (Head < Queue.Num())
+			{
+				const int32 U = Queue[Head++];
+				for (const int32 V : Data.Diagram.Cells[U].Neighbors)
+				{
+					if (V >= 0 && V < NumCells && !Visited[V])
+					{
+						Visited[V] = true;
+						++Reached;
+						Queue.Add(V);
+					}
+				}
+			}
+			TestEqual("MismatchNeverDrop: all-single-door star forms ONE connected component", Reached, NumCells);
+		}
+	}
+
 	// (b) No sealed prefab rooms: every corridor endpoint at a declared-doorway room must
 	//     anchor at one of that room's declared doorway positions.
 	constexpr float PosTol = 1.0f; // world units (anchors set from same float → should match exactly)
@@ -1365,7 +1419,7 @@ bool FOrganicDungeonDumpLayoutsTest::RunTest(const FString& Parameters)
 		return RT;
 	};
 
-	// Representative multi-room-type config with loops + links + waviness, mirroring an authored OD location.
+	// Representative multi-room-type config with waviness, mirroring an authored OD location.
 	FOrganicDungeonResolvedParams Params;
 	Params.RoomTypes.Add(MakeRoom(3200.0f, 3100.0f, 3));
 	Params.RoomTypes.Add(MakeRoom(6200.0f, 5800.0f, 2));
@@ -1377,9 +1431,7 @@ bool FOrganicDungeonDumpLayoutsTest::RunTest(const FString& Parameters)
 	Params.CorridorLengthMin = 1500.0f;
 	Params.CorridorLengthMax = 3000.0f;
 	Params.BranchProbability = 1.0f;
-	Params.LoopCount = 3;
 	Params.SpineWidthScale = 1.6f;
-	Params.CorridorLinkCount = 3;
 	Params.WallThickness = 2;
 
 	const TArray<FString> Seeds = { TEXT("1"), TEXT("2"), TEXT("3"), TEXT("seedA"), TEXT("seedB") };
@@ -1502,8 +1554,6 @@ bool FOrganicDungeonConfigParityTest::RunTest(const FString& Parameters)
 		Config.RoomTypes.Add(RT2);
 	}
 	Config.CorridorStyle = EOrganicCorridorStyle::Cave;
-	Config.LoopCount = 2;
-	Config.CorridorLinkCount = 1;
 
 	constexpr int32 TotalRooms = 8;
 	constexpr int32 GridCellSize = 500; // matches GeneratedLevelActor OrganicGridCellSize default
@@ -1537,8 +1587,6 @@ bool FOrganicDungeonConfigParityTest::RunTest(const FString& Parameters)
 
 	// Requested counts are carried so the dump can compute achieved-vs-requested.
 	TestEqual("ConfigParity: RequestedRoomCount carried", A.RequestedRoomCount, TotalRooms);
-	TestEqual("ConfigParity: RequestedLoopCount carried", A.RequestedLoopCount, Config.LoopCount);
-	TestEqual("ConfigParity: RequestedLinkCount carried", A.RequestedLinkCount, Config.CorridorLinkCount);
 
 	// Hard invariant: the VALID dump line must report crossings=0 (no corridor crosses a room body).
 	const FString DumpText = FOrganicLayoutDebug::ToText(A);
@@ -1549,17 +1597,79 @@ bool FOrganicDungeonConfigParityTest::RunTest(const FString& Parameters)
 }
 
 // ============================================================
-// Wavy few-point corridor curves (WavinessControlPoints)
+// Gridless invariants (multi-seed) — the three properties the VALID dump line reports must hold for every seed:
+//   (a) all requested rooms placed   (best-effort: a shortfall is logged, not failed, but >= 1 room always placed),
+//   (b) the room-cell network is ONE connected region (corridor adjacency — the all-single-door star), and
+//   (c) zero corridor↔room-body crossings (the hard invariant).
+// Asserted through FOrganicLayoutDebug::ToText so this also locks the e2e VALID grammar (rooms=/regions=/crossings=)
+// the orchestrator greps. Connectivity is cross-checked against a direct BFS over the diagram's corridor adjacency.
+// ============================================================
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FOrganicDungeonGridlessInvariantsTest, "ProceduralGeometry.OrganicDungeon.GridlessInvariants", DefaultTestFlags)
+
+bool FOrganicDungeonGridlessInvariantsTest::RunTest(const FString& Parameters)
+{
+	const TArray<FString> Seeds = { TEXT("inv1"), TEXT("inv2"), TEXT("inv3"), TEXT("seedX"), TEXT("seedY") };
+	for (const FString& Seed : Seeds)
+	{
+		UOrganicDungeonGenerator2D*	  Gen = MakeOrganicGenerator(Seed, /*RoomCount=*/6);
+		const FOrganicDungeonGridData Data = Gen->GenerateWithGridData();
+
+		// At least one room is always placed for a non-empty request.
+		TestTrue(FString::Printf(TEXT("GridlessInvariants[%s]: >= 1 room placed"), *Seed), Data.Rooms.Num() >= 1);
+		// Best-effort placement: survivors never exceed the request. A shortfall is logged, not failed.
+		TestTrue(FString::Printf(TEXT("GridlessInvariants[%s]: rooms placed <= requested"), *Seed), Data.Rooms.Num() <= Data.RequestedRoomCount);
+		if (Data.Rooms.Num() < Data.RequestedRoomCount)
+		{
+			AddInfo(FString::Printf(
+				TEXT("GridlessInvariants[%s]: placement shortfall %d/%d (logged, not a failure)"), *Seed, Data.Rooms.Num(), Data.RequestedRoomCount));
+		}
+
+		// (b) Single connected region via a direct BFS over the room-cell diagram's corridor adjacency.
+		const int32 NumCells = Data.Diagram.Cells.Num();
+		if (TestTrue(FString::Printf(TEXT("GridlessInvariants[%s]: diagram has cells"), *Seed), NumCells > 0))
+		{
+			TArray<bool> Visited;
+			Visited.Init(false, NumCells);
+			TArray<int32> Queue;
+			Queue.Add(0);
+			Visited[0] = true;
+			int32 Reached = 1;
+			for (int32 Head = 0; Head < Queue.Num(); ++Head)
+			{
+				for (const int32 V : Data.Diagram.Cells[Queue[Head]].Neighbors)
+				{
+					if (V >= 0 && V < NumCells && !Visited[V])
+					{
+						Visited[V] = true;
+						++Reached;
+						Queue.Add(V);
+					}
+				}
+			}
+			TestEqual(FString::Printf(TEXT("GridlessInvariants[%s]: ONE connected region"), *Seed), Reached, NumCells);
+		}
+
+		// (a)+(b)+(c) via the VALID dump line (also locks the e2e grammar: "VALID " + rooms=/regions=/crossings=).
+		const FString DumpText = FOrganicLayoutDebug::ToText(Data);
+		TestTrue(FString::Printf(TEXT("GridlessInvariants[%s]: dump has VALID line"), *Seed), DumpText.Contains(TEXT("VALID ")));
+		TestTrue(FString::Printf(TEXT("GridlessInvariants[%s]: regions=1 token present"), *Seed), DumpText.Contains(TEXT("regions=1")));
+		TestTrue(FString::Printf(TEXT("GridlessInvariants[%s]: crossings=0 token present (no room-body crossing)"), *Seed),
+			DumpText.Contains(TEXT("crossings=0")));
+	}
+	return true;
+}
+
+// ============================================================
+// Wavy few-point corridor curves (random 2-or-3 intermediate control points per corridor)
 // ============================================================
 
 namespace
 {
-	/** Builds an OD generator with a given WavinessControlPoints on all corridors. */
-	UOrganicDungeonGenerator2D* MakeWavyGenerator(const FString& Seed, int32 RoomCount, int32 WavinessControlPoints, float Waviness = 0.4f)
+	/** Builds an OD generator with default rooms; corridors now pick a random 2-or-3 intermediate control points. */
+	UOrganicDungeonGenerator2D* MakeWavyGenerator(const FString& Seed, int32 RoomCount, float Waviness = 0.4f)
 	{
 		FOrganicDungeonResolvedParams Params;
 		Params.RoomTypes.Add(MakeDefaultRoom(RoomCount));
-		Params.WavinessControlPoints = WavinessControlPoints;
 		Params.Waviness = Waviness;
 
 		UOrganicDungeonGenerator2D* Gen = NewObject<UOrganicDungeonGenerator2D>();
@@ -1570,12 +1680,13 @@ namespace
 	}
 } // namespace
 
-// Test: with WavinessControlPoints>0 each corridor's Radii stays parallel to its (few-point) Centerline.
+// Test: each corridor's Radii stays parallel to its (few-point) Centerline, and the centerline now has
+// 4 or 5 points (2 endpoints + a random 2-or-3 intermediate control points drawn per corridor).
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FOrganicDungeonWavyRadiiParallelTest, "ProceduralGeometry.OrganicDungeon.Wavy.RadiiParallel", DefaultTestFlags)
 
 bool FOrganicDungeonWavyRadiiParallelTest::RunTest(const FString& Parameters)
 {
-	UOrganicDungeonGenerator2D*	  Gen = MakeWavyGenerator(TEXT("WavyRadiiTest"), 4, /*WavinessControlPoints=*/2);
+	UOrganicDungeonGenerator2D*	  Gen = MakeWavyGenerator(TEXT("WavyRadiiTest"), 4);
 	const FOrganicDungeonGridData Data = Gen->GenerateWithGridData();
 
 	for (int32 i = 0; i < Data.Corridors.Num(); ++i)
@@ -1583,6 +1694,9 @@ bool FOrganicDungeonWavyRadiiParallelTest::RunTest(const FString& Parameters)
 		TestEqual(FString::Printf(TEXT("Wavy.RadiiParallel: Corridor[%d].Radii.Num() == Centerline.Num()"), i),
 			Data.Corridors[i].Radii.Num(),
 			Data.Corridors[i].Centerline.Num());
+		const int32 N = Data.Corridors[i].Centerline.Num();
+		TestTrue(FString::Printf(TEXT("Wavy.RadiiParallel: Corridor[%d] has 4 or 5 control points (2 endpoints + 2-or-3 intermediate)"), i),
+			N == 4 || N == 5);
 	}
 	return true;
 }
@@ -1643,8 +1757,9 @@ bool FOrganicDungeonSamplerWavyTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// Test: same seed produces identical room/corridor counts and centerlines with default config
-// (WavinessControlPoints=0 default — draw order unchanged, backward-compatible).
+// Test: the same seed produces identical room/corridor counts and centerlines run-to-run. Corridors now draw
+// a random 2-or-3 intermediate control points internally, but the draw comes from the seeded RandomStream so
+// the output is reproducible for a given seed.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FOrganicDungeonWavyDefaultDeterminismTest, "ProceduralGeometry.OrganicDungeon.Wavy.DefaultDeterminism", DefaultTestFlags)
 
@@ -1652,9 +1767,8 @@ bool FOrganicDungeonWavyDefaultDeterminismTest::RunTest(const FString& Parameter
 {
 	const FString Seed = TEXT("WavyDefaultDeterminism");
 
-	// k=0 (default) vs explicit k=0: identical centerlines confirm the few-point default reproduces legacy.
 	UOrganicDungeonGenerator2D* GenA = MakeOrganicGenerator(Seed, 4);
-	UOrganicDungeonGenerator2D* GenB = MakeWavyGenerator(Seed, 4, /*WavinessControlPoints=*/0);
+	UOrganicDungeonGenerator2D* GenB = MakeOrganicGenerator(Seed, 4);
 
 	const FOrganicDungeonGridData DataA = GenA->GenerateWithGridData();
 	const FOrganicDungeonGridData DataB = GenB->GenerateWithGridData();
@@ -1664,11 +1778,20 @@ bool FOrganicDungeonWavyDefaultDeterminismTest::RunTest(const FString& Parameter
 
 	for (int32 c = 0; c < FMath::Min(DataA.Corridors.Num(), DataB.Corridors.Num()); ++c)
 	{
-		// k=0 must yield a 2-point straight centerline.
-		TestEqual(FString::Printf(TEXT("Wavy.DefaultDeterminism: Corridor[%d] is 2-point"), c), DataB.Corridors[c].Centerline.Num(), 2);
-		TestEqual(FString::Printf(TEXT("Wavy.DefaultDeterminism: Corridor[%d] count matches legacy"), c),
+		// Every corridor now bows with 2 or 3 intermediate control points → 4 or 5 total points.
+		const int32 N = DataA.Corridors[c].Centerline.Num();
+		TestTrue(FString::Printf(TEXT("Wavy.DefaultDeterminism: Corridor[%d] has 4 or 5 control points"), c), N == 4 || N == 5);
+		TestEqual(FString::Printf(TEXT("Wavy.DefaultDeterminism: Corridor[%d] count matches run-to-run"), c),
 			DataA.Corridors[c].Centerline.Num(),
 			DataB.Corridors[c].Centerline.Num());
+		if (DataA.Corridors[c].Centerline.Num() == DataB.Corridors[c].Centerline.Num())
+		{
+			for (int32 p = 0; p < N; ++p)
+			{
+				TestTrue(FString::Printf(TEXT("Wavy.DefaultDeterminism: Corridor[%d].Pt[%d] identical run-to-run"), c, p),
+					DataA.Corridors[c].Centerline[p].Equals(DataB.Corridors[c].Centerline[p], 0.01f));
+			}
+		}
 	}
 	return true;
 }
@@ -1677,99 +1800,11 @@ bool FOrganicDungeonWavyDefaultDeterminismTest::RunTest(const FString& Parameter
 // Junction node tests (deformed-circle hubs, unlimited ports)
 // ============================================================
 
-namespace
-{
-	/** Builds an OD generator with JunctionCount junctions on top of a default (synthetic-doorway) room set. */
-	UOrganicDungeonGenerator2D* MakeJunctionGenerator(const FString& Seed, int32 RoomCount, int32 JunctionCount)
-	{
-		FOrganicDungeonResolvedParams Params;
-		Params.RoomTypes.Add(MakeDefaultRoom(RoomCount));
-		Params.JunctionCount = JunctionCount;
-
-		UOrganicDungeonGenerator2D* Gen = NewObject<UOrganicDungeonGenerator2D>();
-		Gen->SetSeed(Seed);
-		Gen->SetGridSize(50);
-		Gen->ApplyResolvedParams(Params);
-		return Gen;
-	}
-} // namespace
-
-// Test: JunctionCount == 0 is byte-identical to the legacy pipeline (no junctions, identical rooms/corridors).
-// The AddJunctions early-out must take ZERO RandomStream draws so the layout is unchanged.
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FOrganicDungeonJunctionZeroDeterminismTest, "ProceduralGeometry.OrganicDungeon.Junction.ZeroDeterminism", DefaultTestFlags)
-
-bool FOrganicDungeonJunctionZeroDeterminismTest::RunTest(const FString& Parameters)
-{
-	const FString Seed = TEXT("JunctionZeroDeterminism");
-
-	// Legacy (no JunctionCount field set) vs explicit JunctionCount=0 — must be identical.
-	UOrganicDungeonGenerator2D*	  GenLegacy = MakeOrganicGenerator(Seed, 4);
-	UOrganicDungeonGenerator2D*	  GenZero = MakeJunctionGenerator(Seed, 4, /*JunctionCount=*/0);
-	const FOrganicDungeonGridData DataLegacy = GenLegacy->GenerateWithGridData();
-	const FOrganicDungeonGridData DataZero = GenZero->GenerateWithGridData();
-
-	TestEqual("Junction.ZeroDeterminism: no junctions added", DataZero.Junctions.Num(), 0);
-	TestEqual("Junction.ZeroDeterminism: Rooms.Num() matches legacy", DataZero.Rooms.Num(), DataLegacy.Rooms.Num());
-	TestEqual("Junction.ZeroDeterminism: Corridors.Num() matches legacy", DataZero.Corridors.Num(), DataLegacy.Corridors.Num());
-
-	// Centerlines must be byte-for-byte identical (zero junction draws → identical FRandomStream order).
-	constexpr double Tol = 0.01;
-	for (int32 c = 0; c < FMath::Min(DataLegacy.Corridors.Num(), DataZero.Corridors.Num()); ++c)
-	{
-		const FOrganicCorridor& L = DataLegacy.Corridors[c];
-		const FOrganicCorridor& Z = DataZero.Corridors[c];
-		if (!TestEqual(
-				FString::Printf(TEXT("Junction.ZeroDeterminism: Corridor[%d] point count matches"), c), Z.Centerline.Num(), L.Centerline.Num()))
-		{
-			continue;
-		}
-		for (int32 p = 0; p < L.Centerline.Num(); ++p)
-		{
-			TestEqual(FString::Printf(TEXT("Junction.ZeroDeterminism: Corridor[%d].Pt[%d].X"), c, p),
-				(double)Z.Centerline[p].X,
-				(double)L.Centerline[p].X,
-				Tol);
-			TestEqual(FString::Printf(TEXT("Junction.ZeroDeterminism: Corridor[%d].Pt[%d].Y"), c, p),
-				(double)Z.Centerline[p].Y,
-				(double)L.Centerline[p].Y,
-				Tol);
-		}
-	}
-
-	return true;
-}
-
-// Test: JunctionCount == N adds junctions best-effort, each with a clamped Radius (>= one cell) and a
-// 16-vertex deformed-circle perimeter. Best-effort means added count is in [0, N] (room-crossing taps are
-// re-rolled), but every junction that IS added must satisfy the structural invariants.
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FOrganicDungeonJunctionStructureTest, "ProceduralGeometry.OrganicDungeon.Junction.Structure", DefaultTestFlags)
-
-bool FOrganicDungeonJunctionStructureTest::RunTest(const FString& Parameters)
-{
-	constexpr int32 Requested = 4;
-	constexpr int32 GridSizeVal = 50;
-
-	UOrganicDungeonGenerator2D*	  Gen = MakeJunctionGenerator(TEXT("JunctionStructure"), /*RoomCount=*/5, /*JunctionCount=*/Requested);
-	const FOrganicDungeonGridData Data = Gen->GenerateWithGridData();
-
-	// Best-effort: at most Requested junctions, never more (rejections only reduce the count).
-	TestTrue(
-		"Junction.Structure: junction count within best-effort bound [0, Requested]", Data.Junctions.Num() >= 0 && Data.Junctions.Num() <= Requested);
-
-	const float CellSizeVal = static_cast<float>(GridSizeVal);
-	for (int32 j = 0; j < Data.Junctions.Num(); ++j)
-	{
-		const FOrganicJunction& J = Data.Junctions[j];
-		// Radius clamped to at least one cell so the disc/spline are never degenerate.
-		TestTrue(FString::Printf(TEXT("Junction.Structure: Junction[%d].Radius (%.1f) >= CellSize (%.1f)"), j, J.Radius, CellSizeVal),
-			J.Radius >= CellSizeVal - KINDA_SMALL_NUMBER);
-		// 16-vertex perimeter (the deformed-circle boundary fed to PCG).
-		TestEqual(FString::Printf(TEXT("Junction.Structure: Junction[%d] perimeter has 16 vertices"), j), J.Perimeter.Num(), 16);
-	}
-
-	return true;
-}
+// NOTE: on-demand junctions are now the universal connectivity fallback (inserted on an existing corridor to
+// branch to an otherwise-unreachable room). The StarConnected contract — the all-single-door star forms ONE
+// connected component — is asserted by the DeclaredDoorways.MismatchNeverDrop test above (BFS over the
+// room-cell diagram's corridor adjacency reaches every cell).
+// The MakeJunction / AttachCorridorToJunction math is covered directly by Junction.Attach below.
 
 // Test: AttachCorridorToJunction returns the perimeter vertex whose outward direction best matches Toward.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FOrganicDungeonJunctionAttachTest, "ProceduralGeometry.OrganicDungeon.Junction.Attach", DefaultTestFlags)
@@ -1840,217 +1875,6 @@ bool FOrganicDungeonJunctionAttachTest::RunTest(const FString& Parameters)
 			FVector2D::DotProduct(AttachNormal, ExpectedNormal) >= 0.99f);
 	}
 
-	return true;
-}
-
-// Test: junction tap corridors never cross a non-endpoint room body (SHARED MODEL invariant). Exercises the
-// AddJunctions room-collision rejection: every emitted junction-tap corridor's sampled curve must avoid all
-// rooms except the room it originates from.
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FOrganicDungeonJunctionTapNoRoomCrossTest, "ProceduralGeometry.OrganicDungeon.Junction.TapNoRoomCross", DefaultTestFlags)
-
-bool FOrganicDungeonJunctionTapNoRoomCrossTest::RunTest(const FString& Parameters)
-{
-	// Many rooms + many junction requests across several seeds maximizes the chance a tap would otherwise
-	// cross a third room, so the rejection path is exercised.
-	const TArray<FString> Seeds = { TEXT("TapCrossA"), TEXT("TapCrossB"), TEXT("TapCrossC"), TEXT("TapCrossD") };
-
-	int32 TapCorridorsChecked = 0;
-
-	for (const FString& Seed : Seeds)
-	{
-		UOrganicDungeonGenerator2D*	  Gen = MakeJunctionGenerator(Seed, /*RoomCount=*/8, /*JunctionCount=*/6);
-		const float					  CellHalfStep = static_cast<float>(50) * 0.5f; // GridSize=50 in MakeJunctionGenerator
-		const FOrganicDungeonGridData Data = Gen->GenerateWithGridData();
-
-		for (int32 c = 0; c < Data.Corridors.Num(); ++c)
-		{
-			const FOrganicCorridor& Cor = Data.Corridors[c];
-
-			// A junction tap has a Junction-typed anchor on one end and a Room-typed anchor on the other.
-			int32 RoomIdx = INDEX_NONE;
-			bool  bTouchesJunction = false;
-			if (Cor.AnchorA.Type == EOrganicAnchorType::Junction || Cor.AnchorB.Type == EOrganicAnchorType::Junction)
-			{
-				bTouchesJunction = true;
-			}
-			if (Cor.AnchorA.Type == EOrganicAnchorType::Room)
-			{
-				RoomIdx = Cor.AnchorA.Index;
-			}
-			else if (Cor.AnchorB.Type == EOrganicAnchorType::Room)
-			{
-				RoomIdx = Cor.AnchorB.Index;
-			}
-			if (!bTouchesJunction || RoomIdx == INDEX_NONE || !Data.Rooms.IsValidIndex(RoomIdx))
-			{
-				continue;
-			}
-
-			++TapCorridorsChecked;
-
-			// Sample the tap's stored centerline into a dense curve, then assert no non-origin room body is hit.
-			TArray<FVector2D> Dense;
-			UOrganicDungeonGenerator2D::SampleCorridorCurve(Cor.Centerline, Cor.AnchorA.Normal, Cor.AnchorB.Normal, CellHalfStep, Dense);
-
-			for (int32 r = 0; r < Data.Rooms.Num(); ++r)
-			{
-				if (r == RoomIdx)
-				{
-					continue; // the originating room is allowed
-				}
-				const FOrganicRoom& Room = Data.Rooms[r];
-				// Exact swept segment-vs-OBB test mirroring CorridorHitsRoom: any dense segment that enters this
-				// room's footprint OBB is a crossing.
-				const float		C = FMath::Cos(FMath::DegreesToRadians(Room.RotationDeg));
-				const float		S = FMath::Sin(FMath::DegreesToRadians(Room.RotationDeg));
-				const FVector2D AxisX(C, S);
-				const FVector2D AxisY(-S, C);
-				for (int32 i = 0; i + 1 < Dense.Num(); ++i)
-				{
-					// Point-in-OBB check on each dense sample (sufficient at cell-resolution sampling) plus the
-					// midpoint, to catch a segment passing through the body between two outside samples.
-					auto InRoom = [&](const FVector2D& P) {
-						const FVector2D D = P - Room.Center;
-						return FMath::Abs(FVector2D::DotProduct(D, AxisX)) <= Room.HalfExtent.X
-							&& FMath::Abs(FVector2D::DotProduct(D, AxisY)) <= Room.HalfExtent.Y;
-					};
-					const FVector2D Mid = (Dense[i] + Dense[i + 1]) * 0.5f;
-					if (InRoom(Dense[i]) || InRoom(Dense[i + 1]) || InRoom(Mid))
-					{
-						AddError(FString::Printf(TEXT("Junction.TapNoRoomCross[%s]: tap Corridor[%d] crosses non-origin Room[%d]"), *Seed, c, r));
-						break;
-					}
-				}
-			}
-		}
-	}
-
-	// Junction taps are best-effort; if none survived for any seed the invariant holds vacuously, but note it.
-	if (TapCorridorsChecked == 0)
-	{
-		AddInfo(TEXT("Junction.TapNoRoomCross: no junction tap corridors were emitted across the tested seeds"));
-	}
-
-	return true;
-}
-
-// Test: the all-single-door STAR with junctions requested produces ONE connected walkable network. Five
-// 1-doorway rooms (the handshaking-lemma star where MST-over-rooms would have collapsed) plus junctions:
-// every room survives, junctions are added best-effort, and the rasterized floor flood-fills to a single
-// connected region (no isolated room pocket). This is the star contract: junctions absorb the doorway deficit.
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FOrganicDungeonStarConnectedTest, "ProceduralGeometry.OrganicDungeon.Junction.StarConnected", DefaultTestFlags)
-
-bool FOrganicDungeonStarConnectedTest::RunTest(const FString& Parameters)
-{
-	// 1 declared doorway pointing +X, 5 rooms → the star. Junctions requested so the deficit is absorbed.
-	FOrganicResolvedRoomType RT;
-	RT.FootprintWidth = 600.0f;
-	RT.FootprintHeight = 600.0f;
-	RT.Count = 5;
-	RT.Weight = 5;
-	{
-		FOrganicBakedDoorway D;
-		D.LocalOutwardDir = FVector2D(1.0f, 0.0f);
-		D.LocalPosition = FVector2D(300.0f, 0.0f);
-		D.Width = 150.0f;
-		RT.Doorways.Add(D);
-	}
-
-	FOrganicDungeonResolvedParams Params;
-	Params.RoomTypes.Add(RT);
-	Params.MinThickness = 50.0f;
-	Params.MaxWidth = 200.0f;
-	Params.CorridorLengthMin = 400.0f;
-	Params.CorridorLengthMax = 800.0f;
-	Params.JunctionCount = 3; // junction hubs available to tap extra connectivity beyond the single doorways
-
-	// Several seeds so the assertion does not hinge on one placement.
-	const TArray<FString> Seeds = { TEXT("StarA"), TEXT("StarB"), TEXT("StarC"), TEXT("StarD") };
-	int32				  Exercised = 0;
-	for (const FString& Seed : Seeds)
-	{
-		UOrganicDungeonGenerator2D* Gen = NewObject<UOrganicDungeonGenerator2D>();
-		Gen->SetSeed(Seed);
-		Gen->SetGridSize(50);
-		Gen->ApplyResolvedParams(Params);
-		const FOrganicDungeonGridData Data = Gen->GenerateWithGridData();
-
-		if (Data.Rooms.Num() < 2)
-		{
-			// Placement shortfall (not a connectivity drop) — star not exercised for this seed.
-			continue;
-		}
-		++Exercised;
-
-		// Never drop a room (survivors never exceed the 5 requested).
-		TestTrue(FString::Printf(TEXT("StarConnected[%s]: survivors <= 5 requested rooms"), *Seed), Data.Rooms.Num() <= 5);
-
-		// Junctions added best-effort within [0, requested].
-		TestTrue(FString::Printf(TEXT("StarConnected[%s]: junctions within [0, requested]"), *Seed),
-			Data.Junctions.Num() >= 0 && Data.Junctions.Num() <= Params.JunctionCount);
-
-		// Connectivity: the rasterized floor must flood-fill to a SINGLE region (no isolated pocket). The grid
-		// flood-fill (Regions) is the ground truth for walkable connectivity of the realized network.
-		if (Data.Regions.Num() > 0)
-		{
-			TestEqual(FString::Printf(TEXT("StarConnected[%s]: walkable floor is one connected region"), *Seed), Data.Regions.Num(), 1);
-		}
-	}
-
-	if (Exercised == 0)
-	{
-		AddInfo(TEXT("StarConnected: no seed placed >= 2 rooms (placement shortfall) — star connectivity not exercised"));
-	}
-	return true;
-}
-
-// Test: LoopCount / CorridorLinkCount are satisfied best-effort and NEVER crash or fail generation. The
-// realized count must lie within [0, requested]; whatever is not realized is logged as a shortfall (the log
-// is the out-of-band signal — the contract verified here is "best-effort, never fail, never over-deliver").
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FOrganicDungeonLoopLinkBestEffortTest, "ProceduralGeometry.OrganicDungeon.Topology.LoopLinkBestEffort", DefaultTestFlags)
-
-bool FOrganicDungeonLoopLinkBestEffortTest::RunTest(const FString& Parameters)
-{
-	FOrganicDungeonResolvedParams Params;
-	Params.RoomTypes.Add(MakeDefaultRoom(6));
-	Params.LoopCount = 4;
-	Params.LoopMaxDistance = 4000.0f;
-	Params.CorridorLinkCount = 4;
-	Params.LinkMaxDistance = 4000.0f;
-
-	const TArray<FString> Seeds = { TEXT("LL1"), TEXT("LL2"), TEXT("LL3") };
-	for (const FString& Seed : Seeds)
-	{
-		UOrganicDungeonGenerator2D* Gen = NewObject<UOrganicDungeonGenerator2D>();
-		Gen->SetSeed(Seed);
-		Gen->SetGridSize(50);
-		Gen->ApplyResolvedParams(Params);
-		const FOrganicDungeonGridData Data = Gen->GenerateWithGridData();
-
-		// Generation produced a layout (never failed/empty on a topology request).
-		TestTrue(FString::Printf(TEXT("LoopLinkBestEffort[%s]: generation produced rooms"), *Seed), Data.Rooms.Num() > 0);
-
-		// Count realized loops/links over the corridor flags. Best-effort: realized <= requested (never over).
-		int32 Loops = 0;
-		int32 Links = 0;
-		for (const FOrganicCorridor& Cor : Data.Corridors)
-		{
-			if (Cor.bIsLoop)
-			{
-				++Loops;
-			}
-			if (Cor.bIsLink)
-			{
-				++Links;
-			}
-		}
-		TestTrue(FString::Printf(TEXT("LoopLinkBestEffort[%s]: realized loops %d within [0, %d]"), *Seed, Loops, Params.LoopCount),
-			Loops >= 0 && Loops <= Params.LoopCount);
-		TestTrue(FString::Printf(TEXT("LoopLinkBestEffort[%s]: realized links %d within [0, %d]"), *Seed, Links, Params.CorridorLinkCount),
-			Links >= 0 && Links <= Params.CorridorLinkCount);
-	}
 	return true;
 }
 

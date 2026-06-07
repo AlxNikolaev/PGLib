@@ -208,19 +208,13 @@ struct PROCEDURALGEOMETRY_API FOrganicDungeonResolvedParams
 	float				  MinThickness = 100.0f;
 	float				  MaxWidth = 300.0f;
 	float				  Waviness = 0.4f;
-	int32				  WavinessControlPoints = 0;
 	float				  CorridorLengthMin = 400.0f;
 	float				  CorridorLengthMax = 1200.0f;
 
 	// Topology
-	int32 LoopCount = 0;
-	float LoopMaxDistance = 1500.0f;
 	float SpineWidthScale = 1.6f;
 	int32 DeadEndCount = 0;
 	float DeadEndLength = 500.0f;
-	int32 CorridorLinkCount = 0;
-	float LinkMaxDistance = 1200.0f;
-	int32 JunctionCount = 0; // free deformed-circle junction nodes that tap extra connectivity beyond room doorways
 
 	// Realization (note: rasterization grid cell size is an actor-level setting, not per-location)
 	int32 WallThickness = 1;
@@ -230,7 +224,7 @@ struct PROCEDURALGEOMETRY_API FOrganicDungeonResolvedParams
 
 /**
  * Organic dungeon generation parameters: prefab rooms placed in continuous space (with rotation),
- * connected by cave-like corridors that branch, loop, and dead-end. Call Resolve() to clamp into raw
+ * connected by cave-like corridors that branch and dead-end. Call Resolve() to clamp into raw
  * parameters for UOrganicDungeonGenerator2D.
  */
 USTRUCT(BlueprintType)
@@ -318,13 +312,6 @@ struct PROCEDURALGEOMETRY_API FOrganicDungeonConfig
 	UPROPERTY(EditAnywhere,
 		BlueprintReadWrite,
 		Category = "Organic Dungeon|Corridors",
-		meta = (ClampMin = 0,
-			ToolTip = "Number of intermediate control points on a corridor's wavy curve (0 = straight 2-point, 1 = single C bow, 2 = S, ...)."))
-	int32 WavinessControlPoints = 0;
-
-	UPROPERTY(EditAnywhere,
-		BlueprintReadWrite,
-		Category = "Organic Dungeon|Corridors",
 		meta = (ClampMin = 1.0, ToolTip = "Minimum corridor length between rooms, world units."))
 	float CorridorLengthMin = 400.0f;
 
@@ -335,19 +322,6 @@ struct PROCEDURALGEOMETRY_API FOrganicDungeonConfig
 	float CorridorLengthMax = 1200.0f;
 
 	// --- Topology extras ---
-	UPROPERTY(EditAnywhere,
-		BlueprintReadWrite,
-		Category = "Organic Dungeon|Topology",
-		meta = (ClampMin = 0,
-			ToolTip = "Extra loop corridors added beyond the connecting backbone (the shortest non-backbone edges). 0 = pure tree."))
-	int32 LoopCount = 0;
-
-	UPROPERTY(EditAnywhere,
-		BlueprintReadWrite,
-		Category = "Organic Dungeon|Topology",
-		meta = (ClampMin = 0.0, ToolTip = "Maximum room-center distance eligible for a loop, world units."))
-	float LoopMaxDistance = 1500.0f;
-
 	UPROPERTY(EditAnywhere,
 		BlueprintReadWrite,
 		Category = "Organic Dungeon|Topology",
@@ -365,28 +339,6 @@ struct PROCEDURALGEOMETRY_API FOrganicDungeonConfig
 		Category = "Organic Dungeon|Topology",
 		meta = (ClampMin = 1.0, ToolTip = "Length of a dead-end stub, world units."))
 	float DeadEndLength = 500.0f;
-
-	UPROPERTY(EditAnywhere,
-		BlueprintReadWrite,
-		Category = "Organic Dungeon|Topology",
-		meta = (ClampMin = 0,
-			ToolTip =
-				"Number of corridor-link branches to add. Each springs from a corridor and joins the nearest room doorway or another corridor."))
-	int32 CorridorLinkCount = 0;
-
-	UPROPERTY(EditAnywhere,
-		BlueprintReadWrite,
-		Category = "Organic Dungeon|Topology",
-		meta = (ClampMin = 1.0, ToolTip = "Maximum length of a corridor-link branch, world units."))
-	float LinkMaxDistance = 1200.0f;
-
-	UPROPERTY(EditAnywhere,
-		BlueprintReadWrite,
-		Category = "Organic Dungeon|Topology",
-		meta = (ClampMin = 0,
-			ToolTip =
-				"Number of free junction nodes (deformed circles) to add. Each junction taps extra connectivity into the network beyond room doorway budgets."))
-	int32 JunctionCount = 0;
 
 	// --- Realization ---
 	// NOTE: the rasterization grid cell size is configured on the GeneratedLevelActor (OrganicGridCellSize),
