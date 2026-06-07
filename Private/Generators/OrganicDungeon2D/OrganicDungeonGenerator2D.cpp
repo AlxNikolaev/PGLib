@@ -483,49 +483,23 @@ FOrganicCorridor UOrganicDungeonGenerator2D::BuildBezierCorridor(const FVector2D
 	const float CellSizeVal = static_cast<float>(GridSize);
 
 	FOrganicCorridor Cor;
-	const FVector2D	 Chord = BP - AP;
-	const float		 Dist = FMath::Max(1.0f, Chord.Size());
-	const FVector2D	 Perp = FVector2D(-Chord.Y, Chord.X).GetSafeNormal();
-	const float		 Off = Waviness * Dist * 0.5f;
-	const FVector2D	 C1 = AP + AN * (Dist / 3.0f) + Perp * RandomStream.FRandRange(-Off, Off);
-	const FVector2D	 C2 = BP + BN * (Dist / 3.0f) + Perp * RandomStream.FRandRange(-Off, Off);
 
-	const int32 N = FMath::Clamp(FMath::CeilToInt(Dist / (CellSizeVal * 0.5f)), 8, 256);
-
-	// Pre-generate radius control points for cave variation.
-	const int32	  NumCtrl = FMath::Clamp(FMath::CeilToInt(Dist / 200.0f) + 2, 3, 16);
-	TArray<float> RadCtrl;
-	RadCtrl.Reserve(NumCtrl);
-	for (int32 i = 0; i < NumCtrl; ++i)
-	{
-		RadCtrl.Add(RandomStream.FRand());
-	}
+	// Simple straight corridor: a linear centerline between the two doorway points at constant width.
+	// Organic waviness and the visual floor/wall geometry are produced downstream by the PCG brush
+	// (the config Waviness/width travel as spline metadata); the C++ centerline stays minimal.
+	// AN/BN/Waviness/MaxRadius/Style are intentionally unused now (kept for signature compatibility).
+	const FVector2D Chord = BP - AP;
+	const float		Dist = FMath::Max(1.0f, Chord.Size());
+	const int32		N = FMath::Clamp(FMath::CeilToInt(Dist / (CellSizeVal * 0.5f)), 2, 256);
+	const float		HalfWidth = FMath::Max(1.0f, MinRadius * RadiusScale);
 
 	Cor.Centerline.Reserve(N + 1);
 	Cor.Radii.Reserve(N + 1);
 	for (int32 i = 0; i <= N; ++i)
 	{
-		const float		T = static_cast<float>(i) / N;
-		const FVector2D Pt = CubicBezier(AP, C1, C2, BP, T);
-		Cor.Centerline.Add(Pt);
-
-		float Radius;
-		if (Style == EOrganicCorridorStyle::Clean)
-		{
-			Radius = MinRadius;
-		}
-		else
-		{
-			// Smoothstep-interpolated value noise across the control points.
-			const float Fp = T * (NumCtrl - 1);
-			const int32 I0 = FMath::Clamp(FMath::FloorToInt(Fp), 0, NumCtrl - 1);
-			const int32 I1 = FMath::Min(I0 + 1, NumCtrl - 1);
-			float		Frac = FMath::Clamp(Fp - I0, 0.0f, 1.0f);
-			Frac = Frac * Frac * (3.0f - 2.0f * Frac); // smoothstep
-			const float Noise = FMath::Lerp(RadCtrl[I0], RadCtrl[I1], Frac);
-			Radius = FMath::Lerp(MinRadius, MaxRadius, Noise);
-		}
-		Cor.Radii.Add(Radius * RadiusScale);
+		const float T = static_cast<float>(i) / N;
+		Cor.Centerline.Add(FMath::Lerp(AP, BP, T));
+		Cor.Radii.Add(HalfWidth);
 	}
 	return Cor;
 }

@@ -28,7 +28,10 @@ public class ProceduralGeometry : ModuleRules
                 // GeometryAlgorithms is a Runtime module of the GeometryProcessing plugin (enabled in the
                 // .uproject for all targets); GeometryCore is an engine Runtime module.
                 "GeometryCore",
-                "GeometryAlgorithms"
+                "GeometryAlgorithms",
+                // OD config export/import (FOrganicConfigIO): reflection-based JSON for FOrganicDungeonConfig.
+                "Json",
+                "JsonUtilities"
             ]
         );
     }

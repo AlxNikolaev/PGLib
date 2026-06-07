@@ -3,7 +3,10 @@
 #include "Generators/OrganicDungeon2D/OrganicDungeonGenerator2D.h"
 #include "Generators/OrganicDungeon2D/OrganicDungeonConfig.h"
 #include "Generators/OrganicDungeon2D/OrganicFloorBuilder.h"
+#include "Generators/OrganicDungeon2D/OrganicLayoutDebug.h"
+#include "Generators/OrganicDungeon2D/OrganicConfigIO.h"
 #include "Factories/ProceduralMeshFactory.h"
+#include "Misc/Paths.h"
 #include "../../ProceduralGeometryTestFlags.h"
 
 #include "Components/ArrowComponent.h"
@@ -210,8 +213,7 @@ bool FOrganicDungeonNoRoomTypesTest::RunTest(const FString& Parameters)
 // Test 7: StartRoomIndex and EndRoomIndex are valid, distinct room indices (the single entrance/exit)
 //         at the graph-diameter endpoints when more than one room exists.
 // ============================================================
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FOrganicDungeonEntranceAndExitValidTest, "ProceduralGeometry.OrganicDungeon.EntranceAndExitValid", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FOrganicDungeonEntranceAndExitValidTest, "ProceduralGeometry.OrganicDungeon.EntranceAndExitValid", DefaultTestFlags)
 
 bool FOrganicDungeonEntranceAndExitValidTest::RunTest(const FString& Parameters)
 {
@@ -242,8 +244,7 @@ bool FOrganicDungeonEntranceAndExitValidTest::RunTest(const FString& Parameters)
 // ============================================================
 // Test 7b: A single-room cluster degenerates to EndRoomIndex == StartRoomIndex without crashing.
 // ============================================================
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FOrganicDungeonSingleRoomExitTest, "ProceduralGeometry.OrganicDungeon.SingleRoomExitDegenerate", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FOrganicDungeonSingleRoomExitTest, "ProceduralGeometry.OrganicDungeon.SingleRoomExitDegenerate", DefaultTestFlags)
 
 bool FOrganicDungeonSingleRoomExitTest::RunTest(const FString& Parameters)
 {
@@ -850,9 +851,9 @@ bool FOrganicFloorFoundationMeshTest::RunTest(const FString& /*Parameters*/)
 	// Z == FloorH + WallHeight faces up — so above-floor normals are no longer uniformly horizontal.
 	constexpr float TopZ = FloorH + WallHeight;
 	bool			bHasUpFloor = false;
-	bool			bHasWallSide = false;	// a side-face vertex above floor with a horizontal normal
-	bool			bHasTopCap = false;		// a top-cap vertex at TopZ with an up normal
-	float			MaxInsetDistSq = 0.0f;	// inner-face verts are inset from the outer boundary
+	bool			bHasWallSide = false;  // a side-face vertex above floor with a horizontal normal
+	bool			bHasTopCap = false;	   // a top-cap vertex at TopZ with an up normal
+	float			MaxInsetDistSq = 0.0f; // inner-face verts are inset from the outer boundary
 	for (int32 i = 0; i < Mesh.Vertices.Num(); ++i)
 	{
 		const FVector& V = Mesh.Vertices[i];
@@ -1602,16 +1603,95 @@ bool FOrganicBakedMarkerFootprintPrecedenceTest::RunTest(const FString& Paramete
 	const FOrganicDungeonResolvedParams ParamsNoMarker = ConfigNoMarker.Resolve();
 	if (TestEqual("BakedMarkerFootprintPrecedence: one resolved room type (no marker)", ParamsNoMarker.RoomTypes.Num(), 1))
 	{
-		TestEqual("BakedMarkerFootprintPrecedence: width falls back to override",
-			(double)ParamsNoMarker.RoomTypes[0].FootprintWidth,
-			600.0,
-			0.01);
-		TestEqual("BakedMarkerFootprintPrecedence: height falls back to override",
-			(double)ParamsNoMarker.RoomTypes[0].FootprintHeight,
-			600.0,
-			0.01);
+		TestEqual("BakedMarkerFootprintPrecedence: width falls back to override", (double)ParamsNoMarker.RoomTypes[0].FootprintWidth, 600.0, 0.01);
+		TestEqual("BakedMarkerFootprintPrecedence: height falls back to override", (double)ParamsNoMarker.RoomTypes[0].FootprintHeight, 600.0, 0.01);
 	}
 
+	return true;
+}
+
+// ============================================================
+// Layout diagnostics dump (e2e harness): generate representative layouts for several seeds and write
+// text + SVG dumps to <ProjectSaved>/Logs/OD/ for headless inspection / iteration. Not a pass/fail
+// assertion of layout quality — the written artifacts are the point.
+// ============================================================
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FOrganicDungeonDumpLayoutsTest, "ProceduralGeometry.OrganicDungeon.DumpLayouts", DefaultTestFlags)
+
+bool FOrganicDungeonDumpLayoutsTest::RunTest(const FString& Parameters)
+{
+	auto MakeRoom = [](float W, float H, int32 Count) {
+		FOrganicResolvedRoomType RT;
+		RT.FootprintWidth = W;
+		RT.FootprintHeight = H;
+		RT.Count = Count;
+		RT.Weight = Count;
+		return RT;
+	};
+
+	// Representative multi-room-type config with loops + links + waviness, mirroring an authored OD location.
+	FOrganicDungeonResolvedParams Params;
+	Params.RoomTypes.Add(MakeRoom(3200.0f, 3100.0f, 3));
+	Params.RoomTypes.Add(MakeRoom(6200.0f, 5800.0f, 2));
+	Params.RoomTypes.Add(MakeRoom(1800.0f, 1800.0f, 2));
+	Params.CorridorStyle = EOrganicCorridorStyle::Cave;
+	Params.MinThickness = 400.0f;
+	Params.MaxWidth = 900.0f;
+	Params.Waviness = 1.0f;
+	Params.CorridorLengthMin = 1500.0f;
+	Params.CorridorLengthMax = 3000.0f;
+	Params.BranchProbability = 1.0f;
+	Params.LoopCount = 3;
+	Params.SpineWidthScale = 1.6f;
+	Params.CorridorLinkCount = 3;
+	Params.WallThickness = 2;
+
+	const TArray<FString> Seeds = { TEXT("1"), TEXT("2"), TEXT("3"), TEXT("seedA"), TEXT("seedB") };
+	for (const FString& Seed : Seeds)
+	{
+		UOrganicDungeonGenerator2D* Gen = NewObject<UOrganicDungeonGenerator2D>();
+		Gen->SetSeed(Seed);
+		Gen->SetGridSize(100);
+		Gen->ApplyResolvedParams(Params);
+		const FOrganicDungeonGridData Data = Gen->GenerateWithGridData();
+
+		const FString Path = FOrganicLayoutDebug::DumpToFiles(Data, FString::Printf(TEXT("dump_%s"), *Seed));
+		AddInfo(FString::Printf(TEXT("[DumpLayouts] seed='%s' rooms=%d corridors=%d -> %s"), *Seed, Data.Rooms.Num(), Data.Corridors.Num(), *Path));
+		TestTrue(FString::Printf(TEXT("DumpLayouts: wrote dump for seed '%s'"), *Seed), !Path.IsEmpty());
+	}
+	return true;
+}
+
+// ============================================================
+// Import an exported OD config (<ProjectSaved>/OD/import_config.json) and dump layouts for several seeds.
+// Skips cleanly (passes) when no import_config.json is present. Drop a designer-exported config there to
+// drive the e2e loop with real rooms/doorways/params.
+// ============================================================
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FOrganicDungeonDumpFromConfigTest, "ProceduralGeometry.OrganicDungeon.DumpFromConfig", DefaultTestFlags)
+
+bool FOrganicDungeonDumpFromConfigTest::RunTest(const FString& Parameters)
+{
+	const FString Path = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("OD"), TEXT("import_config.json"));
+
+	FOrganicDungeonConfig Config;
+	if (!FOrganicConfigIO::LoadFromFile(Path, Config))
+	{
+		AddInfo(FString::Printf(TEXT("[DumpFromConfig] no import_config.json at %s — skipping (drop a config there to use it)"), *Path));
+		return true;
+	}
+
+	const FOrganicDungeonResolvedParams Params = Config.Resolve();
+	const TArray<FString>				Seeds = { TEXT("1"), TEXT("2"), TEXT("3"), TEXT("4"), TEXT("5"), TEXT("6") };
+	for (const FString& Seed : Seeds)
+	{
+		UOrganicDungeonGenerator2D* Gen = NewObject<UOrganicDungeonGenerator2D>();
+		Gen->SetSeed(Seed);
+		Gen->SetGridSize(100);
+		Gen->ApplyResolvedParams(Params);
+		const FOrganicDungeonGridData Data = Gen->GenerateWithGridData();
+
+		const FString Out = FOrganicLayoutDebug::DumpToFiles(Data, FString::Printf(TEXT("cfg_%s"), *Seed));
+		AddInfo(FString::Printf(TEXT("[DumpFromConfig] seed='%s' rooms=%d corridors=%d -> %s"), *Seed, Data.Rooms.Num(), Data.Corridors.Num(), *Out));
+	}
 	return true;
 }
 
