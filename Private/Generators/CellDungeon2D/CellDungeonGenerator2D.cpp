@@ -244,21 +244,21 @@ UCellDungeonGenerator2D* UCellDungeonGenerator2D::SetConfig(const FCellDungeonCo
 // ============================================================================
 // Substrate construction
 // ============================================================================
-int32 UCellDungeonGenerator2D::EstimateSiteCount() const
+int32 UCellDungeonGenerator2D::EstimateSiteCount(const FBox2D& InBounds) const
 {
-	const FVector2D Size = Bounds.GetSize();
+	const FVector2D Size = InBounds.GetSize();
 	const float		Area = FMath::Abs(Size.X * Size.Y);
 	const float		Cell = FMath::Max(1.f, Config.CorridorSize);
 	const int32		Estimate = FMath::RoundToInt(Area / (Cell * Cell));
 	return FMath::Clamp(Estimate, MinSites, MaxSites);
 }
 
-FVoronoiDiagram2D UCellDungeonGenerator2D::BuildSubstrate() const
+FVoronoiDiagram2D UCellDungeonGenerator2D::BuildSubstrate(const FBox2D& InBounds) const
 {
 	UVoronoiGenerator2D* Gen = NewObject<UVoronoiGenerator2D>();
-	const int32			 NumSites = EstimateSiteCount();
+	const int32			 NumSites = EstimateSiteCount(InBounds);
 
-	Gen->SetBounds(Bounds)->SetSeed(Seed)->SetMinSiteDistance(Config.CorridorSize * 0.7f)->SetRelaxationIterations(RelaxIterations);
+	Gen->SetBounds(InBounds)->SetSeed(Seed)->SetMinSiteDistance(Config.CorridorSize * 0.7f)->SetRelaxationIterations(RelaxIterations);
 
 	return Gen->GenerateRelaxed(NumSites);
 }
@@ -1011,8 +1011,39 @@ FCellDungeonResult UCellDungeonGenerator2D::Generate()
 		}
 	}
 
-	// --- 4. FINE diagram + rasterize ----------------------------------------
-	Result.Diagram = BuildSubstrate();
+	// --- 4. FINE diagram (sized to the room CLUSTER) + rasterize ------------
+	// Fit the fine substrate to the placed rooms' bounding box + a routing margin, NOT the full bounds:
+	// this keeps corridors inside the cluster, yields true CorridorSize cells (no site-count clamp) and is
+	// faster, since the diagram no longer spans empty exterior space.
+	FBox2D ClusterBox(ForceInit);
+	bool   bHaveCluster = false;
+	for (const FPlannedRoom& PR : Planned)
+	{
+		TArray<FVector2D> Corners;
+		RoomRectCorners(PR.Center, PR.RotationDeg, MarkerToType(PR.Marker).Footprint, Corners);
+		for (const FVector2D& C : Corners)
+		{
+			if (!bHaveCluster)
+			{
+				ClusterBox.Min = C;
+				ClusterBox.Max = C;
+				bHaveCluster = true;
+			}
+			else
+			{
+				ClusterBox += C;
+			}
+		}
+	}
+	if (!bHaveCluster)
+	{
+		ClusterBox.Min = Bounds.GetCenter();
+		ClusterBox.Max = Bounds.GetCenter();
+	}
+	const float ClusterMargin = FMath::Max(3.f * CellSize, CoarseCell * 0.5f);
+	ClusterBox = ClusterBox.ExpandBy(FVector2D(ClusterMargin, ClusterMargin));
+
+	Result.Diagram = BuildSubstrate(ClusterBox);
 	const int32 N = Result.Diagram.Cells.Num();
 	if (N == 0)
 	{
@@ -1065,15 +1096,20 @@ FCellDungeonResult UCellDungeonGenerator2D::Generate()
 		ResolveDoorways(Result, Result.Rooms[r]);
 	}
 
-	// --- 5. CONNECTIVITY via corridor seeds ---------------------------------
-
-	// Pick a SEED cell per room (first doorway whose anchor is valid + Empty/Corridor),
-	// mark it Corridor, and collect all seeds.
-	TArray<int32> Seeds;
+	// --- 5. CONNECTIVITY via corridor seeds (primary + secondary-doorway branches) ---
+	//
+	// Each room contributes a PRIMARY seed (its first valid doorway anchor) which guarantees the room joins the
+	// single connected region, plus optional SECONDARY seeds (its OTHER doorway anchors, gated by
+	// Config.BranchChance) that add branch corridors and natural loops. A seed is the one corridor cell allowed
+	// to touch its room.
+	TArray<int32> PrimarySeeds;
+	TArray<int32> SecondarySeeds;
 	for (int32 r = 0; r < Result.Rooms.Num(); ++r)
 	{
 		const FCellPlacedRoom& Room = Result.Rooms[r];
-		int32				   SeedCell = INDEX_NONE;
+
+		// This room's valid, distinct doorway anchors (Empty/Corridor; AnchorWalk already rejected foreign rooms).
+		TArray<int32> Anchors;
 		for (int32 d = 0; d < Room.DoorwayAnchorCell.Num(); ++d)
 		{
 			const int32 Anchor = Room.DoorwayAnchorCell[d];
@@ -1082,30 +1118,43 @@ FCellDungeonResult UCellDungeonGenerator2D::Generate()
 				continue;
 			}
 			const ECellState S = Result.CellState[Anchor];
-			if (S == ECellState::Empty || S == ECellState::Corridor)
+			if ((S == ECellState::Empty || S == ECellState::Corridor) && !Anchors.Contains(Anchor))
 			{
-				SeedCell = Anchor;
-				break;
+				Anchors.Add(Anchor);
 			}
 		}
 
-		if (SeedCell == INDEX_NONE)
+		if (Anchors.Num() == 0)
 		{
 			UE_LOG(LogCellDungeon, Verbose, TEXT("CellDungeon: room %d has no valid doorway anchor; may be unreachable."), r);
 			continue;
 		}
 
-		Result.CellState[SeedCell] = ECellState::Corridor;
-		Result.CorridorSeeds.Add(SeedCell);
-		Seeds.Add(SeedCell);
+		// Primary = first valid doorway.
+		Result.CellState[Anchors[0]] = ECellState::Corridor;
+		Result.CorridorSeeds.Add(Anchors[0]);
+		PrimarySeeds.Add(Anchors[0]);
+
+		// Secondary = the room's remaining doorways (branches), gated by BranchChance.
+		for (int32 a = 1; a < Anchors.Num(); ++a)
+		{
+			if (Config.BranchChance < 1.f && Rng.FRand() >= Config.BranchChance)
+			{
+				continue;
+			}
+			if (Result.CellState[Anchors[a]] == ECellState::Corridor)
+			{
+				continue; // already a seed
+			}
+			Result.CellState[Anchors[a]] = ECellState::Corridor;
+			Result.CorridorSeeds.Add(Anchors[a]);
+			SecondarySeeds.Add(Anchors[a]);
+		}
 	}
 
-	// 1-cell gap between corridors and room walls, enforced as a SOFT preference (not a hard wall): every
-	// Empty cell adjacent to a room (and not itself a seed) gets a high routing penalty, so corridors keep
-	// one cell clear of walls wherever a clear path exists, yet may still slip through a tight lane when that
-	// is the only route — connectivity is never sacrificed. Seeds are the one corridor cell allowed to touch
-	// a room and are excluded from the avoid set.
-	const TSet<int32> SeedSet(Seeds);
+	// Soft 1-cell gap: penalize empty cells adjacent to a room (but not seed cells) so corridors keep one cell
+	// clear of walls wherever a route exists, yet may slip through a forced tight lane (connectivity wins).
+	const TSet<int32> SeedSet(Result.CorridorSeeds);
 	TSet<int32>		  AvoidCells;
 	for (int32 i = 0; i < N; ++i)
 	{
@@ -1122,45 +1171,50 @@ FCellDungeonResult UCellDungeonGenerator2D::Generate()
 			}
 		}
 	}
-	// High enough that corridors detour far to avoid touching a wall, but finite so they never disconnect.
 	const float AvoidExtra = 100.0f;
 
-	// Connect ALL seeds into one component. Sort for determinism.
-	Seeds.Sort();
-
+	// Connect a seed to the current network via the cheapest room-avoiding path; grow the net.
 	TSet<int32> Net;
-	if (Seeds.Num() > 0)
+	auto		ConnectSeed = [&](const int32 Seed) {
+		   if (Net.Num() == 0)
+		   {
+			   Net.Add(Seed); // first seed roots the network
+			   return;
+		   }
+		   if (Net.Contains(Seed))
+		   {
+			   return;
+		   }
+		   TSet<int32> Extra = Net;
+		   Extra.Add(Seed);
+		   const TArray<int32> Path = DijkstraToSet(Result.Diagram, Result.CellState, Seed, Net, Extra, AvoidCells, AvoidExtra);
+		   if (Path.Num() == 0)
+		   {
+			   UE_LOG(LogCellDungeon, Verbose, TEXT("CellDungeon: seed cell %d unreachable from network."), Seed);
+			   return;
+		   }
+		   for (const int32 PCell : Path)
+		   {
+			   if (Result.CellState.IsValidIndex(PCell) && Result.CellState[PCell] == ECellState::Empty)
+			   {
+				   Result.CellState[PCell] = ECellState::Corridor;
+			   }
+			   Net.Add(PCell);
+		   }
+		   Result.CorridorPaths.Add(Path);
+	};
+
+	// PRIMARY pass first (builds the single connected region), then SECONDARY (adds branches/loops). Sorted
+	// by cell index for determinism.
+	PrimarySeeds.Sort();
+	SecondarySeeds.Sort();
+	for (const int32 S : PrimarySeeds)
 	{
-		Net.Add(Seeds[0]);
+		ConnectSeed(S);
 	}
-
-	for (int32 i = 1; i < Seeds.Num(); ++i)
+	for (const int32 S : SecondarySeeds)
 	{
-		const int32 Seed0 = Seeds[i];
-		if (Net.Contains(Seed0))
-		{
-			continue; // already absorbed by an earlier path
-		}
-
-		TSet<int32> Extra = Net;
-		Extra.Add(Seed0);
-
-		TArray<int32> Path = DijkstraToSet(Result.Diagram, Result.CellState, Seed0, Net, Extra, AvoidCells, AvoidExtra);
-		if (Path.Num() == 0)
-		{
-			UE_LOG(LogCellDungeon, Verbose, TEXT("CellDungeon: seed cell %d unreachable from network."), Seed0);
-			continue;
-		}
-
-		for (const int32 PCell : Path)
-		{
-			if (Result.CellState.IsValidIndex(PCell) && Result.CellState[PCell] == ECellState::Empty)
-			{
-				Result.CellState[PCell] = ECellState::Corridor;
-			}
-			Net.Add(PCell);
-		}
-		Result.CorridorPaths.Add(Path);
+		ConnectSeed(S);
 	}
 
 	// --- 6. Validity ---------------------------------------------------------

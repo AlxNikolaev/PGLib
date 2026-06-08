@@ -140,11 +140,11 @@ private:
 
 	// --- Private helpers (implemented in the .cpp) ---
 
-	// Builds the Voronoi substrate (relaxed cells) for the current bounds/seed/cell size.
-	FVoronoiDiagram2D BuildSubstrate() const;
+	// Builds the Voronoi substrate (relaxed cells) over the given bounds at CorridorSize cell size.
+	FVoronoiDiagram2D BuildSubstrate(const FBox2D& InBounds) const;
 
-	// Estimates the number of Voronoi sites needed to fill Bounds at CorridorSize cell size.
-	int32 EstimateSiteCount() const;
+	// Estimates the number of Voronoi sites needed to fill InBounds at CorridorSize cell size.
+	int32 EstimateSiteCount(const FBox2D& InBounds) const;
 
 	// Marks the cells covered by a room footprint as RoomOccupied; records OccupiedCells.
 	void MarkRoomCells(FCellDungeonResult& Result, FCellPlacedRoom& Room, int32 RoomIndex) const;

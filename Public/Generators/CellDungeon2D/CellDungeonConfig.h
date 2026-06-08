@@ -76,6 +76,11 @@ struct PROCEDURALGEOMETRY_API FCellDungeonConfig
 	// TOTAL rooms including start + end.
 	int32 TargetRoomCount = 8;
 
+	// Probability [0..1] that each of a room's SECONDARY doorways (beyond its first/base one) spawns a branch
+	// corridor. 1 = every authored doorway branches (more hubs + loops); 0 = a minimal spanning tree (base
+	// doorway only). The base doorway always connects, so connectivity is unaffected by this value.
+	float BranchChance = 1.f;
+
 	/**
 	 * Expand MiddleRooms into a placement queue of indices into MiddleRooms, length =
 	 * max(0, TargetRoomCount - 2), honoring Min first, then Weight, never exceeding Max
