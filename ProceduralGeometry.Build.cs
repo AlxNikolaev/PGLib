@@ -20,10 +20,7 @@ public class ProceduralGeometry : ModuleRules
             [
                 "CoreUObject",
                 "Engine",
-                "ProceduralMeshComponent",
-                // OD config export/import (FOrganicConfigIO): reflection-based JSON for FOrganicDungeonConfig.
-                "Json",
-                "JsonUtilities"
+                "ProceduralMeshComponent"
             ]
         );
     }

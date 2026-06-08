@@ -15,7 +15,7 @@
  *
  * OutCounts is resized to Weights.Num() on return.
  *
- * Shared by FDrunkardWalkConfig::ResolveForTotal() and FOrganicDungeonConfig::ResolveForTotal().
+ * Used by FDrunkardWalkConfig::ResolveForTotal().
  * Defined as an inline free function to avoid a translation-unit dependency.
  */
 inline void ProceduralGeometry_DistributeCountsByWeight(TArray<int32>& OutCounts, const TArray<int32>& Weights, int32 Total)
@@ -80,7 +80,7 @@ inline void ProceduralGeometry_DistributeCountsByWeight(TArray<int32>& OutCounts
  * sum(OutCounts) == Budget when possible; may be less if all caps are hit before Budget
  * is fully distributed.
  *
- * Used by FDrunkardWalkConfig::ResolveForTotal() and FOrganicDungeonConfig::ResolveForTotal()
+ * Used by FDrunkardWalkConfig::ResolveForTotal()
  * to implement the two-phase room-count distribution (mandatory minimums first, then
  * weight-proportional fill up to optional per-type maximums).
  */
@@ -227,7 +227,7 @@ inline void ProceduralGeometry_DistributePoolByWeight(
  *
  * RandRange(MaxInclusive) must return a uniformly distributed integer in [0, MaxInclusive].
  *
- * Extracted from UOrganicDungeonGenerator2D queue-building (bShuffleRoomOrder branch) so the
+ * A weighted round-robin interleave (bShuffleRoomOrder branch) so the
  * same weighted-selection logic can be shared with UDrunkardWalkGenerator2D and future generators.
  */
 template <typename FRandRangeFunc>

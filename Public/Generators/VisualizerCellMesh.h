@@ -6,7 +6,7 @@
 
 /**
  * Shared mesh-section builder used by the three 2D procedural-geometry editor visualizers
- * (CellularAutomata, DrunkardWalk, OrganicDungeon).
+ * (CellularAutomata, DrunkardWalk).
  *
  * Emits one flat quad per cell (4 verts, 2 CCW tris) coloured uniformly by Color, sitting at
  * ZOffset. All three visualizers used an identical algorithm — this is the single implementation.

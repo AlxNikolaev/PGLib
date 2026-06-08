@@ -93,7 +93,7 @@ protected:
 
 	/** BFS flood-fill over a boolean grid. Populates OutRegionIds and OutRegions, and identifies which
 	 *  region contains the cell (CenterX, CenterY) via OutCenterRegionId (-1 if that cell is a wall).
-	 *  Used by CA, DrunkardWalk, and OrganicDungeon generators. */
+	 * Used by CA and DrunkardWalk generators. */
 	static void FloodFillRegions(const TArray<bool>& Grid,
 		int32										 GridWidth,
 		int32										 GridHeight,
