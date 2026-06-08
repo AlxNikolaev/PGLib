@@ -682,6 +682,7 @@ FCellDungeonResult UCellDungeonGenerator2D::Generate()
 	Rng.Initialize(static_cast<int32>(GetTypeHash(Seed)));
 
 	const float CellSize = FMath::Max(1.f, Config.CorridorSize);
+	Result.CorridorWidth = CellSize;
 
 	// ------------------------------------------------------------------------
 	// TWO-DIAGRAM pipeline:

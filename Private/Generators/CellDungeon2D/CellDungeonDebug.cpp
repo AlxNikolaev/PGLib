@@ -127,22 +127,80 @@ namespace
 		return Out;
 	}
 
-	// Fill color for a cell polygon by state.
-	const TCHAR* StateFill(ECellState State)
+	// Room fill color BY TYPE: start = green, end = red, each middle type its own hue.
+	const TCHAR* RoomColor(int32 TypeIndex)
 	{
-		switch (State)
+		if (TypeIndex == -2)
 		{
-			case ECellState::Empty:
-				return TEXT("#1a1a1f"); // dark
-			case ECellState::Corridor:
-				return TEXT("#2f6fd0"); // blue
-			case ECellState::RoomOccupied:
-				return TEXT("#566273"); // slate
-			case ECellState::Blocked:
-				return TEXT("#08080a"); // near-black
-			default:
-				return TEXT("#000000");
+			return TEXT("#2e9e3f"); // start = green
 		}
+		if (TypeIndex == -3)
+		{
+			return TEXT("#c0392b"); // end = red
+		}
+		static const TCHAR* Palette[] = { TEXT("#4f9dff"), TEXT("#ffb02e"), TEXT("#b06bd9"), TEXT("#2ec4b6"), TEXT("#e85d9b"), TEXT("#9bcf3a") };
+		const int32			N = UE_ARRAY_COUNT(Palette);
+		return Palette[((TypeIndex % N) + N) % N];
+	}
+
+	// Uniform Catmull-Rom through control points (smooth corridor centerline, mirrors the in-engine
+	// ESplinePointType::Curve look). SegSamples points per segment.
+	TArray<FVector2D> SampleCatmullRom(const TArray<FVector2D>& P, int32 SegSamples)
+	{
+		TArray<FVector2D> Out;
+		if (P.Num() < 3)
+		{
+			Out = P;
+			return Out;
+		}
+		auto Pt = [&](int32 i) -> FVector2D { return P[FMath::Clamp(i, 0, P.Num() - 1)]; };
+		for (int32 i = 0; i < P.Num() - 1; ++i)
+		{
+			const FVector2D P0 = Pt(i - 1), P1 = Pt(i), P2 = Pt(i + 1), P3 = Pt(i + 2);
+			for (int32 s = 0; s < SegSamples; ++s)
+			{
+				const float		t = static_cast<float>(s) / static_cast<float>(SegSamples);
+				const float		t2 = t * t, t3 = t2 * t;
+				const FVector2D V =
+					(P1 * 2.0f + (P2 - P0) * t + (P0 * 2.0f - P1 * 5.0f + P2 * 4.0f - P3) * t2 + (P1 * 3.0f - P0 - P2 * 3.0f + P3) * t3) * 0.5f;
+				Out.Add(V);
+			}
+		}
+		Out.Add(P.Last());
+		return Out;
+	}
+
+	// Offset a polyline to a closed ribbon polygon of the given width (per-vertex normals).
+	TArray<FVector2D> BuildRibbon(const TArray<FVector2D>& P, float Width)
+	{
+		TArray<FVector2D> Poly;
+		const int32		  N = P.Num();
+		if (N < 2)
+		{
+			return Poly;
+		}
+		auto SegNormal = [&](int32 a, int32 b) -> FVector2D {
+			const FVector2D D = (P[b] - P[a]).GetSafeNormal();
+			return FVector2D(-D.Y, D.X);
+		};
+		TArray<FVector2D> Nrm;
+		Nrm.SetNum(N);
+		Nrm[0] = SegNormal(0, 1);
+		Nrm[N - 1] = SegNormal(N - 2, N - 1);
+		for (int32 i = 1; i < N - 1; ++i)
+		{
+			Nrm[i] = (SegNormal(i - 1, i) + SegNormal(i, i + 1)).GetSafeNormal();
+		}
+		const float H = Width * 0.5f;
+		for (int32 i = 0; i < N; ++i)
+		{
+			Poly.Add(P[i] + Nrm[i] * H);
+		}
+		for (int32 i = N - 1; i >= 0; --i)
+		{
+			Poly.Add(P[i] - Nrm[i] * H);
+		}
+		return Poly;
 	}
 } // namespace
 
@@ -235,163 +293,189 @@ FString FCellDungeonDebug::ToSvg(const FCellDungeonResult& R)
 	int32		  Crossings = 0;
 	const FString ValidLine = MakeValidLine(R, Regions, Crossings);
 
-	// Fit a viewBox to the diagram bounds with padding. Y is flipped for screen space, so a
-	// world point (x, y) maps to screen (x, -y); we offset by MaxY to keep coordinates positive.
-	const FBox2D& B = R.Diagram.Bounds;
-	const float	  Pad = 200.f;
+	const int32 NumCells = R.Diagram.Cells.Num();
+	const float CorridorW = (R.CorridorWidth > 1.f) ? R.CorridorWidth : 300.f;
 
-	float MinX = B.Min.X;
-	float MinY = B.Min.Y;
-	float MaxX = B.Max.X;
-	float MaxY = B.Max.Y;
+	// World-space corners (CCW) of a placed room rect.
+	auto RoomCorners = [](const FCellPlacedRoom& Room) -> TArray<FVector2D> {
+		const float		  HalfX = Room.Footprint.X * 0.5f;
+		const float		  HalfY = Room.Footprint.Y * 0.5f;
+		const float		  Rad = FMath::DegreesToRadians(Room.RotationDeg);
+		const float		  CosR = FMath::Cos(Rad);
+		const float		  SinR = FMath::Sin(Rad);
+		const FVector2D	  Local[4] = { FVector2D(-HalfX, -HalfY), FVector2D(HalfX, -HalfY), FVector2D(HalfX, HalfY), FVector2D(-HalfX, HalfY) };
+		TArray<FVector2D> Out;
+		for (int32 c = 0; c < 4; ++c)
+		{
+			Out.Add(FVector2D(Room.Center.X + (Local[c].X * CosR - Local[c].Y * SinR), Room.Center.Y + (Local[c].X * SinR + Local[c].Y * CosR)));
+		}
+		return Out;
+	};
 
-	// Guard against degenerate/empty bounds.
-	if (!(MaxX > MinX) || !(MaxY > MinY))
+	// Pre-sample each corridor centerline (smooth Catmull-Rom through its cell sites).
+	TArray<TArray<FVector2D>> CorridorCurves;
+	for (const TArray<int32>& Path : R.CorridorPaths)
 	{
-		MinX = -1.f;
-		MinY = -1.f;
-		MaxX = 1.f;
-		MaxY = 1.f;
+		TArray<FVector2D> Sites;
+		for (const int32 CellIdx : Path)
+		{
+			if (CellIdx >= 0 && CellIdx < NumCells)
+			{
+				Sites.Add(R.Diagram.Cells[CellIdx].SiteLocation);
+			}
+		}
+		if (Sites.Num() >= 2)
+		{
+			CorridorCurves.Add(SampleCatmullRom(Sites, 12));
+		}
 	}
 
-	const float Width = (MaxX - MinX) + 2.f * Pad;
-	const float Height = (MaxY - MinY) + 2.f * Pad;
+	// --- Content bounds: rooms + placement cells + corridor curves (NOT the whole diagram). ---
+	FBox2D BB(ForceInit);
+	bool   bHave = false;
+	auto   Acc = [&](const FVector2D& P) {
+		  if (!bHave)
+		  {
+			  BB.Min = P;
+			  BB.Max = P;
+			  bHave = true;
+		  }
+		  else
+		  {
+			  BB += P;
+		  }
+	};
+	for (const FCellPlacedRoom& Room : R.Rooms)
+	{
+		for (const FVector2D& C : RoomCorners(Room))
+		{
+			Acc(C);
+		}
+	}
+	for (const int32 CoarseIdx : R.PlacementBlobCells)
+	{
+		if (R.PlacementDiagram.Cells.IsValidIndex(CoarseIdx))
+		{
+			for (const FVector2D& V : R.PlacementDiagram.Cells[CoarseIdx].Vertices)
+			{
+				Acc(V);
+			}
+		}
+	}
+	for (const TArray<FVector2D>& Curve : CorridorCurves)
+	{
+		for (const FVector2D& P : Curve)
+		{
+			Acc(P);
+		}
+	}
+	if (!bHave)
+	{
+		BB.Min = FVector2D(-1.f, -1.f);
+		BB.Max = FVector2D(1.f, 1.f);
+	}
 
-	// World -> screen helpers (flip Y).
-	auto SX = [&](float Wx) -> float { return Wx - MinX + Pad; };
-	auto SY = [&](float Wy) -> float { return (MaxY - Wy) + Pad; };
+	const float Pad = FMath::Max(CorridorW, 300.f);
+	const float MinX = BB.Min.X - Pad;
+	const float MinY = BB.Min.Y - Pad;
+	const float MaxX = BB.Max.X + Pad;
+	const float MaxY = BB.Max.Y + Pad;
+	const float W = FMath::Max(1.f, MaxX - MinX);
+	const float H = FMath::Max(1.f, MaxY - MinY);
+
+	// World -> SVG-units (flip Y). viewBox spans [0,W]x[0,H]; width/height px scaled to fit on screen.
+	auto SX = [&](float Wx) -> float { return Wx - MinX; };
+	auto SY = [&](float Wy) -> float { return MaxY - Wy; };
+
+	const float MaxPx = 1000.f;
+	const float Scale = MaxPx / FMath::Max(W, H);
+	const float PxW = W * Scale;
+	const float PxH = H * Scale;
+	const float Label = FMath::Max(W, H) * 0.018f; // text size in world units
 
 	FString Svg;
 	Svg += TEXT("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
 	Svg += FString::Printf(
-		TEXT("<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 %.1f %.1f\" width=\"%.1f\" height=\"%.1f\">\n"), Width, Height, Width, Height);
+		TEXT("<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 %.1f %.1f\" width=\"%.0f\" height=\"%.0f\">\n"), W, H, PxW, PxH);
+	Svg += FString::Printf(TEXT("<rect x=\"0\" y=\"0\" width=\"%.1f\" height=\"%.1f\" fill=\"#101014\"/>\n"), W, H);
 
-	// Background.
-	Svg += FString::Printf(TEXT("<rect x=\"0\" y=\"0\" width=\"%.1f\" height=\"%.1f\" fill=\"#0d0d10\"/>\n"), Width, Height);
-
-	// Cell polygons filled by state.
-	const int32 NumCells = R.Diagram.Cells.Num();
-	for (int32 Idx = 0; Idx < NumCells; ++Idx)
+	// Placement (coarse) diagram, faint, behind everything.
+	for (const int32 CoarseIdx : R.PlacementBlobCells)
 	{
-		const FVoronoiCell2D& Cell = R.Diagram.Cells[Idx];
+		if (!R.PlacementDiagram.Cells.IsValidIndex(CoarseIdx))
+		{
+			continue;
+		}
+		const FVoronoiCell2D& Cell = R.PlacementDiagram.Cells[CoarseIdx];
 		if (Cell.Vertices.Num() < 3)
 		{
 			continue;
 		}
-
-		const ECellState State = (Idx < R.CellState.Num()) ? R.CellState[Idx] : ECellState::Empty;
-
 		FString Points;
 		for (int32 v = 0; v < Cell.Vertices.Num(); ++v)
 		{
-			if (v > 0)
-			{
-				Points += TEXT(" ");
-			}
-			Points += FString::Printf(TEXT("%.1f,%.1f"), SX(Cell.Vertices[v].X), SY(Cell.Vertices[v].Y));
+			Points += FString::Printf(TEXT("%s%.1f,%.1f"), (v > 0 ? TEXT(" ") : TEXT("")), SX(Cell.Vertices[v].X), SY(Cell.Vertices[v].Y));
 		}
-
 		Svg += FString::Printf(
-			TEXT("<polygon points=\"%s\" fill=\"%s\" stroke=\"#000000\" stroke-width=\"1\" stroke-opacity=\"0.4\"/>\n"), *Points, StateFill(State));
+			TEXT(
+				"<polygon points=\"%s\" fill=\"#ffd27f\" fill-opacity=\"0.16\" stroke=\"#ffd27f\" stroke-opacity=\"0.30\" stroke-width=\"%.1f\"/>\n"),
+			*Points,
+			Label * 0.08f);
 	}
 
-	// Placed room rotated-rect outlines (green=start, red=end, gray=middle).
+	// Corridors: smooth true-width ribbons + thin centerline.
+	for (const TArray<FVector2D>& Curve : CorridorCurves)
+	{
+		const TArray<FVector2D> Ribbon = BuildRibbon(Curve, CorridorW);
+		if (Ribbon.Num() >= 3)
+		{
+			FString Points;
+			for (int32 i = 0; i < Ribbon.Num(); ++i)
+			{
+				Points += FString::Printf(TEXT("%s%.1f,%.1f"), (i > 0 ? TEXT(" ") : TEXT("")), SX(Ribbon[i].X), SY(Ribbon[i].Y));
+			}
+			Svg += FString::Printf(TEXT("<polygon points=\"%s\" fill=\"#5a6680\" fill-opacity=\"0.55\" stroke=\"none\"/>\n"), *Points);
+		}
+		FString Line;
+		for (int32 i = 0; i < Curve.Num(); ++i)
+		{
+			Line += FString::Printf(TEXT("%s%.1f,%.1f"), (i > 0 ? TEXT(" ") : TEXT("")), SX(Curve[i].X), SY(Curve[i].Y));
+		}
+		Svg += FString::Printf(TEXT("<polyline points=\"%s\" fill=\"none\" stroke=\"#aab4cc\" stroke-width=\"%.1f\"/>\n"), *Line, Label * 0.10f);
+	}
+
+	// Rooms filled by TYPE (start green, end red, per-type hue) + a center label.
 	for (int32 Idx = 0; Idx < R.Rooms.Num(); ++Idx)
 	{
-		const FCellPlacedRoom& Room = R.Rooms[Idx];
-
-		const TCHAR* Stroke = TEXT("#9aa0a6"); // gray (middle)
-		if (Room.TypeIndex == -2)
+		const FCellPlacedRoom&	Room = R.Rooms[Idx];
+		const TArray<FVector2D> Corners = RoomCorners(Room);
+		FString					Points;
+		for (int32 c = 0; c < Corners.Num(); ++c)
 		{
-			Stroke = TEXT("#33d17a"); // green (start)
+			Points += FString::Printf(TEXT("%s%.1f,%.1f"), (c > 0 ? TEXT(" ") : TEXT("")), SX(Corners[c].X), SY(Corners[c].Y));
 		}
-		else if (Room.TypeIndex == -3)
-		{
-			Stroke = TEXT("#e01b24"); // red (end)
-		}
+		Svg += FString::Printf(TEXT("<polygon points=\"%s\" fill=\"%s\" fill-opacity=\"0.95\" stroke=\"#eef2f7\" stroke-width=\"%.1f\"/>\n"),
+			*Points,
+			RoomColor(Room.TypeIndex),
+			Label * 0.10f);
 
-		const float HalfX = Room.Footprint.X * 0.5f;
-		const float HalfY = Room.Footprint.Y * 0.5f;
-
-		const float Rad = FMath::DegreesToRadians(Room.RotationDeg);
-		const float CosR = FMath::Cos(Rad);
-		const float SinR = FMath::Sin(Rad);
-
-		// Local corners (CCW) rotated and translated to world, then projected to screen.
-		const FVector2D Local[4] = { FVector2D(-HalfX, -HalfY), FVector2D(HalfX, -HalfY), FVector2D(HalfX, HalfY), FVector2D(-HalfX, HalfY) };
-
-		FString Points;
-		for (int32 c = 0; c < 4; ++c)
-		{
-			const float Wx = Room.Center.X + (Local[c].X * CosR - Local[c].Y * SinR);
-			const float Wy = Room.Center.Y + (Local[c].X * SinR + Local[c].Y * CosR);
-			if (c > 0)
-			{
-				Points += TEXT(" ");
-			}
-			Points += FString::Printf(TEXT("%.1f,%.1f"), SX(Wx), SY(Wy));
-		}
-
-		Svg += FString::Printf(TEXT("<polygon points=\"%s\" fill=\"none\" stroke=\"%s\" stroke-width=\"4\"/>\n"), *Points, Stroke);
-
-		// Doorways: short outward tick marks.
-		const int32 NumDoors = FMath::Min(Room.DoorwayPos.Num(), Room.DoorwayDir.Num());
-		for (int32 d = 0; d < NumDoors; ++d)
-		{
-			const FVector2D P = Room.DoorwayPos[d];
-			const FVector2D Dir = Room.DoorwayDir[d];
-			const FVector2D Tip = P + Dir * 120.f;
-			Svg += FString::Printf(TEXT("<line x1=\"%.1f\" y1=\"%.1f\" x2=\"%.1f\" y2=\"%.1f\" stroke=\"#f6d32d\" stroke-width=\"3\"/>\n"),
-				SX(P.X),
-				SY(P.Y),
-				SX(Tip.X),
-				SY(Tip.Y));
-		}
+		FString Lbl = (Room.TypeIndex == -2) ? TEXT("S") : (Room.TypeIndex == -3) ? TEXT("E") : FString::Printf(TEXT("t%d"), Room.TypeIndex);
+		Svg += FString::Printf(TEXT("<text x=\"%.1f\" y=\"%.1f\" fill=\"#ffffff\" font-family=\"sans-serif\" font-size=\"%.1f\" font-weight=\"bold\" "
+									"text-anchor=\"middle\" dominant-baseline=\"central\">%s</text>\n"),
+			SX(Room.Center.X),
+			SY(Room.Center.Y),
+			Label,
+			*Lbl);
 	}
 
-	// Corridor paths drawn as polylines through cell sites.
-	for (int32 Idx = 0; Idx < R.CorridorPaths.Num(); ++Idx)
-	{
-		const TArray<int32>& Path = R.CorridorPaths[Idx];
-		if (Path.Num() < 2)
-		{
-			continue;
-		}
-
-		FString Points;
-		bool	bAny = false;
-		for (int32 j = 0; j < Path.Num(); ++j)
-		{
-			const int32 CellIdx = Path[j];
-			if (CellIdx < 0 || CellIdx >= NumCells)
-			{
-				continue;
-			}
-			const FVector2D Site = R.Diagram.Cells[CellIdx].SiteLocation;
-			if (bAny)
-			{
-				Points += TEXT(" ");
-			}
-			Points += FString::Printf(TEXT("%.1f,%.1f"), SX(Site.X), SY(Site.Y));
-			bAny = true;
-		}
-
-		if (bAny)
-		{
-			Svg += FString::Printf(
-				TEXT("<polyline points=\"%s\" fill=\"none\" stroke=\"#62a0ea\" stroke-width=\"2\" stroke-opacity=\"0.8\"/>\n"), *Points);
-		}
-	}
-
-	// Title text with the VALID line.
-	Svg += FString::Printf(TEXT("<text x=\"%.1f\" y=\"%.1f\" fill=\"#ffffff\" font-family=\"monospace\" font-size=\"%.1f\">%s</text>\n"),
-		Pad * 0.25f,
-		Pad * 0.6f,
-		Pad * 0.4f,
+	// Title with the VALID line.
+	Svg += FString::Printf(TEXT("<text x=\"%.1f\" y=\"%.1f\" fill=\"#cfd6e0\" font-family=\"monospace\" font-size=\"%.1f\">%s</text>\n"),
+		Label * 0.5f,
+		Label * 1.4f,
+		Label,
 		*XmlEscape(ValidLine));
 
 	Svg += TEXT("</svg>\n");
-
 	return Svg;
 }
 

@@ -91,6 +91,9 @@ struct PROCEDURALGEOMETRY_API FCellDungeonResult
 	FVoronoiDiagram2D PlacementDiagram;
 	TArray<int32>	  PlacementBlobCells;
 
+	// Corridor width (== fine cell size) — for rendering corridors at true width.
+	float CorridorWidth = 0.f;
+
 	// Index into Rooms of the start room.
 	int32 StartRoomIndex = -1;
 
