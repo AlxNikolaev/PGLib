@@ -201,6 +201,31 @@ FString FCellDungeonDebug::ToText(const FCellDungeonResult& R)
 		Out += FString::Printf(TEXT("CORR %d cells=%s\n"), Idx, *CellList);
 	}
 
+	// Placement (coarse) diagram blob cells: full polygon vertices so the renderer can draw the
+	// room-layout grid faintly behind the result. "PCELL <coarseIdx> verts=x,y;x,y;..."
+	for (const int32 CoarseIdx : R.PlacementBlobCells)
+	{
+		if (!R.PlacementDiagram.Cells.IsValidIndex(CoarseIdx))
+		{
+			continue;
+		}
+		const FVoronoiCell2D& Cell = R.PlacementDiagram.Cells[CoarseIdx];
+		if (Cell.Vertices.Num() < 3)
+		{
+			continue;
+		}
+		FString Verts;
+		for (int32 v = 0; v < Cell.Vertices.Num(); ++v)
+		{
+			if (v > 0)
+			{
+				Verts += TEXT(";");
+			}
+			Verts += FString::Printf(TEXT("%.1f,%.1f"), Cell.Vertices[v].X, Cell.Vertices[v].Y);
+		}
+		Out += FString::Printf(TEXT("PCELL %d verts=%s\n"), CoarseIdx, *Verts);
+	}
+
 	return Out;
 }
 

@@ -807,6 +807,10 @@ FCellDungeonResult UCellDungeonGenerator2D::Generate()
 		}
 	}
 
+	// Retain the coarse placement diagram + blob for debug visualization (it is otherwise discarded).
+	Result.PlacementDiagram = Coarse;
+	Result.PlacementBlobCells = Blob;
+
 	// --- 2. ASSIGN rooms to blob cells --------------------------------------
 
 	// Per-blob-cell marker; INDEX_NONE means unassigned (left out when queue runs short).

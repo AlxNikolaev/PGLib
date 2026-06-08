@@ -86,6 +86,11 @@ struct PROCEDURALGEOMETRY_API FCellDungeonResult
 	// touch a room. Every other corridor cell keeps a 1-cell gap from room walls.
 	TArray<int32> CorridorSeeds;
 
+	// The COARSE placement Voronoi (discarded by the algorithm after positioning rooms) retained for
+	// debug/visualization, plus the blob cell indices that actually received a room (in placement order).
+	FVoronoiDiagram2D PlacementDiagram;
+	TArray<int32>	  PlacementBlobCells;
+
 	// Index into Rooms of the start room.
 	int32 StartRoomIndex = -1;
 
