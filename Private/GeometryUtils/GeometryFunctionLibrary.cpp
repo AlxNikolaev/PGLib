@@ -487,3 +487,126 @@ FVector2D FGeometryUtils::GetPolygonCentroid(const TArray<FVector2D>& PolygonVer
 
 	return Centroid / (3.0f * SignedArea);
 }
+
+FVector2D FGeometryUtils::RotateVector(const FVector2D& V, const float RotationDeg)
+{
+	const float Rad = FMath::DegreesToRadians(RotationDeg);
+	const float C = FMath::Cos(Rad);
+	const float S = FMath::Sin(Rad);
+	return FVector2D(V.X * C - V.Y * S, V.X * S + V.Y * C);
+}
+
+void FGeometryUtils::RotatedRectCorners(const FVector2D& Center, const float RotationDeg, const FVector2D& Footprint, TArray<FVector2D>& OutCorners)
+{
+	const float		HX = Footprint.X * 0.5f;
+	const float		HY = Footprint.Y * 0.5f;
+	const FVector2D Local[4] = { FVector2D(-HX, -HY), FVector2D(HX, -HY), FVector2D(HX, HY), FVector2D(-HX, HY) };
+
+	OutCorners.Reset(4);
+	for (int32 i = 0; i < 4; ++i)
+	{
+		OutCorners.Add(Center + RotateVector(Local[i], RotationDeg));
+	}
+}
+
+bool FGeometryUtils::ConvexPolygonsOverlap(const TArray<FVector2D>& A, const TArray<FVector2D>& B)
+{
+	if (A.Num() < 3 || B.Num() < 3)
+	{
+		return false;
+	}
+
+	auto Project = [](const TArray<FVector2D>& Poly, const FVector2D& Axis, float& OutMin, float& OutMax) {
+		OutMin = TNumericLimits<float>::Max();
+		OutMax = TNumericLimits<float>::Lowest();
+		for (const FVector2D& P : Poly)
+		{
+			const float D = FVector2D::DotProduct(P, Axis);
+			OutMin = FMath::Min(OutMin, D);
+			OutMax = FMath::Max(OutMax, D);
+		}
+	};
+
+	const TArray<FVector2D>* Polys[2] = { &A, &B };
+	for (int32 Pi = 0; Pi < 2; ++Pi)
+	{
+		const TArray<FVector2D>& Poly = *Polys[Pi];
+		const int32				 N = Poly.Num();
+		for (int32 i = 0; i < N; ++i)
+		{
+			const FVector2D Edge = Poly[(i + 1) % N] - Poly[i];
+			FVector2D		Axis(-Edge.Y, Edge.X);
+			const float		Len = Axis.Size();
+			if (Len <= KINDA_SMALL_NUMBER)
+			{
+				continue;
+			}
+			Axis /= Len;
+
+			float MinA, MaxA, MinB, MaxB;
+			Project(A, Axis, MinA, MaxA);
+			Project(B, Axis, MinB, MaxB);
+
+			// Strict gap on this axis => separated (touching counts as overlap).
+			if (MaxA < MinB - KINDA_SMALL_NUMBER || MaxB < MinA - KINDA_SMALL_NUMBER)
+			{
+				return false;
+			}
+		}
+	}
+	return true;
+}
+
+void FGeometryUtils::SampleCatmullRom(const TArray<FVector2D>& ControlPoints, const int32 SamplesPerSegment, TArray<FVector2D>& OutPoints)
+{
+	OutPoints.Reset();
+	if (ControlPoints.Num() < 3)
+	{
+		OutPoints = ControlPoints;
+		return;
+	}
+	auto Pt = [&](int32 i) -> FVector2D { return ControlPoints[FMath::Clamp(i, 0, ControlPoints.Num() - 1)]; };
+	for (int32 i = 0; i < ControlPoints.Num() - 1; ++i)
+	{
+		const FVector2D P0 = Pt(i - 1), P1 = Pt(i), P2 = Pt(i + 1), P3 = Pt(i + 2);
+		for (int32 s = 0; s < SamplesPerSegment; ++s)
+		{
+			const float t = static_cast<float>(s) / static_cast<float>(SamplesPerSegment);
+			const float t2 = t * t, t3 = t2 * t;
+			OutPoints.Add(
+				(P1 * 2.0f + (P2 - P0) * t + (P0 * 2.0f - P1 * 5.0f + P2 * 4.0f - P3) * t2 + (P1 * 3.0f - P0 - P2 * 3.0f + P3) * t3) * 0.5f);
+		}
+	}
+	OutPoints.Add(ControlPoints.Last());
+}
+
+void FGeometryUtils::OffsetPolylineToRibbon(const TArray<FVector2D>& Polyline, const float Width, TArray<FVector2D>& OutRibbon)
+{
+	OutRibbon.Reset();
+	const int32 N = Polyline.Num();
+	if (N < 2)
+	{
+		return;
+	}
+	auto SegNormal = [&](int32 a, int32 b) -> FVector2D {
+		const FVector2D D = (Polyline[b] - Polyline[a]).GetSafeNormal();
+		return FVector2D(-D.Y, D.X);
+	};
+	TArray<FVector2D> Nrm;
+	Nrm.SetNum(N);
+	Nrm[0] = SegNormal(0, 1);
+	Nrm[N - 1] = SegNormal(N - 2, N - 1);
+	for (int32 i = 1; i < N - 1; ++i)
+	{
+		Nrm[i] = (SegNormal(i - 1, i) + SegNormal(i, i + 1)).GetSafeNormal();
+	}
+	const float H = Width * 0.5f;
+	for (int32 i = 0; i < N; ++i)
+	{
+		OutRibbon.Add(Polyline[i] + Nrm[i] * H);
+	}
+	for (int32 i = N - 1; i >= 0; --i)
+	{
+		OutRibbon.Add(Polyline[i] - Nrm[i] * H);
+	}
+}

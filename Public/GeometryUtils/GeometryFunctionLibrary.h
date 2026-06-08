@@ -21,6 +21,21 @@ public:
 	 */
 	static void ChaikinSubdivide(TArray<FVector2D>& Vertices, int32 Iterations = 2);
 
+	/** Rotate a 2D vector by RotationDeg (CCW, +Y-up math convention). */
+	static FVector2D RotateVector(const FVector2D& V, float RotationDeg);
+
+	/** World-space CCW corners of an axis-aligned rect (full Width,Height = Footprint) centered at Center, rotated by RotationDeg. */
+	static void RotatedRectCorners(const FVector2D& Center, float RotationDeg, const FVector2D& Footprint, TArray<FVector2D>& OutCorners);
+
+	/** Convex-vs-convex overlap via the Separating Axis Theorem. Touching counts as overlap (conservative). */
+	static bool ConvexPolygonsOverlap(const TArray<FVector2D>& A, const TArray<FVector2D>& B);
+
+	/** Uniform Catmull-Rom sampling through control points (SamplesPerSegment per span). <3 points => copied through. */
+	static void SampleCatmullRom(const TArray<FVector2D>& ControlPoints, int32 SamplesPerSegment, TArray<FVector2D>& OutPoints);
+
+	/** Offset a polyline into a closed ribbon polygon of the given width (per-vertex normals). Empty if <2 points. */
+	static void OffsetPolylineToRibbon(const TArray<FVector2D>& Polyline, float Width, TArray<FVector2D>& OutRibbon);
+
 private:
 	// Helper functions for polygon operations
 	static float DistanceToLineSegment(const FVector2D& Point, const FVector2D& LineStart, const FVector2D& LineEnd);
