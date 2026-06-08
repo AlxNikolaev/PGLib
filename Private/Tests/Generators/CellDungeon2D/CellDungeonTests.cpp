@@ -9,8 +9,9 @@
 
 namespace
 {
-	// Generous world bounds so the substrate has plenty of cells to route through.
-	const FBox2D TestBounds(FVector2D(-3000.0f, -3000.0f), FVector2D(3000.0f, 3000.0f));
+	// Generous world bounds so the COARSE layout (rooms spaced by diagonal + a corridor-cell gap) has
+	// enough cells to grow a blob of TargetRoomCount rooms, and the fine substrate has routing room.
+	const FBox2D TestBounds(FVector2D(-5000.0f, -5000.0f), FVector2D(5000.0f, 5000.0f));
 
 	/**
 	 * Builds a square room type with one doorway per edge (4 doorways), each at the edge
@@ -416,6 +417,44 @@ bool FCellDungeonDeterminismTest::RunTest(const FString& Parameters)
 	// Start/end indices identical.
 	TestEqual("Determinism: StartRoomIndex matches", A.StartRoomIndex, B.StartRoomIndex);
 	TestEqual("Determinism: EndRoomIndex matches", A.EndRoomIndex, B.EndRoomIndex);
+
+	return true;
+}
+
+// ============================================================
+// Test 6: CorridorRoomGap — corridors keep a 1-cell gap from rooms; the only
+// corridor cells allowed to touch a room are the per-room seed cells.
+// ============================================================
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCellDungeonCorridorRoomGapTest, "ProceduralGeometry.CellDungeon.CorridorRoomGap", DefaultTestFlags)
+
+bool FCellDungeonCorridorRoomGapTest::RunTest(const FString& Parameters)
+{
+	const FCellDungeonConfig Config = MakeMultiDoorConfig(/*TargetRoomCount=*/8);
+	const FCellDungeonResult Result = RunGenerator(TEXT("CellCorridorRoomGap"), Config);
+
+	FCellDungeonDebug::DumpToFiles(Result, TEXT("test_CorridorRoomGap"));
+
+	const TSet<int32> SeedSet(Result.CorridorSeeds);
+
+	int32 OffendingCells = 0;
+	for (int32 i = 0; i < Result.CellState.Num(); ++i)
+	{
+		if (Result.CellState[i] != ECellState::Corridor || SeedSet.Contains(i))
+		{
+			continue; // only non-seed corridor cells must keep their distance
+		}
+		for (const int32 Nb : Result.Diagram.Cells[i].Neighbors)
+		{
+			if (Result.CellState.IsValidIndex(Nb) && Result.CellState[Nb] == ECellState::RoomOccupied)
+			{
+				++OffendingCells;
+				break;
+			}
+		}
+	}
+
+	TestEqual("CorridorRoomGap: no non-seed corridor cell touches a room", OffendingCells, 0);
+	TestTrue("CorridorRoomGap: every room contributed a seed", Result.CorridorSeeds.Num() >= Result.Rooms.Num() - 1);
 
 	return true;
 }

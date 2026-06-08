@@ -31,19 +31,15 @@ namespace
 	// Lloyd relaxation iterations for an even cell distribution.
 	constexpr int32 RelaxIterations = 8;
 
-	// Doorway-relative placement: starting gap (in CorridorSize multiples) and
-	// how far we widen it on retry, plus retry budget.
-	constexpr float StartGapMul = 1.5f;
-	constexpr float GapStepMul = 1.0f;
-	constexpr int32 MaxGapTries = 6;
+	// Extra spacing between rooms, in CorridorSize multiples, ADDED to the room bounding diagonal when
+	// spacing the coarse layout. Guarantees a clear lane of empty fine cells between adjacent rooms so
+	// footprints never touch and a corridor (with a 1-cell wall clearance each side) always fits.
+	constexpr float RoomGapCells = 4.0f;
 
 	// Dijkstra edge costs by destination cell state (Corridor cheaper so paths
 	// merge into a shared network).
 	constexpr float CorridorCost = 0.2f;
 	constexpr float EmptyCost = 1.0f;
-
-	// Reject corridors that wander far relative to straight-line distance.
-	constexpr float MaxPathDetour = 2.5f;
 
 	// Anchor-walk acceptance cone half-angle (~60deg -> cos ~= 0.5).
 	constexpr float AnchorConeCos = 0.5f;
@@ -653,22 +649,6 @@ static void BfsHopDistances(const FVoronoiDiagram2D& Diagram, const TArray<ECell
 }
 
 // ============================================================================
-// Open-exit bookkeeping
-// ============================================================================
-namespace
-{
-	// One unused doorway available as a corridor attachment point.
-	struct FOpenExit
-	{
-		int32	  RoomIndex = INDEX_NONE;
-		int32	  DoorwayIndex = INDEX_NONE;
-		FVector2D Dir = FVector2D::ZeroVector;			// world outward
-		FVector2D AnchorCenter = FVector2D::ZeroVector; // anchor cell site
-		int32	  AnchorCell = INDEX_NONE;
-	};
-} // namespace
-
-// ============================================================================
 // Room placement + corridor routing (driven from PlaceRooms / RouteCorridors,
 // but the bulk of the work — being inherently coupled — lives in Generate()).
 // ============================================================================
@@ -703,7 +683,326 @@ FCellDungeonResult UCellDungeonGenerator2D::Generate()
 
 	const float CellSize = FMath::Max(1.f, Config.CorridorSize);
 
-	// --- 1. Substrate --------------------------------------------------------
+	// ------------------------------------------------------------------------
+	// TWO-DIAGRAM pipeline:
+	//   (1) a COARSE Voronoi lays out the room graph (one cell per room, spaced
+	//       so footprints can never overlap at any rotation). It is discarded
+	//       once room centers/rotations are decided.
+	//   (2) the FINE Voronoi (BuildSubstrate) is the actual cell substrate the
+	//       rooms rasterize onto and corridors route through.
+	// Doorways are not used for connectivity; we connect corridor SEED cells.
+	// ------------------------------------------------------------------------
+
+	// A room assigned to a coarse blob cell, before fine rasterization.
+	struct FPlannedRoom
+	{
+		FVector2D Center = FVector2D::ZeroVector; // coarse cell site
+		float	  RotationDeg = 0.f;
+		int32	  Marker = INDEX_NONE; // -2 start, -3 end, >=0 middle type index
+	};
+
+	// --- 1. COARSE placement diagram ----------------------------------------
+
+	// Coarse cell size = the largest room BOUNDING DIAGONAL across all room types.
+	// MinSiteDistance >= this diagonal guarantees that two adjacent room footprints
+	// can never overlap, regardless of rotation.
+	auto Diagonal = [](const FVector2D& Fp) -> float { return FMath::Sqrt(Fp.X * Fp.X + Fp.Y * Fp.Y); };
+
+	float CoarseCell = FMath::Max(Diagonal(Config.StartRoom.Footprint), Diagonal(Config.EndRoom.Footprint));
+	for (const FCellRoomType& MidType : Config.MiddleRooms)
+	{
+		CoarseCell = FMath::Max(CoarseCell, Diagonal(MidType.Footprint));
+	}
+	CoarseCell = FMath::Max(CoarseCell, CellSize);
+
+	// Space sites by the diagonal PLUS a corridor-cell gap: adjacent footprints then never touch (the
+	// conservative SAT would otherwise reject the second room) and a corridor lane always fits between them.
+	const float CoarseSpacing = CoarseCell + RoomGapCells * CellSize;
+
+	const FVector2D BoundsSize = Bounds.GetSize();
+	const float		BoundsArea = BoundsSize.X * BoundsSize.Y;
+	const int32		CoarseSites = FMath::Clamp(FMath::RoundToInt(FMath::Abs(BoundsArea) / (CoarseSpacing * CoarseSpacing)), MinSites, MaxSites);
+
+	UVoronoiGenerator2D* CoarseGen = NewObject<UVoronoiGenerator2D>();
+	CoarseGen->SetBounds(Bounds)->SetSeed(Seed + TEXT("_coarse"))->SetMinSiteDistance(CoarseSpacing)->SetRelaxationIterations(RelaxIterations);
+	const FVoronoiDiagram2D Coarse = CoarseGen->GenerateRelaxed(CoarseSites);
+
+	const int32 CoarseN = Coarse.Cells.Num();
+	if (CoarseN == 0)
+	{
+		UE_LOG(LogCellDungeon, Warning, TEXT("CellDungeon: empty coarse Voronoi; aborting."));
+		Result.bValid = false;
+		return Result;
+	}
+
+	auto IsUsableCoarse = [&](const int32 Idx) -> bool {
+		return Coarse.Cells.IsValidIndex(Idx) && Coarse.Cells[Idx].bIsValid && !Coarse.Cells[Idx].bIsBoundaryCell;
+	};
+
+	// Center usable cell.
+	const FVector2D CoarseCenter = Bounds.GetCenter();
+	int32			CenterCell = Coarse.FindCellContainingPoint(CoarseCenter);
+	if (!IsUsableCoarse(CenterCell))
+	{
+		CenterCell = INDEX_NONE;
+		float BestDistSq = TNumericLimits<float>::Max();
+		for (int32 i = 0; i < CoarseN; ++i)
+		{
+			if (!IsUsableCoarse(i))
+			{
+				continue;
+			}
+			const float DistSq = FVector2D::DistSquared(Coarse.Cells[i].SiteLocation, CoarseCenter);
+			// Deterministic tie-break by lower CellIndex (strictly-less keeps the first found).
+			if (DistSq < BestDistSq - KINDA_SMALL_NUMBER)
+			{
+				BestDistSq = DistSq;
+				CenterCell = i;
+			}
+		}
+	}
+
+	if (CenterCell == INDEX_NONE)
+	{
+		UE_LOG(LogCellDungeon, Warning, TEXT("CellDungeon: no usable coarse cell near center; aborting."));
+		Result.bValid = false;
+		return Result;
+	}
+
+	// DFS-grow a connected blob of up to TargetRoomCount usable cells from center.
+	TArray<int32> Blob;
+	{
+		TSet<int32>	  InBlob;
+		TArray<int32> Stack;
+		Stack.Push(CenterCell);
+		InBlob.Add(CenterCell);
+		Blob.Add(CenterCell);
+
+		while (Stack.Num() > 0 && Blob.Num() < Config.TargetRoomCount)
+		{
+			const int32			  Cur = Stack.Last();
+			const FVoronoiCell2D& Cell = Coarse.Cells[Cur];
+
+			// Gather usable, not-yet-in-blob neighbours; sort by CellIndex (determinism).
+			TArray<int32> Candidates;
+			for (const int32 Nb : Cell.Neighbors)
+			{
+				if (IsUsableCoarse(Nb) && !InBlob.Contains(Nb))
+				{
+					Candidates.Add(Nb);
+				}
+			}
+
+			if (Candidates.Num() == 0)
+			{
+				Stack.Pop();
+				continue;
+			}
+
+			Candidates.Sort();
+			const int32 Pick = Candidates[Rng.RandRange(0, Candidates.Num() - 1)];
+			InBlob.Add(Pick);
+			Blob.Add(Pick);
+			Stack.Push(Pick);
+		}
+	}
+
+	// --- 2. ASSIGN rooms to blob cells --------------------------------------
+
+	// Per-blob-cell marker; INDEX_NONE means unassigned (left out when queue runs short).
+	TArray<int32> CellMarker;
+	CellMarker.Init(INDEX_NONE, Blob.Num());
+
+	// Map blob cell -> blob slot for neighbour lookups.
+	TMap<int32, int32> CellToSlot;
+	for (int32 s = 0; s < Blob.Num(); ++s)
+	{
+		CellToSlot.Add(Blob[s], s);
+	}
+
+	// Blob[0] => START.
+	CellMarker[0] = -2;
+
+	int32 EndSlot = INDEX_NONE;
+	if (Blob.Num() >= 2)
+	{
+		// Build a coarse cell-state where blob cells are Empty and the rest Blocked,
+		// then BFS hop distances from Blob[0] to find the graph-farthest blob cell.
+		TArray<ECellState> CoarseState;
+		CoarseState.Init(ECellState::Blocked, CoarseN);
+		for (const int32 BCell : Blob)
+		{
+			if (CoarseState.IsValidIndex(BCell))
+			{
+				CoarseState[BCell] = ECellState::Empty;
+			}
+		}
+
+		TArray<int32> Hops;
+		BfsHopDistances(Coarse, CoarseState, Blob[0], Hops);
+
+		int32 BestHops = -1;
+		for (int32 s = 1; s < Blob.Num(); ++s)
+		{
+			const int32 H = Hops.IsValidIndex(Blob[s]) ? Hops[Blob[s]] : -1;
+			// Max hops; tie -> lower CellIndex.
+			if (H > BestHops || (H == BestHops && EndSlot != INDEX_NONE && Blob[s] < Blob[EndSlot]))
+			{
+				BestHops = H;
+				EndSlot = s;
+			}
+		}
+
+		if (EndSlot != INDEX_NONE)
+		{
+			CellMarker[EndSlot] = -3;
+		}
+	}
+
+	// Remaining blob cells => middles, avoiding repeats in adjacent cells.
+	{
+		TArray<int32> MiddleQueue = Config.ResolveMiddleQueue(Rng);
+		TArray<bool>  Used;
+		Used.Init(false, MiddleQueue.Num());
+
+		for (int32 s = 0; s < Blob.Num(); ++s)
+		{
+			if (CellMarker[s] != INDEX_NONE)
+			{
+				continue; // start / end already assigned
+			}
+
+			// Collect middle types of already-assigned coarse NEIGHBOURS.
+			TSet<int32> NeighbourTypes;
+			for (const int32 Nb : Coarse.Cells[Blob[s]].Neighbors)
+			{
+				const int32* NbSlot = CellToSlot.Find(Nb);
+				if (NbSlot && CellMarker.IsValidIndex(*NbSlot) && CellMarker[*NbSlot] >= 0)
+				{
+					NeighbourTypes.Add(CellMarker[*NbSlot]);
+				}
+			}
+
+			// First still-unused queue entry whose type differs from all neighbours.
+			int32 ChosenQ = INDEX_NONE;
+			for (int32 q = 0; q < MiddleQueue.Num(); ++q)
+			{
+				if (!Used[q] && !NeighbourTypes.Contains(MiddleQueue[q]))
+				{
+					ChosenQ = q;
+					break;
+				}
+			}
+			// If none qualifies, take the next unused entry.
+			if (ChosenQ == INDEX_NONE)
+			{
+				for (int32 q = 0; q < MiddleQueue.Num(); ++q)
+				{
+					if (!Used[q])
+					{
+						ChosenQ = q;
+						break;
+					}
+				}
+			}
+
+			if (ChosenQ == INDEX_NONE)
+			{
+				break; // queue exhausted; leave remaining blob cells unassigned
+			}
+
+			Used[ChosenQ] = true;
+			CellMarker[s] = MiddleQueue[ChosenQ];
+		}
+	}
+
+	// Resolve a marker to its room type description.
+	auto MarkerToType = [&](const int32 Marker) -> const FCellRoomType& {
+		if (Marker == -2)
+		{
+			return Config.StartRoom;
+		}
+		if (Marker == -3)
+		{
+			return Config.EndRoom;
+		}
+		return Config.MiddleRooms[Marker];
+	};
+
+	// --- 3. ROTATE each assigned room toward an occupied neighbour ----------
+	TArray<FPlannedRoom> Planned;
+	{
+		TSet<int32> Processed; // coarse cells already given a rotation (= "occupied")
+		for (int32 s = 0; s < Blob.Num(); ++s)
+		{
+			if (CellMarker[s] == INDEX_NONE)
+			{
+				continue;
+			}
+
+			const int32			 ThisCell = Blob[s];
+			const FVector2D		 ThisSite = Coarse.Cells[ThisCell].SiteLocation;
+			const FCellRoomType& Type = MarkerToType(CellMarker[s]);
+
+			// Choose a target neighbour SITE direction.
+			int32 ChosenNb = INDEX_NONE;		   // prefer assigned AND processed
+			int32 FallbackAssignedNb = INDEX_NONE; // any assigned blob neighbour
+			for (const int32 Nb : Coarse.Cells[ThisCell].Neighbors)
+			{
+				const int32* NbSlot = CellToSlot.Find(Nb);
+				if (!NbSlot || !CellMarker.IsValidIndex(*NbSlot) || CellMarker[*NbSlot] == INDEX_NONE)
+				{
+					continue;
+				}
+				if (FallbackAssignedNb == INDEX_NONE || Nb < FallbackAssignedNb)
+				{
+					FallbackAssignedNb = Nb;
+				}
+				if (Processed.Contains(Nb) && (ChosenNb == INDEX_NONE || Nb < ChosenNb))
+				{
+					ChosenNb = Nb;
+				}
+			}
+			if (ChosenNb == INDEX_NONE)
+			{
+				ChosenNb = FallbackAssignedNb;
+			}
+
+			FVector2D TargetDir;
+			if (ChosenNb != INDEX_NONE)
+			{
+				TargetDir = (Coarse.Cells[ChosenNb].SiteLocation - ThisSite).GetSafeNormal();
+			}
+			else
+			{
+				TargetDir = (Bounds.GetCenter() - ThisSite).GetSafeNormal();
+			}
+			if (TargetDir.IsNearlyZero())
+			{
+				TargetDir = FVector2D(1.f, 0.f);
+			}
+
+			// Rotate so doorway 0's WORLD outward dir == TargetDir.
+			float Rot = 0.f;
+			if (Type.Doorways.Num() > 0)
+			{
+				const FVector2D Ld = Type.Doorways[0].LocalOutwardDir;
+				const float		TargetAng = FMath::RadiansToDegrees(FMath::Atan2(TargetDir.Y, TargetDir.X));
+				const float		LocalAng = FMath::RadiansToDegrees(FMath::Atan2(Ld.Y, Ld.X));
+				Rot = TargetAng - LocalAng;
+			}
+
+			FPlannedRoom PR;
+			PR.Center = ThisSite;
+			PR.RotationDeg = Rot;
+			PR.Marker = CellMarker[s];
+			Planned.Add(PR);
+
+			Processed.Add(ThisCell);
+		}
+	}
+
+	// --- 4. FINE diagram + rasterize ----------------------------------------
 	Result.Diagram = BuildSubstrate();
 	const int32 N = Result.Diagram.Cells.Num();
 	if (N == 0)
@@ -724,483 +1023,140 @@ FCellDungeonResult UCellDungeonGenerator2D::Generate()
 		}
 	}
 
-	// --- 2. Resolve placement plan ------------------------------------------
-	const TArray<int32> MiddleQueue = Config.ResolveMiddleQueue(Rng);
-
-	// Helper: commit a fully-validated room into the result, returning its index.
-	auto CommitRoom = [&](FCellPlacedRoom& Room) -> int32 {
-		const int32 RoomIdx = Result.Rooms.Num();
-		MarkRoomCells(Result, Room, RoomIdx);
-		ResolveDoorways(Result, Room);
-		Result.Rooms.Add(Room);
-		return RoomIdx;
-	};
-
-	// Helper: push a room's unused, anchor-valid doorways onto the open-exit list.
-	TArray<FOpenExit> OpenExits;
-	auto			  PushExits = [&](const int32 RoomIdx) {
-		 const FCellPlacedRoom& Room = Result.Rooms[RoomIdx];
-		 for (int32 d = 0; d < Room.DoorwayDir.Num(); ++d)
-		 {
-			 if (Room.DoorwayUsed.IsValidIndex(d) && Room.DoorwayUsed[d])
-			 {
-				 continue;
-			 }
-			 const int32 Anchor = Room.DoorwayAnchorCell.IsValidIndex(d) ? Room.DoorwayAnchorCell[d] : INDEX_NONE;
-			 if (Anchor == INDEX_NONE || !Result.CellState.IsValidIndex(Anchor))
-			 {
-				 continue;
-			 }
-			 if (Result.CellState[Anchor] != ECellState::Empty && Result.CellState[Anchor] != ECellState::Corridor)
-			 {
-				 continue;
-			 }
-			 FOpenExit Exit;
-			 Exit.RoomIndex = RoomIdx;
-			 Exit.DoorwayIndex = d;
-			 Exit.Dir = Room.DoorwayDir[d];
-			 Exit.AnchorCell = Anchor;
-			 Exit.AnchorCenter = Result.Diagram.Cells[Anchor].SiteLocation;
-			 OpenExits.Add(Exit);
-		 }
-	};
-
-	// Build corridor-cell frontiers: every Corridor cell adjacent to an Empty cell is a branch point the
-	// network can grow a new room off of. This is what lets single-doorway rooms keep connecting after their
-	// host rooms' doors are consumed — corridors have unlimited branch capacity, so the frontier never dries
-	// up while empty space remains next to the network. Deterministic (cell-index order).
-	auto AppendCorridorFrontiers = [&](TArray<FOpenExit>& Out) {
-		for (int32 c = 0; c < N; ++c)
-		{
-			if (Result.CellState[c] != ECellState::Corridor)
-			{
-				continue;
-			}
-			const FVoronoiCell2D& Cell = Result.Diagram.Cells[c];
-			for (const int32 Nb : Cell.Neighbors)
-			{
-				if (!Result.CellState.IsValidIndex(Nb) || Result.CellState[Nb] != ECellState::Empty)
-				{
-					continue;
-				}
-				FOpenExit F;
-				F.RoomIndex = INDEX_NONE;
-				F.DoorwayIndex = INDEX_NONE;
-				F.AnchorCell = c;
-				F.AnchorCenter = Cell.SiteLocation;
-				F.Dir = (Result.Diagram.Cells[Nb].SiteLocation - Cell.SiteLocation).GetSafeNormal();
-				Out.Add(F);
-			}
-		}
-	};
-
-	// Remove a consumed room open-exit (matched by room + doorway) from the persistent OpenExits list.
-	// Corridor frontiers carry RoomIndex == INDEX_NONE and own no exit, so they are a no-op here.
-	auto ConsumeRoomExit = [&](const FOpenExit& Used) {
-		if (Used.RoomIndex == INDEX_NONE)
-		{
-			return;
-		}
-		OpenExits.RemoveAll([&](const FOpenExit& E) { return E.RoomIndex == Used.RoomIndex && E.DoorwayIndex == Used.DoorwayIndex; });
-	};
-
-	// --- 3. Place START at the center ---------------------------------------
+	// Commit rooms onto the fine grid (blob order).
+	for (const FPlannedRoom& PR : Planned)
 	{
-		const FVector2D Center = Bounds.GetCenter();
+		const FCellRoomType& Type = MarkerToType(PR.Marker);
+		FCellPlacedRoom		 Cand = MakeCandidateRoom(Type, PR.Center, PR.RotationDeg, PR.Marker, Result.Diagram, CellSize);
 
-		bool			bPlaced = false;
-		FCellPlacedRoom Best;
-		const float		Rotations[4] = { 0.f, 90.f, 180.f, 270.f };
-
-		for (const float Rot : Rotations)
+		if (!CanPlaceRoom(Result, Cand))
 		{
-			FCellPlacedRoom Cand = MakeCandidateRoom(Config.StartRoom, Center, Rot, -2, Result.Diagram, CellSize);
-			if (!CanPlaceRoom(Result, Cand))
+			UE_LOG(LogCellDungeon, Verbose, TEXT("CellDungeon: could not commit planned room (marker=%d); skipping."), PR.Marker);
+			continue;
+		}
+
+		const int32 Idx = Result.Rooms.Num();
+		MarkRoomCells(Result, Cand, Idx);
+		Result.Rooms.Add(Cand);
+
+		if (PR.Marker == -2)
+		{
+			Result.StartRoomIndex = Idx;
+		}
+		else if (PR.Marker == -3)
+		{
+			Result.EndRoomIndex = Idx;
+		}
+	}
+
+	// Resolve doorway anchors against the FINAL committed state (second pass so a
+	// later room's footprint can't invalidate an earlier room's anchor).
+	for (int32 r = 0; r < Result.Rooms.Num(); ++r)
+	{
+		ResolveDoorways(Result, Result.Rooms[r]);
+	}
+
+	// --- 5. CONNECTIVITY via corridor seeds ---------------------------------
+
+	// Pick a SEED cell per room (first doorway whose anchor is valid + Empty/Corridor),
+	// mark it Corridor, and collect all seeds.
+	TArray<int32> Seeds;
+	for (int32 r = 0; r < Result.Rooms.Num(); ++r)
+	{
+		const FCellPlacedRoom& Room = Result.Rooms[r];
+		int32				   SeedCell = INDEX_NONE;
+		for (int32 d = 0; d < Room.DoorwayAnchorCell.Num(); ++d)
+		{
+			const int32 Anchor = Room.DoorwayAnchorCell[d];
+			if (Anchor == INDEX_NONE || !Result.CellState.IsValidIndex(Anchor))
 			{
 				continue;
 			}
-			// Need at least one doorway whose anchor walk lands in an Empty cell.
-			// Temporarily resolve anchors against current state.
-			TArray<int32> Anchors;
-			Anchors.SetNum(Cand.DoorwayPos.Num());
-			bool bAnyAnchor = false;
-			for (int32 d = 0; d < Cand.DoorwayPos.Num(); ++d)
+			const ECellState S = Result.CellState[Anchor];
+			if (S == ECellState::Empty || S == ECellState::Corridor)
 			{
-				Anchors[d] = AnchorWalk(Result.Diagram, Result.CellState, Cand.OccupiedCells, Cand.DoorwayPos[d], Cand.DoorwayDir[d]);
-				if (Anchors[d] != INDEX_NONE && Result.CellState.IsValidIndex(Anchors[d]) && Result.CellState[Anchors[d]] == ECellState::Empty)
-				{
-					bAnyAnchor = true;
-				}
-			}
-			if (bAnyAnchor)
-			{
-				Best = Cand;
-				bPlaced = true;
+				SeedCell = Anchor;
 				break;
 			}
 		}
 
-		if (!bPlaced)
+		if (SeedCell == INDEX_NONE)
 		{
-			UE_LOG(LogCellDungeon, Warning, TEXT("CellDungeon: failed to place START room; aborting."));
-			Result.bValid = false;
-			return Result;
+			UE_LOG(LogCellDungeon, Verbose, TEXT("CellDungeon: room %d has no valid doorway anchor; may be unreachable."), r);
+			continue;
 		}
 
-		const int32 StartIdx = CommitRoom(Best);
-		Result.StartRoomIndex = StartIdx;
-		PushExits(StartIdx);
+		Result.CellState[SeedCell] = ECellState::Corridor;
+		Result.CorridorSeeds.Add(SeedCell);
+		Seeds.Add(SeedCell);
 	}
 
-	// --- 4. GROW: place each middle room, doorway-relative, then connect -----
-	int32 PlacedMiddles = 0;
-	for (const int32 MiddleTypeIdx : MiddleQueue)
+	// Enforce a 1-cell gap between corridors and room walls: a corridor may only TOUCH a room at its seed
+	// cell. Temporarily Block every Empty cell adjacent to a room (the buffer ring) so routing keeps one
+	// cell clear of every wall; seeds are already Corridor (not Empty) so they stay usable as endpoints.
+	// Restored to Empty after routing (corridors never enter the ring, so nothing there becomes Corridor).
+	TArray<int32> BufferCells;
+	for (int32 i = 0; i < N; ++i)
 	{
-		if (!Config.MiddleRooms.IsValidIndex(MiddleTypeIdx))
+		if (Result.CellState[i] != ECellState::Empty)
 		{
 			continue;
 		}
-		const FCellRoomType& Type = Config.MiddleRooms[MiddleTypeIdx];
-
-		bool bRoomPlaced = false;
-
-		// Frontiers = room open-exits FIRST (prefer growing off real doorways), then corridor-cell branch
-		// points (so single-doorway networks keep growing). Rebuilt per room because corridors grow.
-		TArray<FOpenExit> Sources = OpenExits;
-		AppendCorridorFrontiers(Sources);
-
-		const int32 ExitCount = Sources.Num();
-		for (int32 eOff = 0; eOff < ExitCount && !bRoomPlaced; ++eOff)
+		for (const int32 Nb : Result.Diagram.Cells[i].Neighbors)
 		{
-			const FOpenExit Source = Sources[eOff]; // deterministic order
-
-			if (Source.AnchorCell == INDEX_NONE || !Result.CellState.IsValidIndex(Source.AnchorCell))
+			if (Result.CellState.IsValidIndex(Nb) && Result.CellState[Nb] == ECellState::RoomOccupied)
 			{
-				continue;
-			}
-
-			// Choose the candidate rotation whose entry doorway best opposes the
-			// source exit direction (world dot ~= -Source.Dir).
-			const float Rotations[4] = { 0.f, 90.f, 180.f, 270.f };
-
-			for (int32 GapTry = 0; GapTry < MaxGapTries && !bRoomPlaced; ++GapTry)
-			{
-				const float		Gap = (StartGapMul + GapStepMul * GapTry) * CellSize;
-				const FVector2D Target = Source.AnchorCenter + Source.Dir * Gap;
-
-				// Evaluate every rotation, pick the best-opposed entry doorway.
-				float			BestScore = -2.f;
-				FCellPlacedRoom BestCand;
-				int32			BestEntryDoor = INDEX_NONE;
-				bool			bHaveCand = false;
-
-				for (const float Rot : Rotations)
-				{
-					// Find the entry doorway for this rotation (best opposition).
-					int32 EntryDoor = INDEX_NONE;
-					float EntryScore = -2.f;
-					for (int32 d = 0; d < Type.Doorways.Num(); ++d)
-					{
-						const FVector2D WorldDir = Rotate2D(Type.Doorways[d].LocalOutwardDir, Rot).GetSafeNormal();
-						const float		Score = FVector2D::DotProduct(WorldDir, -Source.Dir);
-						if (Score > EntryScore)
-						{
-							EntryScore = Score;
-							EntryDoor = d;
-						}
-					}
-					if (EntryDoor == INDEX_NONE)
-					{
-						continue;
-					}
-
-					// Position room by its DOORWAY: Center = Target - Rotate(localPos).
-					const FVector2D EntryLocal = Type.Doorways[EntryDoor].LocalPosition;
-					const FVector2D RoomCenter = Target - Rotate2D(EntryLocal, Rot);
-
-					FCellPlacedRoom Cand = MakeCandidateRoom(Type, RoomCenter, Rot, MiddleTypeIdx, Result.Diagram, CellSize);
-
-					if (!CanPlaceRoom(Result, Cand))
-					{
-						continue;
-					}
-
-					if (EntryScore > BestScore)
-					{
-						BestScore = EntryScore;
-						BestCand = Cand;
-						BestEntryDoor = EntryDoor;
-						bHaveCand = true;
-					}
-				}
-
-				if (!bHaveCand)
-				{
-					continue; // try a larger gap
-				}
-
-				// Resolve the candidate entry anchor; must be Empty.
-				const int32 EntryAnchor = AnchorWalk(
-					Result.Diagram, Result.CellState, BestCand.OccupiedCells, BestCand.DoorwayPos[BestEntryDoor], BestCand.DoorwayDir[BestEntryDoor]);
-				if (EntryAnchor == INDEX_NONE || !Result.CellState.IsValidIndex(EntryAnchor) || Result.CellState[EntryAnchor] != ECellState::Empty)
-				{
-					continue;
-				}
-
-				// CONNECT: Dijkstra from entry anchor to the connected target set =
-				// {all Corridor cells} UNION {Source.AnchorCell}.
-				TSet<int32> Goals;
-				Goals.Add(Source.AnchorCell);
-				for (int32 c = 0; c < N; ++c)
-				{
-					if (Result.CellState[c] == ECellState::Corridor)
-					{
-						Goals.Add(c);
-					}
-				}
-
-				TSet<int32> Extra;
-				Extra.Add(EntryAnchor);
-				Extra.Add(Source.AnchorCell);
-
-				TArray<int32> Path = DijkstraToSet(Result.Diagram, Result.CellState, EntryAnchor, Goals, Extra);
-				if (Path.Num() == 0)
-				{
-					continue; // unreachable; try larger gap
-				}
-
-				// Optional detour rejection.
-				{
-					const FVector2D A = Result.Diagram.Cells[Path[0]].SiteLocation;
-					const FVector2D B = Result.Diagram.Cells[Path.Last()].SiteLocation;
-					const float		Straight = FVector2D::Distance(A, B);
-					float			PathLen = 0.f;
-					for (int32 p = 1; p < Path.Num(); ++p)
-					{
-						PathLen += FVector2D::Distance(Result.Diagram.Cells[Path[p]].SiteLocation, Result.Diagram.Cells[Path[p - 1]].SiteLocation);
-					}
-					if (Straight > KINDA_SMALL_NUMBER && PathLen > Straight * MaxPathDetour)
-					{
-						continue; // too winding; try larger gap
-					}
-				}
-
-				// COMMIT the room and the corridor.
-				const int32 NewRoomIdx = CommitRoom(BestCand);
-
-				for (const int32 PCell : Path)
-				{
-					if (Result.CellState.IsValidIndex(PCell) && Result.CellState[PCell] != ECellState::RoomOccupied
-						&& Result.CellState[PCell] != ECellState::Blocked)
-					{
-						Result.CellState[PCell] = ECellState::Corridor;
-					}
-				}
-				Result.CorridorPaths.Add(Path);
-
-				// Mark source + entry doorways used.
-				if (Result.Rooms.IsValidIndex(Source.RoomIndex) && Result.Rooms[Source.RoomIndex].DoorwayUsed.IsValidIndex(Source.DoorwayIndex))
-				{
-					Result.Rooms[Source.RoomIndex].DoorwayUsed[Source.DoorwayIndex] = true;
-				}
-				if (Result.Rooms[NewRoomIdx].DoorwayUsed.IsValidIndex(BestEntryDoor))
-				{
-					Result.Rooms[NewRoomIdx].DoorwayUsed[BestEntryDoor] = true;
-				}
-
-				// The source exit is consumed; remove it from the open list (corridor frontiers own no exit).
-				ConsumeRoomExit(Source);
-
-				// Push the new room's remaining doorways as open exits.
-				PushExits(NewRoomIdx);
-
-				PlacedMiddles++;
-				bRoomPlaced = true;
-			}
-		}
-
-		if (!bRoomPlaced)
-		{
-			UE_LOG(LogCellDungeon,
-				Warning,
-				TEXT("CellDungeon: could not place middle room type %d (placed %d/%d middles)."),
-				MiddleTypeIdx,
-				PlacedMiddles,
-				MiddleQueue.Num());
-		}
-	}
-
-	// --- 5. PLACE END last, at the graph-farthest open exit ------------------
-	{
-		// Compute BFS hop distances from the start room's first valid anchor.
-		int32 StartAnchor = INDEX_NONE;
-		if (Result.Rooms.IsValidIndex(Result.StartRoomIndex))
-		{
-			const FCellPlacedRoom& StartRoom = Result.Rooms[Result.StartRoomIndex];
-			for (int32 d = 0; d < StartRoom.DoorwayAnchorCell.Num(); ++d)
-			{
-				if (StartRoom.DoorwayAnchorCell[d] != INDEX_NONE)
-				{
-					StartAnchor = StartRoom.DoorwayAnchorCell[d];
-					break;
-				}
-			}
-		}
-
-		TArray<int32> Hops;
-		if (StartAnchor != INDEX_NONE)
-		{
-			BfsHopDistances(Result.Diagram, Result.CellState, StartAnchor, Hops);
-		}
-
-		// Order candidate exits by graph distance (farthest first); fall back to
-		// insertion order when hops are unknown. Deterministic.
-		TArray<FOpenExit> Sources = OpenExits;
-		AppendCorridorFrontiers(Sources);
-
-		TArray<int32> ExitOrder;
-		for (int32 i = 0; i < Sources.Num(); ++i)
-		{
-			ExitOrder.Add(i);
-		}
-		ExitOrder.Sort([&](const int32 A, const int32 B) {
-			const int32 HA = (Hops.IsValidIndex(Sources[A].AnchorCell)) ? Hops[Sources[A].AnchorCell] : -1;
-			const int32 HB = (Hops.IsValidIndex(Sources[B].AnchorCell)) ? Hops[Sources[B].AnchorCell] : -1;
-			if (HA != HB)
-			{
-				return HA > HB; // farther first
-			}
-			return A < B; // deterministic tie-break by insertion order
-		});
-
-		bool bEndPlaced = false;
-		for (const int32 ExitIdx : ExitOrder)
-		{
-			if (!Sources.IsValidIndex(ExitIdx))
-			{
-				continue;
-			}
-			const FOpenExit Source = Sources[ExitIdx];
-			if (Source.AnchorCell == INDEX_NONE || !Result.CellState.IsValidIndex(Source.AnchorCell))
-			{
-				continue;
-			}
-
-			const float Rotations[4] = { 0.f, 90.f, 180.f, 270.f };
-
-			for (int32 GapTry = 0; GapTry < MaxGapTries && !bEndPlaced; ++GapTry)
-			{
-				const float		Gap = (StartGapMul + GapStepMul * GapTry) * CellSize;
-				const FVector2D Target = Source.AnchorCenter + Source.Dir * Gap;
-
-				float			BestScore = -2.f;
-				FCellPlacedRoom BestCand;
-				int32			BestEntryDoor = INDEX_NONE;
-				bool			bHaveCand = false;
-
-				for (const float Rot : Rotations)
-				{
-					int32 EntryDoor = INDEX_NONE;
-					float EntryScore = -2.f;
-					for (int32 d = 0; d < Config.EndRoom.Doorways.Num(); ++d)
-					{
-						const FVector2D WorldDir = Rotate2D(Config.EndRoom.Doorways[d].LocalOutwardDir, Rot).GetSafeNormal();
-						const float		Score = FVector2D::DotProduct(WorldDir, -Source.Dir);
-						if (Score > EntryScore)
-						{
-							EntryScore = Score;
-							EntryDoor = d;
-						}
-					}
-					if (EntryDoor == INDEX_NONE)
-					{
-						continue;
-					}
-
-					const FVector2D EntryLocal = Config.EndRoom.Doorways[EntryDoor].LocalPosition;
-					const FVector2D RoomCenter = Target - Rotate2D(EntryLocal, Rot);
-
-					FCellPlacedRoom Cand = MakeCandidateRoom(Config.EndRoom, RoomCenter, Rot, -3, Result.Diagram, CellSize);
-
-					if (!CanPlaceRoom(Result, Cand))
-					{
-						continue;
-					}
-					if (EntryScore > BestScore)
-					{
-						BestScore = EntryScore;
-						BestCand = Cand;
-						BestEntryDoor = EntryDoor;
-						bHaveCand = true;
-					}
-				}
-
-				if (!bHaveCand)
-				{
-					continue;
-				}
-
-				const int32 EntryAnchor = AnchorWalk(
-					Result.Diagram, Result.CellState, BestCand.OccupiedCells, BestCand.DoorwayPos[BestEntryDoor], BestCand.DoorwayDir[BestEntryDoor]);
-				if (EntryAnchor == INDEX_NONE || !Result.CellState.IsValidIndex(EntryAnchor) || Result.CellState[EntryAnchor] != ECellState::Empty)
-				{
-					continue;
-				}
-
-				TSet<int32> Goals;
-				Goals.Add(Source.AnchorCell);
-				for (int32 c = 0; c < N; ++c)
-				{
-					if (Result.CellState[c] == ECellState::Corridor)
-					{
-						Goals.Add(c);
-					}
-				}
-				TSet<int32> Extra;
-				Extra.Add(EntryAnchor);
-				Extra.Add(Source.AnchorCell);
-
-				TArray<int32> Path = DijkstraToSet(Result.Diagram, Result.CellState, EntryAnchor, Goals, Extra);
-				if (Path.Num() == 0)
-				{
-					continue;
-				}
-
-				const int32 EndIdx = CommitRoom(BestCand);
-				for (const int32 PCell : Path)
-				{
-					if (Result.CellState.IsValidIndex(PCell) && Result.CellState[PCell] != ECellState::RoomOccupied
-						&& Result.CellState[PCell] != ECellState::Blocked)
-					{
-						Result.CellState[PCell] = ECellState::Corridor;
-					}
-				}
-				Result.CorridorPaths.Add(Path);
-
-				if (Result.Rooms.IsValidIndex(Source.RoomIndex) && Result.Rooms[Source.RoomIndex].DoorwayUsed.IsValidIndex(Source.DoorwayIndex))
-				{
-					Result.Rooms[Source.RoomIndex].DoorwayUsed[Source.DoorwayIndex] = true;
-				}
-				if (Result.Rooms[EndIdx].DoorwayUsed.IsValidIndex(BestEntryDoor))
-				{
-					Result.Rooms[EndIdx].DoorwayUsed[BestEntryDoor] = true;
-				}
-
-				Result.EndRoomIndex = EndIdx;
-				ConsumeRoomExit(Source);
-				PushExits(EndIdx);
-				bEndPlaced = true;
-			}
-
-			if (bEndPlaced)
-			{
+				BufferCells.Add(i);
+				Result.CellState[i] = ECellState::Blocked;
 				break;
 			}
 		}
+	}
 
-		if (!bEndPlaced)
+	// Connect ALL seeds into one component. Sort for determinism.
+	Seeds.Sort();
+
+	TSet<int32> Net;
+	if (Seeds.Num() > 0)
+	{
+		Net.Add(Seeds[0]);
+	}
+
+	for (int32 i = 1; i < Seeds.Num(); ++i)
+	{
+		const int32 Seed0 = Seeds[i];
+		if (Net.Contains(Seed0))
 		{
-			UE_LOG(LogCellDungeon, Warning, TEXT("CellDungeon: failed to place END room."));
+			continue; // already absorbed by an earlier path
+		}
+
+		TSet<int32> Extra = Net;
+		Extra.Add(Seed0);
+
+		TArray<int32> Path = DijkstraToSet(Result.Diagram, Result.CellState, Seed0, Net, Extra);
+		if (Path.Num() == 0)
+		{
+			UE_LOG(LogCellDungeon, Verbose, TEXT("CellDungeon: seed cell %d unreachable from network."), Seed0);
+			continue;
+		}
+
+		for (const int32 PCell : Path)
+		{
+			if (Result.CellState.IsValidIndex(PCell) && Result.CellState[PCell] == ECellState::Empty)
+			{
+				Result.CellState[PCell] = ECellState::Corridor;
+			}
+			Net.Add(PCell);
+		}
+		Result.CorridorPaths.Add(Path);
+	}
+
+	// Restore the buffer ring to Empty (corridors never entered it; seeds stayed Corridor).
+	for (const int32 BufCell : BufferCells)
+	{
+		if (Result.CellState.IsValidIndex(BufCell) && Result.CellState[BufCell] == ECellState::Blocked)
+		{
+			Result.CellState[BufCell] = ECellState::Empty;
 		}
 	}
 

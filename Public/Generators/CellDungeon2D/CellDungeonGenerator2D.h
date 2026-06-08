@@ -82,6 +82,10 @@ struct PROCEDURALGEOMETRY_API FCellDungeonResult
 	// Each entry = ordered cell indices of one carved corridor.
 	TArray<TArray<int32>> CorridorPaths;
 
+	// One corridor cell per room (just outside its base doorway) — the ONLY corridor cells allowed to
+	// touch a room. Every other corridor cell keeps a 1-cell gap from room walls.
+	TArray<int32> CorridorSeeds;
+
 	// Index into Rooms of the start room.
 	int32 StartRoomIndex = -1;
 
