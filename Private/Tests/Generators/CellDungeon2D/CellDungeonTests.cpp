@@ -81,6 +81,89 @@ namespace
 		return RoomType;
 	}
 
+	/** Build a W x H room with NumDoors doorways on distinct random edges (deterministic via R). */
+	FCellRoomType MakeRoom(float W, float H, int32 NumDoors, FRandomStream& R)
+	{
+		FCellRoomType RoomType;
+		RoomType.Footprint = FVector2D(W, H);
+		const float HX = W * 0.5f;
+		const float HY = H * 0.5f;
+
+		TArray<FCellDoorway> AllEdges;
+		{
+			FCellDoorway D;
+			D.LocalOutwardDir = FVector2D(1.0f, 0.0f);
+			D.LocalPosition = FVector2D(HX, 0.0f);
+			AllEdges.Add(D);
+		}
+		{
+			FCellDoorway D;
+			D.LocalOutwardDir = FVector2D(-1.0f, 0.0f);
+			D.LocalPosition = FVector2D(-HX, 0.0f);
+			AllEdges.Add(D);
+		}
+		{
+			FCellDoorway D;
+			D.LocalOutwardDir = FVector2D(0.0f, 1.0f);
+			D.LocalPosition = FVector2D(0.0f, HY);
+			AllEdges.Add(D);
+		}
+		{
+			FCellDoorway D;
+			D.LocalOutwardDir = FVector2D(0.0f, -1.0f);
+			D.LocalPosition = FVector2D(0.0f, -HY);
+			AllEdges.Add(D);
+		}
+
+		// Deterministic Fisher-Yates, then take the first NumDoors distinct edges.
+		TArray<int32> Order = { 0, 1, 2, 3 };
+		for (int32 i = Order.Num() - 1; i > 0; --i)
+		{
+			Order.Swap(i, R.RandRange(0, i));
+		}
+		const int32 Count = FMath::Clamp(NumDoors, 1, 4);
+		for (int32 i = 0; i < Count; ++i)
+		{
+			RoomType.Doorways.Add(AllEdges[Order[i]]);
+		}
+		return RoomType;
+	}
+
+	/**
+	 * Realistic project-scale config: corridor width 1000; three middle room types
+	 * (5x 2500x2500, 2x 5000x5000, 1x 6000x7000) each with 1-2 random doorways;
+	 * start 3000x4000 (1 door), end 1500x1500 (1 door). 10 rooms total.
+	 */
+	FCellDungeonConfig MakeRealisticConfig()
+	{
+		FRandomStream R(12345);
+
+		FCellDungeonConfig Config;
+		Config.CorridorSize = 1000.0f;
+		Config.TargetRoomCount = 10; // start + end + (5+2+1) middles
+
+		Config.StartRoom = MakeRoom(3000.0f, 4000.0f, 1, R);
+		Config.EndRoom = MakeRoom(1500.0f, 1500.0f, 1, R);
+
+		FCellRoomType T0 = MakeRoom(2500.0f, 2500.0f, R.RandRange(1, 2), R);
+		T0.Min = 5;
+		T0.Max = 5;
+		T0.Weight = 5;
+		FCellRoomType T1 = MakeRoom(5000.0f, 5000.0f, R.RandRange(1, 2), R);
+		T1.Min = 2;
+		T1.Max = 2;
+		T1.Weight = 2;
+		FCellRoomType T2 = MakeRoom(6000.0f, 7000.0f, R.RandRange(1, 2), R);
+		T2.Min = 1;
+		T2.Max = 1;
+		T2.Weight = 1;
+
+		Config.MiddleRooms.Add(T0);
+		Config.MiddleRooms.Add(T1);
+		Config.MiddleRooms.Add(T2);
+		return Config;
+	}
+
 	/** A normal multi-doorway config: start/end/middle all 4-door rooms. */
 	FCellDungeonConfig MakeMultiDoorConfig(int32 TargetRoomCount = 8, float CellSize = 300.0f)
 	{
@@ -455,6 +538,57 @@ bool FCellDungeonCorridorRoomGapTest::RunTest(const FString& Parameters)
 
 	TestEqual("CorridorRoomGap: no non-seed corridor cell touches a room", OffendingCells, 0);
 	TestTrue("CorridorRoomGap: every room contributed a seed", Result.CorridorSeeds.Num() >= Result.Rooms.Num() - 1);
+
+	return true;
+}
+
+// ============================================================
+// Test 7: RealisticShowcase — project-scale config (corridor 1000; mixed large
+// rooms with 1-2 random doors). Dumps for visual inspection; asserts invariants.
+// ============================================================
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCellDungeonRealisticShowcaseTest, "ProceduralGeometry.CellDungeon.RealisticShowcase", DefaultTestFlags)
+
+bool FCellDungeonRealisticShowcaseTest::RunTest(const FString& Parameters)
+{
+	const FCellDungeonConfig Config = MakeRealisticConfig();
+	const FBox2D			 Bounds(FVector2D(-45000.0f, -45000.0f), FVector2D(45000.0f, 45000.0f));
+	const FCellDungeonResult Result = RunGenerator(TEXT("CellRealistic"), Config, Bounds);
+
+	FCellDungeonDebug::DumpToFiles(Result, TEXT("test_RealisticShowcase"));
+
+	AddInfo(FString::Printf(TEXT("RealisticShowcase: placed %d/%d rooms, %d corridors, %d seeds"),
+		Result.Rooms.Num(),
+		Result.RequestedRoomCount,
+		Result.CorridorPaths.Num(),
+		Result.CorridorSeeds.Num()));
+
+	TestTrue("RealisticShowcase: all (or all-but-one) rooms placed", Result.Rooms.Num() >= Result.RequestedRoomCount - 1);
+
+	// One connected region over room+corridor cells.
+	int32 SeedCell = INDEX_NONE;
+	for (int32 i = 0; i < Result.CellState.Num(); ++i)
+	{
+		if (Result.CellState[i] == ECellState::RoomOccupied)
+		{
+			SeedCell = i;
+			break;
+		}
+	}
+	if (SeedCell != INDEX_NONE)
+	{
+		const TArray<ECellState> RoomAndCorridor = { ECellState::RoomOccupied, ECellState::Corridor };
+		TArray<bool>			 Visited;
+		BfsConnectedComponent(Result, SeedCell, RoomAndCorridor, Visited);
+		int32 Unreached = 0;
+		for (int32 i = 0; i < Result.CellState.Num(); ++i)
+		{
+			if (Result.CellState[i] == ECellState::RoomOccupied && !Visited[i])
+			{
+				++Unreached;
+			}
+		}
+		TestEqual("RealisticShowcase: one connected region", Unreached, 0);
+	}
 
 	return true;
 }
