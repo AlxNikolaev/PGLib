@@ -31,11 +31,6 @@ namespace
 	// Lloyd relaxation iterations for an even cell distribution.
 	constexpr int32 RelaxIterations = 8;
 
-	// Extra spacing between rooms, in CorridorSize multiples, ADDED to the room bounding diagonal when
-	// spacing the coarse layout. Guarantees a clear lane of empty fine cells between adjacent rooms so
-	// footprints never touch and a corridor (with a 1-cell wall clearance each side) always fits.
-	constexpr float RoomGapCells = 4.0f;
-
 	// Dijkstra edge costs by destination cell state (Corridor cheaper so paths
 	// merge into a shared network).
 	constexpr float CorridorCost = 0.2f;
@@ -484,7 +479,9 @@ static TArray<int32> DijkstraToSet(const FVoronoiDiagram2D& Diagram,
 	const TArray<ECellState>&								CellState,
 	const int32												StartCell,
 	const TSet<int32>&										Goals,
-	const TSet<int32>&										AllowedExtra)
+	const TSet<int32>&										AllowedExtra,
+	const TSet<int32>&										AvoidCells = TSet<int32>(),
+	float													AvoidExtra = 0.f)
 {
 	TArray<int32> Path;
 	if (!Diagram.Cells.IsValidIndex(StartCell) || Goals.Num() == 0)
@@ -507,12 +504,16 @@ static TArray<int32> DijkstraToSet(const FVoronoiDiagram2D& Diagram,
 		return S == ECellState::Empty || S == ECellState::Corridor;
 	};
 
+	// Base cost (Corridor cheaper so paths merge) plus a soft AVOID penalty: a high finite cost on cells we
+	// prefer to keep clear (e.g. room-adjacent cells, to hold a 1-cell gap) — corridors route around them when
+	// any alternative exists, but may still cross them when that is the only route, so connectivity never breaks.
 	auto EnterCost = [&](const int32 Idx) -> float {
-		if (CellState.IsValidIndex(Idx) && CellState[Idx] == ECellState::Corridor)
+		float Cost = (CellState.IsValidIndex(Idx) && CellState[Idx] == ECellState::Corridor) ? CorridorCost : EmptyCost;
+		if (AvoidExtra > 0.f && AvoidCells.Contains(Idx))
 		{
-			return CorridorCost;
+			Cost += AvoidExtra;
 		}
-		return EmptyCost;
+		return Cost;
 	};
 
 	if (!IsTraversable(StartCell))
@@ -704,22 +705,25 @@ FCellDungeonResult UCellDungeonGenerator2D::Generate()
 
 	// --- 1. COARSE placement diagram ----------------------------------------
 
-	// Coarse cell size = the largest room BOUNDING DIAGONAL across all room types.
-	// MinSiteDistance >= this diagonal guarantees that two adjacent room footprints
-	// can never overlap, regardless of rotation.
-	auto Diagonal = [](const FVector2D& Fp) -> float { return FMath::Sqrt(Fp.X * Fp.X + Fp.Y * Fp.Y); };
+	// Coarse PLACEMENT cell size: configurable (Config.PlacementCellSize); falls back to the largest room
+	// footprint DIMENSION (max of W,H) across all room types — no diagonal/gap offset. One room per cell, and
+	// since cells are sized to the LARGEST room, smaller rooms keep a natural gap; the router's 1-cell buffer
+	// handles wall clearance. Overlap stays impossible because CanPlaceRoom (conservative SAT) rejects any
+	// footprint that would collide, so tight same-size adjacency degrades to a placement shortfall, not overlap.
+	auto MaxDim = [](const FVector2D& Fp) -> float { return FMath::Max(Fp.X, Fp.Y); };
 
-	float CoarseCell = FMath::Max(Diagonal(Config.StartRoom.Footprint), Diagonal(Config.EndRoom.Footprint));
-	for (const FCellRoomType& MidType : Config.MiddleRooms)
+	float CoarseCell = Config.PlacementCellSize;
+	if (CoarseCell <= 0.f)
 	{
-		CoarseCell = FMath::Max(CoarseCell, Diagonal(MidType.Footprint));
+		CoarseCell = FMath::Max(MaxDim(Config.StartRoom.Footprint), MaxDim(Config.EndRoom.Footprint));
+		for (const FCellRoomType& MidType : Config.MiddleRooms)
+		{
+			CoarseCell = FMath::Max(CoarseCell, MaxDim(MidType.Footprint));
+		}
 	}
 	CoarseCell = FMath::Max(CoarseCell, CellSize);
 
-	// Space sites by the diagonal PLUS a corridor-cell gap: adjacent footprints then never touch (the
-	// conservative SAT would otherwise reject the second room) and a corridor lane always fits between them.
-	const float CoarseSpacing = CoarseCell + RoomGapCells * CellSize;
-
+	const float		CoarseSpacing = CoarseCell;
 	const FVector2D BoundsSize = Bounds.GetSize();
 	const float		BoundsArea = BoundsSize.X * BoundsSize.Y;
 	const int32		CoarseSites = FMath::Clamp(FMath::RoundToInt(FMath::Abs(BoundsArea) / (CoarseSpacing * CoarseSpacing)), MinSites, MaxSites);
@@ -1096,14 +1100,16 @@ FCellDungeonResult UCellDungeonGenerator2D::Generate()
 		Seeds.Add(SeedCell);
 	}
 
-	// Enforce a 1-cell gap between corridors and room walls: a corridor may only TOUCH a room at its seed
-	// cell. Temporarily Block every Empty cell adjacent to a room (the buffer ring) so routing keeps one
-	// cell clear of every wall; seeds are already Corridor (not Empty) so they stay usable as endpoints.
-	// Restored to Empty after routing (corridors never enter the ring, so nothing there becomes Corridor).
-	TArray<int32> BufferCells;
+	// 1-cell gap between corridors and room walls, enforced as a SOFT preference (not a hard wall): every
+	// Empty cell adjacent to a room (and not itself a seed) gets a high routing penalty, so corridors keep
+	// one cell clear of walls wherever a clear path exists, yet may still slip through a tight lane when that
+	// is the only route — connectivity is never sacrificed. Seeds are the one corridor cell allowed to touch
+	// a room and are excluded from the avoid set.
+	const TSet<int32> SeedSet(Seeds);
+	TSet<int32>		  AvoidCells;
 	for (int32 i = 0; i < N; ++i)
 	{
-		if (Result.CellState[i] != ECellState::Empty)
+		if (Result.CellState[i] != ECellState::Empty || SeedSet.Contains(i))
 		{
 			continue;
 		}
@@ -1111,12 +1117,13 @@ FCellDungeonResult UCellDungeonGenerator2D::Generate()
 		{
 			if (Result.CellState.IsValidIndex(Nb) && Result.CellState[Nb] == ECellState::RoomOccupied)
 			{
-				BufferCells.Add(i);
-				Result.CellState[i] = ECellState::Blocked;
+				AvoidCells.Add(i);
 				break;
 			}
 		}
 	}
+	// High enough that corridors detour far to avoid touching a wall, but finite so they never disconnect.
+	const float AvoidExtra = 100.0f;
 
 	// Connect ALL seeds into one component. Sort for determinism.
 	Seeds.Sort();
@@ -1138,7 +1145,7 @@ FCellDungeonResult UCellDungeonGenerator2D::Generate()
 		TSet<int32> Extra = Net;
 		Extra.Add(Seed0);
 
-		TArray<int32> Path = DijkstraToSet(Result.Diagram, Result.CellState, Seed0, Net, Extra);
+		TArray<int32> Path = DijkstraToSet(Result.Diagram, Result.CellState, Seed0, Net, Extra, AvoidCells, AvoidExtra);
 		if (Path.Num() == 0)
 		{
 			UE_LOG(LogCellDungeon, Verbose, TEXT("CellDungeon: seed cell %d unreachable from network."), Seed0);
@@ -1154,15 +1161,6 @@ FCellDungeonResult UCellDungeonGenerator2D::Generate()
 			Net.Add(PCell);
 		}
 		Result.CorridorPaths.Add(Path);
-	}
-
-	// Restore the buffer ring to Empty (corridors never entered it; seeds stayed Corridor).
-	for (const int32 BufCell : BufferCells)
-	{
-		if (Result.CellState.IsValidIndex(BufCell) && Result.CellState[BufCell] == ECellState::Blocked)
-		{
-			Result.CellState[BufCell] = ECellState::Empty;
-		}
 	}
 
 	// --- 6. Validity ---------------------------------------------------------

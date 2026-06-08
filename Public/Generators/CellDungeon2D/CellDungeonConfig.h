@@ -67,6 +67,12 @@ struct PROCEDURALGEOMETRY_API FCellDungeonConfig
 	// Corridor width == Voronoi cell size (world units).
 	float CorridorSize = 300.f;
 
+	// Coarse PLACEMENT cell size (world units): the spacing of the room-layout Voronoi. 0 = auto, which
+	// falls back to the largest room footprint DIMENSION (max of W,H across all room types). No extra gap is
+	// added — rooms sit one-per-cell and the router keeps a 1-cell clearance, so cells sized to the largest
+	// room already leave room for corridors. Raise this to spread rooms further apart.
+	float PlacementCellSize = 0.f;
+
 	// TOTAL rooms including start + end.
 	int32 TargetRoomCount = 8;
 
