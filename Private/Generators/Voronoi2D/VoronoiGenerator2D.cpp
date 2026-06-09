@@ -241,6 +241,36 @@ FVoronoiDiagram2D UVoronoiGenerator2D::GenerateRelaxed(const int32 NumSites)
 	return GenerateFromSites(Sites);
 }
 
+// =============================================================================================================
+// TODO(perf): Replace this O(N^2) Voronoi with Boost.Polygon's Fortune sweepline (O(N log N)).
+//
+// Current cost: ComputeCellForSite clips the bounds box by the perpendicular bisector against EVERY other site,
+// so the whole diagram is O(N^2), and GenerateRelaxed multiplies that by the Lloyd iteration count. At the
+// CellDungeon fine-substrate scale (sites clamped to ~4096, ~8 relax iters) that is ~100M+ half-plane clips per
+// generation; Boost's sweepline is ~hundreds of K. This method is the single hot spot — FVoronoiGridGenerator and
+// every consumer go through GenerateFromSites, so swapping it here speeds up everything with NO consumer changes.
+//
+// Feasibility: Boost 1.85 ships with UE 5.6 (Engine/Source/ThirdParty/Boost). Header-only —
+//   - add `AddEngineThirdPartyPrivateStaticDependencies(Target, "Boost")` to ProceduralGeometry.Build.cs,
+//   - `#include <boost/polygon/voronoi.hpp>` in THIS .cpp only (heavy header; keep it out of the public .h),
+//   - it's a *system* include path so Boost's warnings won't trip -WarningsAsErrors.
+//
+// Modification points (keep FVoronoiDiagram2D / FVoronoiCell2D output identical = drop-in):
+//   1. Quantize float sites to integers (Boost needs exact-integer input); map cells back via cell.source_index().
+//   2. Build boost::polygon::voronoi_diagram<double> over the integer sites.
+//   3. CLIP to Bounds — the real work: Boost leaves boundary cells with infinite edges (edge.is_infinite(),
+//      vertex0/vertex1 null). Intersect those rays with the FBox2D and Sutherland-Hodgman-clip the cell polygon
+//      (see Boost's "voronoi clipping" example). Mark bIsBoundaryCell when any incident edge is infinite.
+//   4. Cell polygon: walk cell.incident_edge()->next(); emit vertices CCW (consumers assume convex CCW).
+//   5. Neighbors: edge.twin()->cell()->source_index() — drops the separate O(N^2) edge-sharing pass below.
+//   Unchanged: Lloyd relaxation (now cheap), fan-triangulation (mesh factory), GetSharedEdge, seed/determinism.
+//
+// Plan: implement behind a cvar with the current path kept as an oracle; validate parity with the existing
+// automation (ProceduralGeometry Voronoi tests, Determinism / NoOverlap / OneConnectedRegion, CellDungeon suite,
+// VoronoiGridGeneratorTests) + a perf microbench, then flip the default. Risks: integer-quantization precision
+// (near-coincident sites collapse — pick a scale with headroom) and clipping correctness (foundation mesh +
+// adjacency depend on the exact bounded polygons).
+// =============================================================================================================
 void UVoronoiGenerator2D::ComputeVoronoiCells(const TArray<FVector2D>& Sites, FVoronoiDiagram2D& OutDiagram) const
 {
 	OutDiagram.Cells.Empty();
