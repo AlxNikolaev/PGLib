@@ -85,7 +85,7 @@ class PROCEDURALGEOMETRY_API UProceduralMeshFactory : public UObject
 
 	static bool ValidateInput(const FMeshGenerationParams& Params);
 	static void BuildVertices(const FMeshGenerationParams& Params, TArray<FVector>& BottomVerts, TArray<FVector>& TopVerts);
-	static void ComposeFaceTriangles(const int VertexCount, TArray<int32>& Triangles);
+	static void ComposeFaceTriangles(const TArray<FVector2D>& FoundationVertices, TArray<int32>& Triangles);
 	static void BuildSideGeometry(
 		const TArray<FVector>& BottomVerts, const TArray<FVector>& TopVerts, const FMeshGenerationParams& Params, FMeshData& MeshData);
 	static void CalcNormals(const int VertexCount, FMeshData& MeshData);

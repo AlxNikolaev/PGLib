@@ -221,7 +221,7 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 		bShuffleRoomOrder ? TEXT("true") : TEXT("false"),
 		BranchProbability);
 
-	const float CellSizeVal = static_cast<float>(GridSize);
+	float CellSizeVal = static_cast<float>(GridSize);
 
 	auto MakeEmptyResult = [&]() -> FDrunkardWalkGridData {
 		FDrunkardWalkGridData EmptyResult;
@@ -751,14 +751,89 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 
 	// --- Rasterize signed cells into a final grid sized to actual extents ---
 
-	FIntPoint MinExtent(MAX_int32, MAX_int32);
-	FIntPoint MaxExtent(MIN_int32, MIN_int32);
-	for (const TPair<FIntPoint, uint8>& Pair : CellTypeMap)
+	constexpr int64 MaxCells = 4'194'304;
+
+	auto ComputeExtents = [&](FIntPoint& OutMin, FIntPoint& OutMax) {
+		OutMin = FIntPoint(MAX_int32, MAX_int32);
+		OutMax = FIntPoint(MIN_int32, MIN_int32);
+		for (const TPair<FIntPoint, uint8>& Pair : CellTypeMap)
+		{
+			OutMin.X = FMath::Min(OutMin.X, Pair.Key.X);
+			OutMin.Y = FMath::Min(OutMin.Y, Pair.Key.Y);
+			OutMax.X = FMath::Max(OutMax.X, Pair.Key.X);
+			OutMax.Y = FMath::Max(OutMax.Y, Pair.Key.Y);
+		}
+	};
+
+	FIntPoint MinExtent;
+	FIntPoint MaxExtent;
+	ComputeExtents(MinExtent, MaxExtent);
+
+	if (CellTypeMap.Num() == 0)
 	{
-		MinExtent.X = FMath::Min(MinExtent.X, Pair.Key.X);
-		MinExtent.Y = FMath::Min(MinExtent.Y, Pair.Key.Y);
-		MaxExtent.X = FMath::Max(MaxExtent.X, Pair.Key.X);
-		MaxExtent.Y = FMath::Max(MaxExtent.Y, Pair.Key.Y);
+		UE_LOG(LogRoguelikeGeometry, Warning, TEXT("[DW] No floor cells produced — nothing to generate."));
+		return MakeEmptyResult();
+	}
+
+	bool bDegradedResolution = false;
+
+	// The walk footprint is intrinsic, so we cannot shrink it by retuning bounds. To honor the cell budget we
+	// merge the signed cell map down by an integer factor (combining S*S cells into one) and enlarge the physical
+	// cell size by the same factor, preserving world extents at a coarser resolution.
+	{
+		const int32 Pad = FMath::Max(1, WallThickness);
+		const int64 RawWidth = (MaxExtent.X - MinExtent.X + 1) + 2 * Pad;
+		const int64 RawHeight = (MaxExtent.Y - MinExtent.Y + 1) + 2 * Pad;
+		if (RawWidth * RawHeight > MaxCells)
+		{
+			const int32 DownsampleFactor =
+				FMath::CeilToInt(FMath::Sqrt(static_cast<double>(RawWidth) * static_cast<double>(RawHeight) / static_cast<double>(MaxCells)));
+
+			auto CoarsenCoord = [DownsampleFactor](int32 V) { return FMath::FloorToInt(static_cast<float>(V) / DownsampleFactor); };
+
+			TMap<FIntPoint, uint8> CoarseCellTypeMap;
+			CoarseCellTypeMap.Reserve(CellTypeMap.Num());
+			for (const TPair<FIntPoint, uint8>& Pair : CellTypeMap)
+			{
+				const FIntPoint Coarse(CoarsenCoord(Pair.Key.X), CoarsenCoord(Pair.Key.Y));
+				uint8&			Existing = CoarseCellTypeMap.FindOrAdd(Coarse, Pair.Value);
+				if (Pair.Value == EDrunkardWalkCellType::Room)
+				{
+					Existing = EDrunkardWalkCellType::Room; // Room beats Corridor where they collapse together.
+				}
+			}
+			CellTypeMap = MoveTemp(CoarseCellTypeMap);
+
+			for (FWalkRoom& R : PlacedRoomsSigned)
+			{
+				const int32 MaxX = R.Min.X + R.W - 1;
+				const int32 MaxY = R.Min.Y + R.H - 1;
+				R.Min = FIntPoint(CoarsenCoord(R.Min.X), CoarsenCoord(R.Min.Y));
+				R.W = CoarsenCoord(MaxX) - R.Min.X + 1;
+				R.H = CoarsenCoord(MaxY) - R.Min.Y + 1;
+			}
+
+			for (TArray<FIntPoint>& Poly : CorridorPolylines)
+			{
+				for (FIntPoint& P : Poly)
+				{
+					P = FIntPoint(CoarsenCoord(P.X), CoarsenCoord(P.Y));
+				}
+			}
+
+			CellSizeVal *= DownsampleFactor;
+			bDegradedResolution = true;
+			ComputeExtents(MinExtent, MaxExtent);
+
+			UE_LOG(LogRoguelikeGeometry,
+				Warning,
+				TEXT("[DW] Cell budget exceeded: %lldx%lld would exceed %lld cells; degrading by %dx (CellSize=%.1f)."),
+				RawWidth,
+				RawHeight,
+				MaxCells,
+				DownsampleFactor,
+				CellSizeVal);
+		}
 	}
 
 	const int32		Pad = FMath::Max(1, WallThickness); // outer ring wide enough to hold the walls
@@ -768,9 +843,9 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 
 	UE_LOG(LogRoguelikeGeometry, Log, TEXT("[DW] Grid dimensions: %dx%d (%d total cells)"), GWidth, GHeight, GWidth * GHeight);
 
-	if (GWidth <= 0 || GHeight <= 0 || (int64)GWidth * GHeight > 4'194'304)
+	if (GWidth <= 0 || GHeight <= 0)
 	{
-		UE_LOG(LogRoguelikeGeometry, Error, TEXT("[DW] OOM guard triggered: %dx%d exceeds limit"), GWidth, GHeight);
+		UE_LOG(LogRoguelikeGeometry, Error, TEXT("[DW] Invalid grid dimensions: %dx%d"), GWidth, GHeight);
 		return MakeEmptyResult();
 	}
 
@@ -903,6 +978,7 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 	Result.GridWidth = GWidth;
 	Result.GridHeight = GHeight;
 	Result.CellSize = CellSizeVal;
+	Result.bDegradedResolution = bDegradedResolution;
 	Result.Diagram = MoveTemp(Diagram);
 
 	return Result;

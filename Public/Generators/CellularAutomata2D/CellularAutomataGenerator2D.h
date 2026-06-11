@@ -20,7 +20,8 @@ struct PROCEDURALGEOMETRY_API FCellularAutomataGridData
 	int32					  GridWidth;
 	int32					  GridHeight;
 	float					  CellSize;
-	FLayoutDiagram2D		  Diagram; // The final merged diagram (existing output)
+	bool					  bDegradedResolution = false; // true when cell size was enlarged to fit the cell budget
+	FLayoutDiagram2D		  Diagram;					   // The final merged diagram (existing output)
 };
 
 UCLASS()

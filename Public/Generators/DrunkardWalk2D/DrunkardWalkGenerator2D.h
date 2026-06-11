@@ -45,7 +45,8 @@ struct PROCEDURALGEOMETRY_API FDrunkardWalkGridData
 	int32							GridWidth;
 	int32							GridHeight;
 	float							CellSize;
-	FLayoutDiagram2D				Diagram; // Final output (existing)
+	bool							bDegradedResolution = false; // true when cell size was enlarged to fit the cell budget
+	FLayoutDiagram2D				Diagram;					 // Final output (existing)
 };
 
 UCLASS()

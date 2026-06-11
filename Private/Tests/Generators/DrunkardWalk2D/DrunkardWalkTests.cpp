@@ -121,26 +121,22 @@ bool FDrunkardWalkRoomCountMatchesPlacementTest::RunTest(const FString& Paramete
 }
 
 // ============================================================
-// Test 5: OOM guard — large footprint triggers empty result.
+// Test 5: Cell budget — a large footprint degrades resolution instead of returning empty.
 // A single room with 2500×2500 cell footprint produces a raster grid of
-// roughly 2502×2502 = 6.26M cells, which exceeds the 4,194,304-cell limit.
+// roughly 2502×2502 = 6.26M cells, which exceeds the 4,194,304-cell limit and is
+// downsampled to fit rather than refused.
 // ============================================================
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDrunkardWalkOOMGuardTest, "ProceduralGeometry.DrunkardWalk.OOMGuard", DefaultTestFlags)
 
 bool FDrunkardWalkOOMGuardTest::RunTest(const FString& Parameters)
 {
-	// Large footprint: 2500×2500 grid cells. First room is always placed at origin
-	// regardless of bounds, so grid extent ≈ 2500×2500 ≫ 4M-cell limit.
-	// The generator logs an Error when the guard fires; register it as expected so the
-	// automation framework does not auto-fail the test on the Error-level log.
-	AddExpectedError(TEXT("OOM guard triggered"), EAutomationExpectedErrorFlags::Contains);
-
 	UDrunkardWalkGenerator2D*	Gen = MakeDrunkardGenerator(TEXT("OOMTest"), 1, /*FootprintCells=*/2500);
 	const FDrunkardWalkGridData Data = Gen->GenerateWithGridData();
 
-	TestEqual("OOMGuard: Diagram.Cells.Num() == 0", Data.Diagram.Cells.Num(), 0);
-	TestEqual("OOMGuard: GridWidth == 0", Data.GridWidth, 0);
-	TestEqual("OOMGuard: GridHeight == 0", Data.GridHeight, 0);
+	TestTrue("OOMGuard: degraded resolution flagged", Data.bDegradedResolution);
+	TestTrue("OOMGuard: grid fits the cell budget", (int64)Data.GridWidth * Data.GridHeight <= 4'194'304);
+	TestTrue("OOMGuard: cell size enlarged beyond requested 100", Data.CellSize > 100.0f);
+	TestTrue("OOMGuard: still produces cells", Data.Diagram.Cells.Num() > 0);
 
 	return true;
 }

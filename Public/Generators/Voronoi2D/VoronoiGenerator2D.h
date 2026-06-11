@@ -1,6 +1,6 @@
 ﻿#pragma once
 
-#include "Generators/LayoutGenerator.h"
+#include "CoreMinimal.h"
 #include "VoronoiGenerator2D.generated.h"
 
 USTRUCT()
@@ -92,9 +92,17 @@ namespace VoronoiUtils
 } // namespace VoronoiUtils
 
 UCLASS()
-class PROCEDURALGEOMETRY_API UVoronoiGenerator2D final : public ULayoutGenerator
+class PROCEDURALGEOMETRY_API UVoronoiGenerator2D final : public UObject
 {
 	GENERATED_BODY()
+
+	UPROPERTY()
+	FBox2D Bounds;
+
+	UPROPERTY()
+	FString Seed;
+
+	FRandomStream RandomStream;
 
 	float MinSiteDistance;
 	int32 RelaxationIterations;
@@ -103,10 +111,10 @@ public:
 	UVoronoiGenerator2D();
 
 	// Config
-	virtual UVoronoiGenerator2D* SetBounds(const FBox2D& InBounds) override;
-	virtual UVoronoiGenerator2D* SetSeed(const FString& InSeed) override;
-	UVoronoiGenerator2D*		 SetMinSiteDistance(float Distance);
-	UVoronoiGenerator2D*		 SetRelaxationIterations(int32 Iterations);
+	UVoronoiGenerator2D* SetBounds(const FBox2D& InBounds);
+	UVoronoiGenerator2D* SetSeed(const FString& InSeed);
+	UVoronoiGenerator2D* SetMinSiteDistance(float Distance);
+	UVoronoiGenerator2D* SetRelaxationIterations(int32 Iterations);
 
 	// Generation
 	FVoronoiDiagram2D GenerateFromSites(const TArray<FVector2D>& SiteLocations) const;
@@ -114,9 +122,10 @@ public:
 	FVoronoiDiagram2D GenerateRelaxed(int32 NumSites);
 
 private:
+	void InitializeRandomStream();
+
 	void ComputeVoronoiCells(const TArray<FVector2D>& Sites, FVoronoiDiagram2D& OutDiagram, bool bComputeNeighbors = true) const;
 	void ComputeCellForSite(FVoronoiCell2D& OutCell, int32 SiteIndex, const TArray<FVector2D>& AllSites) const;
 
-	// Helpers
 	void RelaxSites(TArray<FVector2D>& Sites);
 };

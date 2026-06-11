@@ -202,7 +202,7 @@ bool FCellularAutomataKeepCenterTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// Test 8: OOM guard - huge bounds + small GridSize returns empty diagram
+// Test 8: Cell budget — huge bounds + small GridSize degrades resolution instead of returning empty.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCellularAutomataOOMGuardTest, "ProceduralGeometry.CellularAutomata.OOMGuard", DefaultTestFlags)
 
 bool FCellularAutomataOOMGuardTest::RunTest(const FString& Parameters)
@@ -212,9 +212,12 @@ bool FCellularAutomataOOMGuardTest::RunTest(const FString& Parameters)
 	Generator->SetGridSize(10);
 	Generator->SetSeed(TEXT("OOMTest"));
 
-	FLayoutDiagram2D Diagram = Generator->Generate();
+	const FCellularAutomataGridData Data = Generator->GenerateWithGridData();
 
-	TestEqual("OOM guard should produce empty diagram", Diagram.Cells.Num(), 0);
+	TestTrue("Cell budget should flag degraded resolution", Data.bDegradedResolution);
+	TestTrue("Degraded grid should fit the cell budget", (int64)Data.GridWidth * Data.GridHeight <= 4'194'304);
+	TestTrue("Degraded cell size should exceed the requested 10", Data.CellSize > 10.0f);
+	TestTrue("Degraded generation should still produce cells", Data.Diagram.Cells.Num() > 0);
 
 	return true;
 }

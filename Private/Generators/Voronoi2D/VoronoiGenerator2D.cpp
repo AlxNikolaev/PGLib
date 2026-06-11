@@ -164,15 +164,25 @@ UVoronoiGenerator2D::UVoronoiGenerator2D()
 	InitializeRandomStream();
 }
 
+void UVoronoiGenerator2D::InitializeRandomStream()
+{
+	if (Seed.IsEmpty())
+	{
+		Seed = FGuid::NewGuid().ToString(EGuidFormats::Digits);
+	}
+	RandomStream = FRandomStream(GetTypeHash(Seed));
+}
+
 UVoronoiGenerator2D* UVoronoiGenerator2D::SetBounds(const FBox2D& InBounds)
 {
-	Super::SetBounds(InBounds);
+	Bounds = InBounds;
 	return this;
 }
 
 UVoronoiGenerator2D* UVoronoiGenerator2D::SetSeed(const FString& InSeed)
 {
-	Super::SetSeed(InSeed);
+	Seed = InSeed;
+	InitializeRandomStream();
 	return this;
 }
 

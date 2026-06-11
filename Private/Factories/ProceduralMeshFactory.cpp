@@ -38,7 +38,7 @@ bool UProceduralMeshFactory::CreatePrismMesh(const FMeshGenerationParams& Params
 	OutMeshData.Vertices.Append(TopVerts);
 
 	// Order matters!!!
-	ComposeFaceTriangles(VertexCount, OutMeshData.Triangles);
+	ComposeFaceTriangles(Params.FoundationVertices, OutMeshData.Triangles);
 	CalcNormals(VertexCount, OutMeshData);
 	CalcUVs(BottomVerts, TopVerts, Params.UVScale, OutMeshData);
 	BuildSideGeometry(BottomVerts, TopVerts, Params, OutMeshData);
@@ -89,7 +89,14 @@ void UProceduralMeshFactory::BuildSlabSkirtMasks(const TArray<const FVoronoiCell
 		OutMasks[c].SetNumUninitialized(N);
 		for (int32 e = 0; e < N; ++e)
 		{
-			const int32* Count = EdgeUseCount.Find(EdgeKey(Cell->Vertices[e], Cell->Vertices[(e + 1) % N]));
+			const TPair<FIntPoint, FIntPoint> Key = EdgeKey(Cell->Vertices[e], Cell->Vertices[(e + 1) % N]);
+			// A sub-tolerance (degenerate) edge gets no skirt — its quad would be zero-area.
+			if (Key.Key == Key.Value)
+			{
+				OutMasks[c][e] = false;
+				continue;
+			}
+			const int32* Count = EdgeUseCount.Find(Key);
 			OutMasks[c][e] = !Count || *Count <= 1;
 		}
 	}
@@ -150,16 +157,22 @@ void UProceduralMeshFactory::BuildVertices(const FMeshGenerationParams& Params, 
 	}
 }
 
-void UProceduralMeshFactory::ComposeFaceTriangles(const int VertexCount, TArray<int32>& Triangles)
+void UProceduralMeshFactory::ComposeFaceTriangles(const TArray<FVector2D>& FoundationVertices, TArray<int32>& Triangles)
 {
-	for (int32 i = 0; i < VertexCount - 2; ++i)
-	{
-		Triangles.Append({ 0, i + 1, i + 2 });
-	}
-
+	const int32 VertexCount = FoundationVertices.Num();
 	const int32 TopBase = VertexCount;
+
 	for (int32 i = 0; i < VertexCount - 2; ++i)
 	{
+		// Voronoi clipping can emit coincident/collinear polygon vertices; their fan triangles are
+		// degenerate (zero area) and pollute collision cooking — drop them, keep the shared vertices.
+		const FVector2D E1 = FoundationVertices[i + 1] - FoundationVertices[0];
+		const FVector2D E2 = FoundationVertices[i + 2] - FoundationVertices[0];
+		if (FMath::Abs(E1 ^ E2) < 1.0f)
+		{
+			continue;
+		}
+		Triangles.Append({ 0, i + 1, i + 2 });
 		Triangles.Append({ TopBase, TopBase + i + 2, TopBase + i + 1 });
 	}
 }
@@ -182,6 +195,12 @@ void UProceduralMeshFactory::BuildSideGeometry(
 		AccumulatedLength += EdgeLength;
 
 		if (bMaskedSkirts && !Params.EmitSkirtPerEdge[i])
+		{
+			continue;
+		}
+
+		// Degenerate edge (coincident vertices) — its skirt quad would be zero-area.
+		if (EdgeLength < 0.5f)
 		{
 			continue;
 		}

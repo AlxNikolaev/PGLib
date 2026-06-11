@@ -143,25 +143,53 @@ FCellularAutomataGridData UCellularAutomataGenerator2D::GenerateInternal()
 		MinRegionSize,
 		bKeepCenterRegion ? TEXT("true") : TEXT("false"));
 
-	const float CellSizeVal = static_cast<float>(GridSize);
+	constexpr int64 MaxCells = 4'194'304;
+
 	const float BoundsWidth = Bounds.Max.X - Bounds.Min.X;
 	const float BoundsHeight = Bounds.Max.Y - Bounds.Min.Y;
+
+	if (BoundsWidth <= 0.0f || BoundsHeight <= 0.0f)
+	{
+		UE_LOG(LogRoguelikeGeometry, Warning, TEXT("[CA] Invalid bounds (%.1fx%.1f) — nothing to generate."), BoundsWidth, BoundsHeight);
+		FCellularAutomataGridData EmptyResult;
+		EmptyResult.CenterRegionId = -1;
+		EmptyResult.GridWidth = 0;
+		EmptyResult.GridHeight = 0;
+		EmptyResult.CellSize = static_cast<float>(GridSize);
+		return EmptyResult;
+	}
+
+	bool bDegradedResolution = false;
+
+	// Enlarge the cell size so the grid fits the cell budget rather than refusing to generate. Solving
+	// (W/c)(H/c) <= MaxCells for c gives c >= sqrt(W*H / MaxCells).
+	if (static_cast<int64>(FMath::CeilToInt(BoundsWidth / static_cast<float>(GridSize)))
+			* static_cast<int64>(FMath::CeilToInt(BoundsHeight / static_cast<float>(GridSize)))
+		> MaxCells)
+	{
+		const int32	 OriginalGridSize = GridSize;
+		const double MinCellSize = FMath::Sqrt(static_cast<double>(BoundsWidth) * static_cast<double>(BoundsHeight) / static_cast<double>(MaxCells));
+		GridSize = FMath::Max(GridSize, FMath::CeilToInt(MinCellSize));
+		bDegradedResolution = true;
+
+		const int32 DegradedWidth = FMath::CeilToInt(BoundsWidth / static_cast<float>(GridSize));
+		const int32 DegradedHeight = FMath::CeilToInt(BoundsHeight / static_cast<float>(GridSize));
+		UE_LOG(LogRoguelikeGeometry,
+			Warning,
+			TEXT("[CA] Cell budget exceeded: GridSize %d would produce >%lld cells; degrading to GridSize %d (%dx%d)."),
+			OriginalGridSize,
+			MaxCells,
+			GridSize,
+			DegradedWidth,
+			DegradedHeight);
+	}
+
+	const float CellSizeVal = static_cast<float>(GridSize);
 
 	const int32 GWidth = FMath::CeilToInt(BoundsWidth / CellSizeVal);
 	const int32 GHeight = FMath::CeilToInt(BoundsHeight / CellSizeVal);
 
 	UE_LOG(LogRoguelikeGeometry, Log, TEXT("[CA] Grid dimensions: %dx%d (%d total cells)"), GWidth, GHeight, GWidth * GHeight);
-
-	if (GWidth <= 0 || GHeight <= 0 || (int64)GWidth * GHeight > 4'194'304)
-	{
-		UE_LOG(LogRoguelikeGeometry, Warning, TEXT("[CA] OOM guard triggered: %dx%d exceeds limit"), GWidth, GHeight);
-		FCellularAutomataGridData EmptyResult;
-		EmptyResult.CenterRegionId = -1;
-		EmptyResult.GridWidth = 0;
-		EmptyResult.GridHeight = 0;
-		EmptyResult.CellSize = CellSizeVal;
-		return EmptyResult;
-	}
 
 	const int32 TotalCells = GWidth * GHeight;
 
@@ -313,6 +341,7 @@ FCellularAutomataGridData UCellularAutomataGenerator2D::GenerateInternal()
 	Result.GridWidth = GWidth;
 	Result.GridHeight = GHeight;
 	Result.CellSize = CellSizeVal;
+	Result.bDegradedResolution = bDegradedResolution;
 	Result.Diagram = MoveTemp(Diagram);
 
 	return Result;
