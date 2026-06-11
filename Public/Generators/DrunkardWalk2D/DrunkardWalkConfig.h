@@ -6,27 +6,21 @@
 /**
  * A single room type for room-and-corridor generation.
  * Each type contributes Count room instances to the placement queue.
- * Footprint is expressed in grid cells; in the future this will be derived from a
- * prefab room's bounds via ceil(prefabBounds / cellSize) and carry a prefab reference.
+ * Footprint is expressed in grid cells. Callers may extend this struct with an opaque
+ * per-type payload (e.g. a soft reference to type-specific data) without changing the generator.
  */
 USTRUCT(BlueprintType)
 struct PROCEDURALGEOMETRY_API FRoomTypeConfig
 {
 	GENERATED_BODY()
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Room Type", meta = (ToolTip = "Identifier for this room type (e.g. 'Small', 'Boss')."))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Room Type", meta = (ToolTip = "Identifier for this room type."))
 	FName Tag = NAME_None;
 
-	UPROPERTY(EditAnywhere,
-		BlueprintReadWrite,
-		Category = "Room Type",
-		meta = (ClampMin = 1, ToolTip = "Room footprint width in grid cells. Later derived from prefab bounds."))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Room Type", meta = (ClampMin = 1, ToolTip = "Room footprint width in grid cells."))
 	int32 FootprintWidthCells = 4;
 
-	UPROPERTY(EditAnywhere,
-		BlueprintReadWrite,
-		Category = "Room Type",
-		meta = (ClampMin = 1, ToolTip = "Room footprint height in grid cells. Later derived from prefab bounds."))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Room Type", meta = (ClampMin = 1, ToolTip = "Room footprint height in grid cells."))
 	int32 FootprintHeightCells = 4;
 
 	UPROPERTY(EditAnywhere,
@@ -50,8 +44,6 @@ struct PROCEDURALGEOMETRY_API FRoomTypeConfig
 		Category = "Room Type",
 		meta = (ClampMin = 0, ToolTip = "Maximum rooms of this type allowed when distributing a total room budget (ResolveForTotal). 0 = uncapped."))
 	int32 Max = 0;
-
-	// Future: TSoftClassPtr<AActor> / TSoftObjectPtr<UWorld> RoomPrefab — the actual room instance.
 };
 
 /**

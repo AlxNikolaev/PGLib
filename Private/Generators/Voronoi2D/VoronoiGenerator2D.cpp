@@ -73,64 +73,64 @@ int32 FVoronoiDiagram2D::FindCellContainingPoint(const FVector2D& Point) const
 	return INDEX_NONE;
 }
 
-bool FVoronoiDiagram2D::GetSharedEdge(const int32 CellA, const int32 CellB, FVector2D& OutStart, FVector2D& OutEnd) const
+bool VoronoiUtils::GetSharedEdge(
+	const TArray<FVector2D>& VertsA, const TArray<FVector2D>& VertsB, float Tolerance, FVector2D& OutStart, FVector2D& OutEnd)
 {
-	if (!Cells.IsValidIndex(CellA) || !Cells.IsValidIndex(CellB))
-		return false;
-
-	const FVoronoiCell2D& A = Cells[CellA];
-	const FVoronoiCell2D& B = Cells[CellB];
-
-	TArray<FVector2D> SharedVertices;
-	// Scale tolerance relative to diagram bounds — proportional to MaxDimension * 5e-5
-	const float MaxExtent = FMath::Max(Bounds.GetExtent().X, Bounds.GetExtent().Y);
-	const float Tolerance = MaxExtent * 1e-4f;
-
-	for (const FVector2D& VA : A.Vertices)
+	TArray<FVector2D> Shared;
+	for (const FVector2D& VA : VertsA)
 	{
-		for (const FVector2D& VB : B.Vertices)
+		for (const FVector2D& VB : VertsB)
 		{
 			if (FVector2D::Distance(VA, VB) < Tolerance)
 			{
-				SharedVertices.AddUnique(VA);
+				Shared.AddUnique(VA);
 				break;
 			}
 		}
 	}
 
-	if (SharedVertices.Num() >= 2)
+	if (Shared.Num() < 2)
 	{
-		// Pick the two farthest-apart shared vertices — the true edge endpoints. With 3+ near-coincident
-		// shared vertices, [0]/[1] could be an arbitrary, near-degenerate pair.
-		int32 BestI = 0;
-		int32 BestJ = 1;
-		float BestDistSq = -1.0f;
-		for (int32 i = 0; i < SharedVertices.Num(); ++i)
-		{
-			for (int32 j = i + 1; j < SharedVertices.Num(); ++j)
-			{
-				const float DistSq = FVector2D::DistSquared(SharedVertices[i], SharedVertices[j]);
-				if (DistSq > BestDistSq)
-				{
-					BestDistSq = DistSq;
-					BestI = i;
-					BestJ = j;
-				}
-			}
-		}
-
-		// Corner-only contact collapses to a (near) point — not a real shared edge.
-		if (BestDistSq <= Tolerance * Tolerance)
-		{
-			return false;
-		}
-
-		OutStart = SharedVertices[BestI];
-		OutEnd = SharedVertices[BestJ];
-		return true;
+		return false;
 	}
 
-	return false;
+	int32 BestI = 0, BestJ = 1;
+	float BestDistSq = -1.f;
+	for (int32 i = 0; i < Shared.Num(); ++i)
+	{
+		for (int32 j = i + 1; j < Shared.Num(); ++j)
+		{
+			const float D = FVector2D::DistSquared(Shared[i], Shared[j]);
+			if (D > BestDistSq)
+			{
+				BestDistSq = D;
+				BestI = i;
+				BestJ = j;
+			}
+		}
+	}
+
+	if (BestDistSq <= Tolerance * Tolerance)
+	{
+		return false;
+	}
+
+	OutStart = Shared[BestI];
+	OutEnd = Shared[BestJ];
+	return true;
+}
+
+bool FVoronoiDiagram2D::GetSharedEdge(const int32 CellA, const int32 CellB, FVector2D& OutStart, FVector2D& OutEnd) const
+{
+	if (!Cells.IsValidIndex(CellA) || !Cells.IsValidIndex(CellB))
+	{
+		return false;
+	}
+
+	const float MaxExtent = FMath::Max(Bounds.GetExtent().X, Bounds.GetExtent().Y);
+	const float Tolerance = FMath::Max(MaxExtent * 1e-4f, UE_KINDA_SMALL_NUMBER);
+
+	return VoronoiUtils::GetSharedEdge(Cells[CellA].Vertices, Cells[CellB].Vertices, Tolerance, OutStart, OutEnd);
 }
 
 int32 FVoronoiDiagram2D::FindClosestCellBySite(const FVector2D& Point) const
@@ -271,7 +271,7 @@ FVoronoiDiagram2D UVoronoiGenerator2D::GenerateRelaxed(const int32 NumSites)
 // (near-coincident sites collapse — pick a scale with headroom) and clipping correctness (foundation mesh +
 // adjacency depend on the exact bounded polygons).
 // =============================================================================================================
-void UVoronoiGenerator2D::ComputeVoronoiCells(const TArray<FVector2D>& Sites, FVoronoiDiagram2D& OutDiagram) const
+void UVoronoiGenerator2D::ComputeVoronoiCells(const TArray<FVector2D>& Sites, FVoronoiDiagram2D& OutDiagram, bool bComputeNeighbors) const
 {
 	OutDiagram.Cells.Empty();
 	OutDiagram.Cells.Reserve(Sites.Num());
@@ -288,18 +288,16 @@ void UVoronoiGenerator2D::ComputeVoronoiCells(const TArray<FVector2D>& Sites, FV
 		OutDiagram.Cells.Add(Cell);
 	}
 
-	// Build a vertex→cell multimap from the already-computed clip results so neighbor
-	// detection is O(N·V) instead of the previous O(N²·V²) all-pairs scan.
-	//
-	// Two Voronoi cells share an edge iff they share exactly 2 distinct vertex positions
-	// (the two endpoints of that edge).  Corner contacts share only 1 vertex; we exclude
-	// those by requiring a shared-bucket count of at least 2.
+	if (!bComputeNeighbors)
+	{
+		return;
+	}
+
 	{
 		const float MaxExtent = FMath::Max(Bounds.GetExtent().X, Bounds.GetExtent().Y);
 		const float Tolerance = FMath::Max(MaxExtent * 1e-4f, UE_KINDA_SMALL_NUMBER);
-		// Bucket granularity = Tolerance/2.  True floating-point coincidences from the
-		// Sutherland-Hodgman clip are << Tolerance apart and always collapse to the same
-		// bucket; corner contacts land in different buckets (>> Tolerance apart).
+		// Bucket granularity = Tolerance/2 so true clip coincidences (< Tolerance apart) hash
+		// within ±2 buckets of each other; the 3x3 neighborhood probe below catches them all.
 		const double QuantStep = static_cast<double>(Tolerance) * 0.5;
 
 		using FVertKey = TPair<int64, int64>;
@@ -312,38 +310,72 @@ void UVoronoiGenerator2D::ComputeVoronoiCells(const TArray<FVector2D>& Sites, FV
 				continue;
 			for (const FVector2D& V : OutDiagram.Cells[i].Vertices)
 			{
-				const FVertKey Key(static_cast<int64>(FMath::RoundToDouble(static_cast<double>(V.X) / QuantStep)),
-					static_cast<int64>(FMath::RoundToDouble(static_cast<double>(V.Y) / QuantStep)));
-				VertexToCells.FindOrAdd(Key).Add(i);
+				const int64 BX = static_cast<int64>(FMath::RoundToDouble(static_cast<double>(V.X) / QuantStep));
+				const int64 BY = static_cast<int64>(FMath::RoundToDouble(static_cast<double>(V.Y) / QuantStep));
+				VertexToCells.FindOrAdd(FVertKey(BX, BY)).AddUnique(i);
 			}
 		}
 
-		// Tally shared-bucket count per ordered cell pair (Lo < Hi).
-		TMap<TPair<int32, int32>, int32> PairSharedCount;
+		// Tally candidate pairs via exact-bucket sharing first, then probe the 3x3 neighborhood
+		// to catch coincident vertices that straddle a bucket boundary.
+		TSet<TPair<int32, int32>> CandidatePairs;
 		for (auto& [VertKey, CellList] : VertexToCells)
 		{
-			for (int32 a = 0; a < CellList.Num(); ++a)
+			for (int64 dy = -1; dy <= 1; ++dy)
 			{
-				for (int32 b = a + 1; b < CellList.Num(); ++b)
+				for (int64 dx = -1; dx <= 1; ++dx)
 				{
-					const int32 CellA = CellList[a];
-					const int32 CellB = CellList[b];
-					if (CellA == CellB)
-						continue; // same cell appeared twice in this bucket (degenerate vertex)
-					const int32 Lo = FMath::Min(CellA, CellB);
-					const int32 Hi = FMath::Max(CellA, CellB);
-					PairSharedCount.FindOrAdd(TPair<int32, int32>(Lo, Hi))++;
+					const FVertKey		 NeighborKey(VertKey.Key + dx, VertKey.Value + dy);
+					const TArray<int32>* NeighborCells = VertexToCells.Find(NeighborKey);
+					if (!NeighborCells)
+					{
+						continue;
+					}
+					for (const int32 CellA : CellList)
+					{
+						for (const int32 CellB : *NeighborCells)
+						{
+							if (CellA < CellB)
+							{
+								CandidatePairs.Add(TPair<int32, int32>(CellA, CellB));
+							}
+						}
+					}
 				}
 			}
 		}
 
-		// Pairs with 2+ shared vertex buckets share a Voronoi edge → register as neighbors.
-		for (auto& [PairKey, Count] : PairSharedCount)
+		// Verify each candidate pair by counting vertex pairs that are within Tolerance of each
+		// other. Pairs with 2+ coincident vertices share a Voronoi edge; corner-only contacts
+		// share 1 and are excluded.
+		const float ToleranceSq = Tolerance * Tolerance;
+		for (const TPair<int32, int32>& Pair : CandidatePairs)
 		{
-			if (Count >= 2)
+			const FVoronoiCell2D& A = OutDiagram.Cells[Pair.Key];
+			const FVoronoiCell2D& B = OutDiagram.Cells[Pair.Value];
+			int32				  SharedCount = 0;
+			for (const FVector2D& VA : A.Vertices)
 			{
-				OutDiagram.Cells[PairKey.Key].Neighbors.AddUnique(PairKey.Value);
-				OutDiagram.Cells[PairKey.Value].Neighbors.AddUnique(PairKey.Key);
+				for (const FVector2D& VB : B.Vertices)
+				{
+					if (FVector2D::DistSquared(VA, VB) < ToleranceSq)
+					{
+						++SharedCount;
+						if (SharedCount >= 2)
+						{
+							break;
+						}
+					}
+				}
+				if (SharedCount >= 2)
+				{
+					break;
+				}
+			}
+			if (SharedCount >= 2)
+			{
+				OutDiagram.Cells[Pair.Key].Neighbors.AddUnique(Pair.Value);
+				OutDiagram.Cells[Pair.Value].Neighbors.AddUnique(Pair.Key);
 			}
 		}
 	}
@@ -354,6 +386,9 @@ void UVoronoiGenerator2D::ComputeCellForSite(FVoronoiCell2D& OutCell, int32 Site
 	OutCell.SiteLocation = AllSites[SiteIndex];
 	OutCell.CellIndex = SiteIndex;
 
+	TArray<FVector2D> Scratch;
+	Scratch.Reserve(AllSites.Num() + 4);
+
 	for (int32 j = 0; j < AllSites.Num(); ++j)
 	{
 		if (j == SiteIndex)
@@ -362,7 +397,7 @@ void UVoronoiGenerator2D::ComputeCellForSite(FVoronoiCell2D& OutCell, int32 Site
 		const FVector2D MidPoint = (AllSites[SiteIndex] + AllSites[j]) * 0.5f;
 		const FVector2D Normal = (AllSites[j] - AllSites[SiteIndex]).GetSafeNormal();
 
-		if (!FGeometryUtils::ClipPolygonByHalfPlane(OutCell.Vertices, MidPoint, Normal))
+		if (!FGeometryUtils::ClipPolygonByHalfPlane(OutCell.Vertices, Scratch, MidPoint, Normal))
 		{
 			OutCell.bIsValid = false;
 			return;
@@ -388,7 +423,7 @@ void UVoronoiGenerator2D::RelaxSites(TArray<FVector2D>& Sites)
 	TempDiagram.Bounds = Bounds;
 	TempDiagram.Sites = Sites;
 
-	ComputeVoronoiCells(Sites, TempDiagram);
+	ComputeVoronoiCells(Sites, TempDiagram, false);
 
 	if (!ensureMsgf(TempDiagram.Cells.Num() == Sites.Num(),
 			TEXT("[Voronoi] RelaxSites: cell count mismatch — expected %d, got %d; skipping relaxation step"),

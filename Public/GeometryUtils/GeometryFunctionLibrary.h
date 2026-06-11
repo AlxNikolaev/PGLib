@@ -8,7 +8,11 @@ public:
 	static bool SortPlaneVerticesByAngle(const TArray<FVector2D>& InVertices, TArray<FVector2D>& OutSortedVertices);
 	static bool ClipPolygonByHalfPlane(TArray<FVector2D>& OutPolygon, const FVector2D& PlanePoint, const FVector2D& PlaneNormal);
 
-	// Polygon utilities for POI placement
+	/** Overload that reuses Scratch to avoid per-call allocation; Scratch is cleared and swapped each call.
+	 *  Callers that clip many times in a loop should declare a TArray and pass it as Scratch. */
+	static bool ClipPolygonByHalfPlane(
+		TArray<FVector2D>& OutPolygon, TArray<FVector2D>& Scratch, const FVector2D& PlanePoint, const FVector2D& PlaneNormal);
+
 	static bool	 PointInPolygon(const TArray<FVector2D>& PolygonVertices, const FVector2D& Point);
 	static float DistanceToPolygonBoundary(const TArray<FVector2D>& PolygonVertices, const FVector2D& Point);
 	static bool	 MaxInscribedCircle(const TArray<FVector2D>& PolygonVertices, FVector2D& OutCenter, float& OutRadius, float Epsilon = 10.0f);

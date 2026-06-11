@@ -15,8 +15,19 @@ bool UProceduralMeshFactory::CreatePrismMesh(const FMeshGenerationParams& Params
 	OutMeshData.Clear();
 
 	const int32 VertexCount = Params.FoundationVertices.Num();
-	const int32 TotalVertices = VertexCount * 6;
-	const int32 TotalTriangles = ((VertexCount - 2) * 2 + VertexCount * 2) * 3;
+
+	int32 SkirtEdges = VertexCount;
+	if (Params.EmitSkirtPerEdge.Num() == VertexCount)
+	{
+		SkirtEdges = 0;
+		for (const bool bEmit : Params.EmitSkirtPerEdge)
+		{
+			SkirtEdges += bEmit ? 1 : 0;
+		}
+	}
+
+	const int32 TotalVertices = VertexCount * 2 + SkirtEdges * 4;
+	const int32 TotalTriangles = ((VertexCount - 2) * 2 + SkirtEdges * 2) * 3;
 
 	OutMeshData.Reserve(TotalVertices, TotalTriangles);
 
@@ -36,6 +47,54 @@ bool UProceduralMeshFactory::CreatePrismMesh(const FMeshGenerationParams& Params
 	return true;
 }
 
+void UProceduralMeshFactory::BuildSlabSkirtMasks(const TArray<const FVoronoiCell2D*>& SlabCells, TArray<TArray<bool>>& OutMasks)
+{
+	OutMasks.Reset();
+	OutMasks.SetNum(SlabCells.Num());
+
+	constexpr float QuantScale = 1.0f; // 1cm weld tolerance — coincident cell edges share quantized endpoints
+
+	auto QuantizePoint = [](const FVector2D& P) -> FIntPoint {
+		return FIntPoint(FMath::RoundToInt(P.X * QuantScale), FMath::RoundToInt(P.Y * QuantScale));
+	};
+	auto EdgeKey = [&QuantizePoint](const FVector2D& A, const FVector2D& B) -> TPair<FIntPoint, FIntPoint> {
+		const FIntPoint QA = QuantizePoint(A);
+		const FIntPoint QB = QuantizePoint(B);
+		const bool		bAFirst = QA.X < QB.X || (QA.X == QB.X && QA.Y <= QB.Y);
+		return bAFirst ? TPair<FIntPoint, FIntPoint>(QA, QB) : TPair<FIntPoint, FIntPoint>(QB, QA);
+	};
+
+	TMap<TPair<FIntPoint, FIntPoint>, int32> EdgeUseCount;
+	for (const FVoronoiCell2D* Cell : SlabCells)
+	{
+		if (!Cell || Cell->Vertices.Num() < 3)
+		{
+			continue;
+		}
+		const int32 N = Cell->Vertices.Num();
+		for (int32 e = 0; e < N; ++e)
+		{
+			EdgeUseCount.FindOrAdd(EdgeKey(Cell->Vertices[e], Cell->Vertices[(e + 1) % N]), 0)++;
+		}
+	}
+
+	for (int32 c = 0; c < SlabCells.Num(); ++c)
+	{
+		const FVoronoiCell2D* Cell = SlabCells[c];
+		if (!Cell || Cell->Vertices.Num() < 3)
+		{
+			continue;
+		}
+		const int32 N = Cell->Vertices.Num();
+		OutMasks[c].SetNumUninitialized(N);
+		for (int32 e = 0; e < N; ++e)
+		{
+			const int32* Count = EdgeUseCount.Find(EdgeKey(Cell->Vertices[e], Cell->Vertices[(e + 1) % N]));
+			OutMasks[c][e] = !Count || *Count <= 1;
+		}
+	}
+}
+
 bool UProceduralMeshFactory::ValidateInput(const FMeshGenerationParams& Params)
 {
 	if (Params.FoundationVertices.Num() < 3)
@@ -51,6 +110,28 @@ bool UProceduralMeshFactory::ValidateInput(const FMeshGenerationParams& Params)
 	{
 		UE_LOG(LogRoguelikeGeometry, Warning, TEXT("ProceduralMeshGenerator: Invalid height (%f), must be positive"), Params.Height);
 		return false;
+	}
+
+	// Fan triangulation from vertex 0 produces broken geometry for concave polygons. Warn when a
+	// reflex vertex (negative cross product in CCW winding) is detected.
+	{
+		const int32 N = Params.FoundationVertices.Num();
+		for (int32 i = 0; i < N; ++i)
+		{
+			const FVector2D& A = Params.FoundationVertices[(i - 1 + N) % N];
+			const FVector2D& B = Params.FoundationVertices[i];
+			const FVector2D& C = Params.FoundationVertices[(i + 1) % N];
+			const float		 Cross = (B.X - A.X) * (C.Y - B.Y) - (B.Y - A.Y) * (C.X - B.X);
+			if (Cross < -UE_KINDA_SMALL_NUMBER)
+			{
+				UE_LOG(LogRoguelikeGeometry,
+					Warning,
+					TEXT(
+						"ProceduralMeshGenerator: CreatePrismMesh requires a convex CCW polygon; reflex vertex detected at index %d. Cap triangulation will be incorrect."),
+					i);
+				break;
+			}
+		}
 	}
 
 	return true;
@@ -87,19 +168,25 @@ void UProceduralMeshFactory::BuildSideGeometry(
 	const TArray<FVector>& BottomVerts, const TArray<FVector>& TopVerts, const FMeshGenerationParams& Params, FMeshData& MeshData)
 {
 	const int32 VertexCount = BottomVerts.Num();
+	const bool	bMaskedSkirts = Params.EmitSkirtPerEdge.Num() == VertexCount;
 	float		AccumulatedLength = 0.0f;
 	int32		VertexOffset = VertexCount * 2;
 
 	for (int32 i = 0; i < VertexCount; ++i)
 	{
 		const int32 NextIndex = (i + 1) % VertexCount;
-
-		MeshData.Vertices.Append({ BottomVerts[i], BottomVerts[NextIndex], TopVerts[i], TopVerts[NextIndex] });
-
 		const float EdgeLength = FVector2D::Distance(FVector2D(BottomVerts[i]), FVector2D(BottomVerts[NextIndex]));
+
 		const float UStart = AccumulatedLength * Params.UVScale;
 		const float UEnd = (AccumulatedLength + EdgeLength) * Params.UVScale;
 		AccumulatedLength += EdgeLength;
+
+		if (bMaskedSkirts && !Params.EmitSkirtPerEdge[i])
+		{
+			continue;
+		}
+
+		MeshData.Vertices.Append({ BottomVerts[i], BottomVerts[NextIndex], TopVerts[i], TopVerts[NextIndex] });
 
 		MeshData.UVs.Append({ FVector2D(UStart, 0.0f),
 			FVector2D(UEnd, 0.0f),

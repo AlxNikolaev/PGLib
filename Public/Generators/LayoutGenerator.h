@@ -15,24 +15,15 @@ struct PROCEDURALGEOMETRY_API FLayoutCell2D
 	TArray<int32> Neighbors;
 
 	UPROPERTY()
-	FVector2D Center;
+	FVector2D Center = FVector2D::ZeroVector;
 
 	UPROPERTY()
-	int32 CellIndex;
+	int32 CellIndex = -1;
 
 	UPROPERTY()
-	bool bIsOccupied;
+	bool bIsExterior = false;
 
-	UPROPERTY()
-	bool bIsExterior;
-
-	FLayoutCell2D()
-	{
-		CellIndex = -1;
-		Center = FVector2D::ZeroVector;
-		bIsExterior = false;
-		bIsOccupied = false;
-	}
+	FLayoutCell2D() = default;
 };
 
 USTRUCT()
@@ -44,13 +35,13 @@ struct PROCEDURALGEOMETRY_API FLayoutDiagram2D
 	TArray<FLayoutCell2D> Cells;
 
 	UPROPERTY()
-	FBox2D Bounds;
+	FBox2D Bounds = FBox2D(ForceInit);
 
 	UPROPERTY()
-	FVector2D CenterPoint;
+	FVector2D CenterPoint = FVector2D::ZeroVector;
 
 	UPROPERTY()
-	int32 CenterCellIndex;
+	int32 CenterCellIndex = INDEX_NONE;
 
 	UPROPERTY()
 	FString Seed;
@@ -75,6 +66,9 @@ protected:
 	int32 GridSize;
 
 	FRandomStream RandomStream;
+
+private:
+	bool bCenterSet = false;
 
 public:
 	ULayoutGenerator();

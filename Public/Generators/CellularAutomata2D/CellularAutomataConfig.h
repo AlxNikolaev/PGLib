@@ -7,21 +7,21 @@
 UENUM(BlueprintType)
 enum class ECaveStyle : uint8
 {
-	OpenChambers UMETA(DisplayName = "Open Chambers", ToolTip = "Large open areas with few walls. Best for boss arenas or hub rooms."),
+	OpenChambers UMETA(DisplayName = "Open Chambers", ToolTip = "Large open areas with few walls. High floor-to-wall ratio."),
 	NaturalCaves UMETA(DisplayName = "Natural Caves", ToolTip = "Organic caverns with smooth walls. Good general-purpose cave style."),
-	DenseCaverns UMETA(DisplayName = "Dense Caverns", ToolTip = "Moderate density with connected chambers. Balanced exploration feel."),
-	TightTunnels UMETA(DisplayName = "Tight Tunnels", ToolTip = "Narrow passages with maze-like connectivity. High tactical density."),
-	SwissCheese	 UMETA(DisplayName = "Swiss Cheese", ToolTip = "Many small isolated pockets. Fragmented layout, use with corridor carving."),
+	DenseCaverns UMETA(DisplayName = "Dense Caverns", ToolTip = "Moderate density with connected chambers. Balanced layout."),
+	TightTunnels UMETA(DisplayName = "Tight Tunnels", ToolTip = "Narrow passages with maze-like connectivity."),
+	SwissCheese	 UMETA(DisplayName = "Swiss Cheese", ToolTip = "Many small isolated pockets. Use with corridor carving to reconnect regions."),
 };
 
 /** Controls grid cell density and minimum region size for cave generation. */
 UENUM(BlueprintType)
 enum class ECaveRegionScale : uint8
 {
-	Small	UMETA(DisplayName = "Small", ToolTip = "Grid density 5x, min region 10 cells. Coarse features, fast generation."),
-	Medium	UMETA(DisplayName = "Medium", ToolTip = "Grid density 10x, min region 30 cells. Balanced detail and performance."),
-	Large	UMETA(DisplayName = "Large", ToolTip = "Grid density 15x, min region 60 cells. Fine detail, more cells."),
-	Massive UMETA(DisplayName = "Massive", ToolTip = "Grid density 20x, min region 100 cells. Maximum detail, slower generation."),
+	Small	UMETA(DisplayName = "Small", ToolTip = "Grid density multiplier 5, min region 10 cells. Coarse features, fast generation."),
+	Medium	UMETA(DisplayName = "Medium", ToolTip = "Grid density multiplier 10, min region 30 cells. Balanced detail and performance."),
+	Large	UMETA(DisplayName = "Large", ToolTip = "Grid density multiplier 15, min region 60 cells. Fine detail, more cells."),
+	Massive UMETA(DisplayName = "Massive", ToolTip = "Grid density multiplier 20, min region 100 cells. Maximum detail, slower generation."),
 };
 
 /**
@@ -149,7 +149,7 @@ struct PROCEDURALGEOMETRY_API FCellularAutomataConfig
 		meta = (EditCondition = "bUseAdvancedOverride",
 			ClampMin = 1,
 			ClampMax = 30,
-			ToolTip = "Grid density multiplier. CellSize = ZoneSize / this value. Higher = finer grid."))
+			ToolTip = "Grid density multiplier. CellSize = BoundsExtent / this value. Higher = finer grid, slower generation."))
 	int32 AdvancedGridDensityMultiplier = 10;
 
 	UPROPERTY(EditAnywhere,
@@ -160,18 +160,18 @@ struct PROCEDURALGEOMETRY_API FCellularAutomataConfig
 			ToolTip = "Regions with fewer cells than this are culled (unless center region is kept)."))
 	int32 AdvancedMinRegionSize = 20;
 
-	// --- Corridor carving (future feature — declared now, consumed in a later task) ---
+	// --- Corridor carving ---
 
 	UPROPERTY(EditAnywhere,
 		BlueprintReadWrite,
 		Category = "Cave Generation|Corridors",
-		meta = (ClampMin = 0.0, ClampMax = 1.0, ToolTip = "[Future] Probability of carving corridors between disconnected regions. 0 = off."))
+		meta = (ClampMin = 0.0, ClampMax = 1.0, ToolTip = "Probability of carving corridors between disconnected regions. 0 = off."))
 	float CorridorProbability = 0.0f;
 
 	UPROPERTY(EditAnywhere,
 		BlueprintReadWrite,
 		Category = "Cave Generation|Corridors",
-		meta = (ClampMin = 1, ClampMax = 5, ToolTip = "[Future] Width of carved corridors in grid cells."))
+		meta = (ClampMin = 1, ClampMax = 5, ToolTip = "Width of carved corridors in grid cells."))
 	int32 CorridorWidth = 2;
 
 	/** Resolves semantic parameters into raw CA parameters for the generator. Pure function, no side effects. */

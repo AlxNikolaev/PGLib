@@ -12,12 +12,7 @@ public class ProceduralGeometry : ModuleRules
 
         PublicDependencyModuleNames.AddRange(
             [
-                "Core"
-            ]
-        );
-
-        PrivateDependencyModuleNames.AddRange(
-            [
+                "Core",
                 "CoreUObject",
                 "Engine",
                 "ProceduralMeshComponent"

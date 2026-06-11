@@ -84,12 +84,11 @@ void ADrunkardWalk2DVisualizer::OnConstruction(const FTransform& Transform)
 		return;
 	}
 
-	const float	  CS = GridData.CellSize;
-	const FBox2D& B = Bounds;
-	int32		  SectionIndex = 0;
+	const float	 CS = GridData.CellSize;
+	const FBox2D B = GridData.Diagram.Bounds;
+	int32		 SectionIndex = 0;
 
-	// ProceduralMeshComponent vertices are in LOCAL space (relative to actor).
-	// Bounds are in world space, so offset all mesh vertices by the actor's position.
+	// ProceduralMeshComponent vertices are local-space; B is world-space, so rebase to the actor origin.
 	const FVector ActorLoc = GetActorLocation();
 	const FBox2D  LocalBounds(B.Min - FVector2D(ActorLoc.X, ActorLoc.Y), B.Max - FVector2D(ActorLoc.X, ActorLoc.Y));
 

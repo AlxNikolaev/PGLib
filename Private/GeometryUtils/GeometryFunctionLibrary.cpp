@@ -28,14 +28,22 @@ bool FGeometryUtils::SortPlaneVerticesByAngle(const TArray<FVector2D>& InVertice
 
 bool FGeometryUtils::ClipPolygonByHalfPlane(TArray<FVector2D>& OutPolygon, const FVector2D& PlanePoint, const FVector2D& PlaneNormal)
 {
+	TArray<FVector2D> Scratch;
+	return ClipPolygonByHalfPlane(OutPolygon, Scratch, PlanePoint, PlaneNormal);
+}
+
+bool FGeometryUtils::ClipPolygonByHalfPlane(
+	TArray<FVector2D>& OutPolygon, TArray<FVector2D>& Scratch, const FVector2D& PlanePoint, const FVector2D& PlaneNormal)
+{
 	if (OutPolygon.Num() == 0)
 	{
 		return false;
 	}
 
-	TArray<FVector2D> Result;
-	FVector2D		  Prev = OutPolygon.Last();
-	double			  PrevSide = FVector2D::DotProduct(Prev - PlanePoint, PlaneNormal);
+	Scratch.Reset();
+
+	FVector2D Prev = OutPolygon.Last();
+	double	  PrevSide = FVector2D::DotProduct(Prev - PlanePoint, PlaneNormal);
 
 	auto SafeAlpha = [](double InPrevSide, double InCurrSide) -> double {
 		double Denominator = InPrevSide - InCurrSide;
@@ -52,29 +60,27 @@ bool FGeometryUtils::ClipPolygonByHalfPlane(TArray<FVector2D>& OutPolygon, const
 
 		if (PrevSide <= 0.0 && CurrSide <= 0.0)
 		{
-			Result.Add(Curr);
+			Scratch.Add(Curr);
 		}
 		else if (PrevSide <= 0.0 && CurrSide > 0.0)
 		{
 			double Alpha = SafeAlpha(PrevSide, CurrSide);
-			Result.Add(FMath::Lerp(Prev, Curr, Alpha));
+			Scratch.Add(FMath::Lerp(Prev, Curr, Alpha));
 		}
 		else if (PrevSide > 0.0 && CurrSide <= 0.0)
 		{
 			double Alpha = SafeAlpha(PrevSide, CurrSide);
-			Result.Add(FMath::Lerp(Prev, Curr, Alpha));
-			Result.Add(Curr);
+			Scratch.Add(FMath::Lerp(Prev, Curr, Alpha));
+			Scratch.Add(Curr);
 		}
 
 		Prev = Curr;
 		PrevSide = CurrSide;
 	}
 
-	OutPolygon = Result;
+	Swap(OutPolygon, Scratch);
 	return OutPolygon.Num() >= 3;
 }
-
-// Polygon utilities for POI placement
 
 bool FGeometryUtils::PointInPolygon(const TArray<FVector2D>& PolygonVertices, const FVector2D& Point)
 {

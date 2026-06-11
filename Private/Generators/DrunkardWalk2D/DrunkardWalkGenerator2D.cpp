@@ -414,8 +414,10 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 				CurBandSet.Add(C);
 			}
 
-			// Reject if the new band comes within one cell of an earlier (non-adjacent) part of this
-			// corridor — that is the blob case. Touching the previous band (contiguity/corner) is allowed.
+			// Reject if the new band folds onto itself or overlaps pending geometry from earlier
+			// corridors/rooms in this attempt (prevents fork corridors from plowing through
+			// the main corridor or pending rooms). The 1-cell margin is checked around each
+			// band cell; the previous band and current band cells are exempt (contiguity is ok).
 			for (const FIntPoint& C : Band)
 			{
 				for (int32 ny = -1; ny <= 1; ++ny)
@@ -430,6 +432,11 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 						if (SelfSet.Contains(N))
 						{
 							++StatRejectSelfTouch;
+							return false;
+						}
+						if (PendingCellSet.Contains(N))
+						{
+							++StatRejectClearance;
 							return false;
 						}
 					}
@@ -867,12 +874,16 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 		Regions.Num(),
 		CenterRegionId);
 
-	// Position the diagram so the first room's center maps to CenterPoint, and Bounds reflects true extents.
-	const float MinXWorld = CenterPoint.X - (CenterX + 0.5f) * CellSizeVal;
-	const float MinYWorld = CenterPoint.Y - (CenterY + 0.5f) * CellSizeVal;
-	Bounds = FBox2D(FVector2D(MinXWorld, MinYWorld), FVector2D(MinXWorld + GWidth * CellSizeVal, MinYWorld + GHeight * CellSizeVal));
+	const float	 MinXWorld = CenterPoint.X - (CenterX + 0.5f) * CellSizeVal;
+	const float	 MinYWorld = CenterPoint.Y - (CenterY + 0.5f) * CellSizeVal;
+	const FBox2D OutputBounds(FVector2D(MinXWorld, MinYWorld), FVector2D(MinXWorld + GWidth * CellSizeVal, MinYWorld + GHeight * CellSizeVal));
 
+	// ConvertGridToDiagram uses the inherited Bounds for world-space vertex positions; set it to the
+	// output frame for that call, then restore so Generate() does not mutate caller-configured state.
+	const FBox2D SavedBounds = Bounds;
+	Bounds = OutputBounds;
 	FLayoutDiagram2D Diagram = ConvertGridToDiagram(Grid, GWidth, GHeight);
+	Bounds = SavedBounds;
 
 	const double ElapsedMs = (FPlatformTime::Seconds() - StartTime) * 1000.0;
 	UE_LOG(LogRoguelikeGeometry, Log, TEXT("[DW] Generate() complete: %d cells in %.2fms"), Diagram.Cells.Num(), ElapsedMs);

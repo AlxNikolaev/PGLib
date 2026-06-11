@@ -58,7 +58,7 @@ struct PROCEDURALGEOMETRY_API FVoronoiDiagram2D
 	TArray<FVoronoiCell2D> Cells;
 
 	UPROPERTY()
-	FBox2D Bounds;
+	FBox2D Bounds = FBox2D(ForceInit);
 
 	UPROPERTY()
 	TArray<FVector2D> Sites;
@@ -73,6 +73,23 @@ struct PROCEDURALGEOMETRY_API FVoronoiDiagram2D
 	bool  GetSharedEdge(int32 CellA, int32 CellB, FVector2D& OutStart, FVector2D& OutEnd) const;
 	int32 FindClosestCellBySite(const FVector2D& Point) const;
 };
+
+/**
+ * Shared-edge utilities used by both FVoronoiDiagram2D and the runtime FVoronoiGridDiagram.
+ * The tolerance must be pre-computed by the caller from its own bounds or grid cell size.
+ */
+namespace VoronoiUtils
+{
+	/**
+	 * Finds the shared edge between two Voronoi cells given their vertex lists.
+	 * Returns true (and fills OutStart/OutEnd) when the cells share at least two coincident
+	 * vertices within Tolerance that are farther apart than a corner-only contact.
+	 * Tolerance: caller-supplied, derived from Max(MaxExtent*1e-4, UE_KINDA_SMALL_NUMBER) for
+	 * diagram-relative scales, or from GridCellSize*1e-3 for grid-relative scales.
+	 */
+	PROCEDURALGEOMETRY_API bool GetSharedEdge(
+		const TArray<FVector2D>& VertsA, const TArray<FVector2D>& VertsB, float Tolerance, FVector2D& OutStart, FVector2D& OutEnd);
+} // namespace VoronoiUtils
 
 UCLASS()
 class PROCEDURALGEOMETRY_API UVoronoiGenerator2D final : public ULayoutGenerator
@@ -97,7 +114,7 @@ public:
 	FVoronoiDiagram2D GenerateRelaxed(int32 NumSites);
 
 private:
-	void ComputeVoronoiCells(const TArray<FVector2D>& Sites, FVoronoiDiagram2D& OutDiagram) const;
+	void ComputeVoronoiCells(const TArray<FVector2D>& Sites, FVoronoiDiagram2D& OutDiagram, bool bComputeNeighbors = true) const;
 	void ComputeCellForSite(FVoronoiCell2D& OutCell, int32 SiteIndex, const TArray<FVector2D>& AllSites) const;
 
 	// Helpers

@@ -10,7 +10,7 @@ ULayoutGenerator::ULayoutGenerator()
 ULayoutGenerator* ULayoutGenerator::SetBounds(const FBox2D& InBounds)
 {
 	Bounds = InBounds;
-	if (CenterPoint == FVector2D::ZeroVector)
+	if (!bCenterSet)
 	{
 		CenterPoint = Bounds.GetCenter();
 	}
@@ -20,6 +20,7 @@ ULayoutGenerator* ULayoutGenerator::SetBounds(const FBox2D& InBounds)
 ULayoutGenerator* ULayoutGenerator::SetCenter(const FVector2D& InCenter)
 {
 	CenterPoint = InCenter;
+	bCenterSet = true;
 	return this;
 }
 

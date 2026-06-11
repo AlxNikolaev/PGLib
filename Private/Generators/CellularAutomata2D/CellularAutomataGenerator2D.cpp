@@ -152,10 +152,9 @@ FCellularAutomataGridData UCellularAutomataGenerator2D::GenerateInternal()
 
 	UE_LOG(LogRoguelikeGeometry, Log, TEXT("[CA] Grid dimensions: %dx%d (%d total cells)"), GWidth, GHeight, GWidth * GHeight);
 
-	// OOM guard
 	if (GWidth <= 0 || GHeight <= 0 || (int64)GWidth * GHeight > 4'194'304)
 	{
-		UE_LOG(LogRoguelikeGeometry, Error, TEXT("[CA] OOM guard triggered: %dx%d exceeds limit"), GWidth, GHeight);
+		UE_LOG(LogRoguelikeGeometry, Warning, TEXT("[CA] OOM guard triggered: %dx%d exceeds limit"), GWidth, GHeight);
 		FCellularAutomataGridData EmptyResult;
 		EmptyResult.CenterRegionId = -1;
 		EmptyResult.GridWidth = 0;
@@ -166,7 +165,6 @@ FCellularAutomataGridData UCellularAutomataGenerator2D::GenerateInternal()
 
 	const int32 TotalCells = GWidth * GHeight;
 
-	// Initialize grid: true = floor, false = wall
 	TArray<bool> Grid;
 	Grid.Init(false, TotalCells);
 
@@ -174,17 +172,14 @@ FCellularAutomataGridData UCellularAutomataGenerator2D::GenerateInternal()
 	{
 		for (int32 X = 0; X < GWidth; ++X)
 		{
-			// Boundary cells are always walls
 			if (X == 0 || X == GWidth - 1 || Y == 0 || Y == GHeight - 1)
 			{
 				continue;
 			}
-			// Floor if random value exceeds fill probability (fill = wall probability)
 			Grid[Y * GWidth + X] = (RandomStream.FRand() >= FillProbability);
 		}
 	}
 
-	// CA iterations with double buffer
 	const uint16 BirthMask = RuleToBitmask(BirthRule);
 	const uint16 SurvivalMask = RuleToBitmask(SurvivalRule);
 
@@ -199,7 +194,6 @@ FCellularAutomataGridData UCellularAutomataGenerator2D::GenerateInternal()
 			{
 				const int32 Index = Y * GWidth + X;
 
-				// Boundary cells stay walls
 				if (X == 0 || X == GWidth - 1 || Y == 0 || Y == GHeight - 1)
 				{
 					NewGrid[Index] = false;
@@ -211,12 +205,10 @@ FCellularAutomataGridData UCellularAutomataGenerator2D::GenerateInternal()
 
 				if (bIsWall)
 				{
-					// Wall stays wall if survival rule matches
 					NewGrid[Index] = ((SurvivalMask >> WallNeighbors) & 1) ? false : true;
 				}
 				else
 				{
-					// Floor becomes wall if birth rule matches
 					NewGrid[Index] = ((BirthMask >> WallNeighbors) & 1) ? false : true;
 				}
 			}
@@ -225,7 +217,6 @@ FCellularAutomataGridData UCellularAutomataGenerator2D::GenerateInternal()
 		Swap(Grid, NewGrid);
 	}
 
-	// Count floor cells after CA iterations
 	{
 		int32 FloorCount = 0;
 		for (bool bIsFloor : Grid)
@@ -243,7 +234,6 @@ FCellularAutomataGridData UCellularAutomataGenerator2D::GenerateInternal()
 			100.0f * FloorCount / TotalCells);
 	}
 
-	// Flood-fill: identify connected floor regions
 	TArray<int32>			  RegionIds;
 	TArray<TArray<FIntPoint>> Regions;
 	int32					  CenterRegionId = -1;
@@ -254,11 +244,35 @@ FCellularAutomataGridData UCellularAutomataGenerator2D::GenerateInternal()
 
 	UE_LOG(LogRoguelikeGeometry, Log, TEXT("[CA] Flood-fill found %d regions, center region=%d"), Regions.Num(), CenterRegionId);
 
-	// Build SurvivingRegions array before culling
+	// When bKeepCenterRegion is set but the exact center cell is a wall, fall back to the region
+	// nearest the center so culling always has a target to preserve.
+	if (bKeepCenterRegion && CenterRegionId < 0 && Regions.Num() > 0)
+	{
+		const FVector2D CenterWorld(
+			Bounds.Min.X + (CenterX + 0.5f) * static_cast<float>(GridSize), Bounds.Min.Y + (CenterY + 0.5f) * static_cast<float>(GridSize));
+		float BestDistSq = FLT_MAX;
+		int32 BestRegion = 0;
+		for (int32 RegionId = 0; RegionId < Regions.Num(); ++RegionId)
+		{
+			for (const FIntPoint& Cell : Regions[RegionId])
+			{
+				const FVector2D CellWorld(
+					Bounds.Min.X + (Cell.X + 0.5f) * static_cast<float>(GridSize), Bounds.Min.Y + (Cell.Y + 0.5f) * static_cast<float>(GridSize));
+				const float DistSq = FVector2D::DistSquared(CellWorld, CenterWorld);
+				if (DistSq < BestDistSq)
+				{
+					BestDistSq = DistSq;
+					BestRegion = RegionId;
+				}
+			}
+		}
+		CenterRegionId = BestRegion;
+		UE_LOG(LogRoguelikeGeometry, Log, TEXT("[CA] Center cell is wall — KeepCenterRegion fallback to nearest region %d"), CenterRegionId);
+	}
+
 	TArray<bool> SurvivingRegions;
 	SurvivingRegions.Init(true, Regions.Num());
 
-	// Cull small regions
 	int32 CulledCount = 0;
 	for (int32 RegionId = 0; RegionId < Regions.Num(); ++RegionId)
 	{
@@ -480,6 +494,15 @@ void UCellularAutomataGenerator2D::RebuildDiagram(FCellularAutomataGridData& Gri
 		TEXT("[CA] RebuildDiagram: rebuilding diagram from modified grid (%dx%d)"),
 		GridData.GridWidth,
 		GridData.GridHeight);
+
+	const int32 CenterX = GridData.GridWidth / 2;
+	const int32 CenterY = GridData.GridHeight / 2;
+
+	int32 NewCenterRegionId = -1;
+	FloodFillRegions(
+		GridData.Grid, GridData.GridWidth, GridData.GridHeight, CenterX, CenterY, GridData.RegionIds, GridData.Regions, NewCenterRegionId);
+
+	GridData.CenterRegionId = NewCenterRegionId;
 
 	GridData.Diagram = BuildDiagramFromRegions(
 		GridData.Grid, GridData.RegionIds, GridData.Regions, GridData.CenterRegionId, GridData.GridWidth, GridData.GridHeight);
