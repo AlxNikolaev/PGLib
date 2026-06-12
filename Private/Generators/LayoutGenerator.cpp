@@ -1,5 +1,7 @@
 ﻿#include "Generators/LayoutGenerator.h"
 
+#include "SeedHashing.h"
+
 ULayoutGenerator::ULayoutGenerator()
 {
 	Bounds = FBox2D();
@@ -43,7 +45,7 @@ void ULayoutGenerator::InitializeRandomStream()
 	{
 		Seed = FGuid::NewGuid().ToString(EGuidFormats::Digits);
 	}
-	RandomStream = FRandomStream(GetTypeHash(Seed));
+	RandomStream = FRandomStream(static_cast<int32>(PGSeed::HashSeedString(Seed)));
 }
 
 FVector2D ULayoutGenerator::ClampToBounds(const FVector2D& Point) const

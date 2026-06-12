@@ -148,15 +148,29 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FCellularAutomataGridDataCullingTest::RunTest(const FString& Parameters)
 {
-	UCellularAutomataGenerator2D* Generator = NewObject<UCellularAutomataGenerator2D>();
-	Generator->SetBounds(FBox2D(FVector2D(-500, -500), FVector2D(500, 500)));
-	Generator->SetSeed(TEXT("CullingTest"));
-	Generator->SetMinRegionSize(10000);
-	Generator->SetKeepCenterRegion(true);
+	// Whether a given seed's cave splits into multiple regions is an emergent property — search a fixed
+	// seed family for a multi-region layout instead of pinning one seed's output, so the assertions stay
+	// meaningful across deliberate seeding changes.
+	FCellularAutomataGridData GridData;
+	bool					  bFoundMultiRegion = false;
+	for (int32 SeedIdx = 0; SeedIdx < 16 && !bFoundMultiRegion; ++SeedIdx)
+	{
+		UCellularAutomataGenerator2D* Generator = NewObject<UCellularAutomataGenerator2D>();
+		Generator->SetBounds(FBox2D(FVector2D(-500, -500), FVector2D(500, 500)));
+		Generator->SetSeed(FString::Printf(TEXT("CullingTest_%d"), SeedIdx));
+		Generator->SetMinRegionSize(10000);
+		Generator->SetKeepCenterRegion(true);
 
-	FCellularAutomataGridData GridData = Generator->GenerateWithGridData();
+		GridData = Generator->GenerateWithGridData();
+		bFoundMultiRegion = GridData.SurvivingRegions.Num() > 1;
+	}
 
-	// At least one region should have been culled with such a high MinRegionSize
+	if (!TestTrue("Found a multi-region cave within the seed family (generator does not collapse everything to one region)", bFoundMultiRegion))
+	{
+		return false;
+	}
+
+	// MinRegionSize=10000 exceeds any region in a ~50x50 grid, so every non-center region must be culled.
 	bool bHasCulledRegion = false;
 	for (int32 r = 0; r < GridData.SurvivingRegions.Num(); ++r)
 	{

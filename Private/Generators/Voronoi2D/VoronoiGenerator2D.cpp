@@ -4,6 +4,7 @@
 #endif
 #include "GeometryUtils/GeometryFunctionLibrary.h"
 #include "ProceduralGeometry.h"
+#include "SeedHashing.h"
 
 float FVoronoiCell2D::GetArea() const
 {
@@ -170,7 +171,7 @@ void UVoronoiGenerator2D::InitializeRandomStream()
 	{
 		Seed = FGuid::NewGuid().ToString(EGuidFormats::Digits);
 	}
-	RandomStream = FRandomStream(GetTypeHash(Seed));
+	RandomStream = FRandomStream(static_cast<int32>(PGSeed::HashSeedString(Seed)));
 }
 
 UVoronoiGenerator2D* UVoronoiGenerator2D::SetBounds(const FBox2D& InBounds)
