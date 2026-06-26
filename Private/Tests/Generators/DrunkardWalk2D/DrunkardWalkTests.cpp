@@ -62,6 +62,41 @@ bool FDrunkardWalkDeterminismTest::RunTest(const FString& Parameters)
 	{
 		TestEqual(FString::Printf(TEXT("Determinism: PlacedRoom[%d].Min.X"), i), Data1.PlacedRooms[i].Min.X, Data2.PlacedRooms[i].Min.X);
 		TestEqual(FString::Printf(TEXT("Determinism: PlacedRoom[%d].Min.Y"), i), Data1.PlacedRooms[i].Min.Y, Data2.PlacedRooms[i].Min.Y);
+		TestEqual(FString::Printf(TEXT("Determinism: PlacedRoom[%d].Width"), i), Data1.PlacedRooms[i].Width, Data2.PlacedRooms[i].Width);
+		TestEqual(FString::Printf(TEXT("Determinism: PlacedRoom[%d].Height"), i), Data1.PlacedRooms[i].Height, Data2.PlacedRooms[i].Height);
+	}
+
+	// Counts matching is necessary but not sufficient: assert identical geometry cell-for-cell so the
+	// strongest seed-stability invariant (same seed -> same layout) is verified, not just container sizes.
+	TestEqual("Determinism: Grid size matches", Data1.Grid.Num(), Data2.Grid.Num());
+	TestEqual("Determinism: CellType size matches", Data1.CellType.Num(), Data2.CellType.Num());
+
+	if (Data1.Grid.Num() == Data2.Grid.Num())
+	{
+		bool bGridMatches = true;
+		for (int32 i = 0; i < Data1.Grid.Num() && bGridMatches; ++i)
+		{
+			if (Data1.Grid[i] != Data2.Grid[i])
+			{
+				bGridMatches = false;
+				AddError(FString::Printf(TEXT("Determinism: Grid differs at cell %d"), i));
+			}
+		}
+		TestTrue("Determinism: Grid matches cell-for-cell", bGridMatches);
+	}
+
+	if (Data1.CellType.Num() == Data2.CellType.Num())
+	{
+		bool bCellTypeMatches = true;
+		for (int32 i = 0; i < Data1.CellType.Num() && bCellTypeMatches; ++i)
+		{
+			if (Data1.CellType[i] != Data2.CellType[i])
+			{
+				bCellTypeMatches = false;
+				AddError(FString::Printf(TEXT("Determinism: CellType differs at cell %d"), i));
+			}
+		}
+		TestTrue("Determinism: CellType matches cell-for-cell", bCellTypeMatches);
 	}
 
 	return true;

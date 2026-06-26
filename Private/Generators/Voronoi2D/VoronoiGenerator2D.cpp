@@ -11,14 +11,16 @@ float FVoronoiCell2D::GetArea() const
 	if (Vertices.Num() < 3)
 		return 0.0f;
 
-	float Area = 0.0f;
+	// Accumulate the shoelace sum in double to avoid float cancellation at fine substrate scale,
+	// mirroring the precision used by the clipping pipeline; return float only at the end.
+	double Area = 0.0;
 	for (int32 i = 0; i < Vertices.Num(); ++i)
 	{
 		const FVector2D& V1 = Vertices[i];
 		const FVector2D& V2 = Vertices[(i + 1) % Vertices.Num()];
-		Area += V1.X * V2.Y - V2.X * V1.Y;
+		Area += double(V1.X) * V2.Y - double(V2.X) * V1.Y;
 	}
-	return FMath::Abs(Area) * 0.5f;
+	return static_cast<float>(FMath::Abs(Area) * 0.5);
 }
 
 FVector2D FVoronoiCell2D::GetCentroid() const
@@ -407,6 +409,13 @@ void UVoronoiGenerator2D::ComputeCellForSite(FVoronoiCell2D& OutCell, int32 Site
 
 		const FVector2D MidPoint = (AllSites[SiteIndex] + AllSites[j]) * 0.5f;
 		const FVector2D Normal = (AllSites[j] - AllSites[SiteIndex]).GetSafeNormal();
+
+		// Coincident sites yield a zero-length normal; the perpendicular bisector is undefined, so the
+		// half-plane clip would be a no-op that leaves two overlapping degenerate cells. Skip it.
+		if (Normal.IsNearlyZero())
+		{
+			continue;
+		}
 
 		if (!FGeometryUtils::ClipPolygonByHalfPlane(OutCell.Vertices, Scratch, MidPoint, Normal))
 		{

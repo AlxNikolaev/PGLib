@@ -102,8 +102,9 @@ bool FGeometryUtils::PointInPolygon(const TArray<FVector2D>& PolygonVertices, co
 		{
 			if (V2.Y > Point.Y) // Upward crossing
 			{
-				const float CrossProduct = (V2.X - V1.X) * (Point.Y - V1.Y) - (V2.Y - V1.Y) * (Point.X - V1.X);
-				if (CrossProduct > 0) // Point is left of edge
+				// Cross product in double to match the clipping pipeline and stay consistent on near-collinear edges.
+				const double CrossProduct = (double(V2.X) - V1.X) * (double(Point.Y) - V1.Y) - (double(V2.Y) - V1.Y) * (double(Point.X) - V1.X);
+				if (CrossProduct > 0.0) // Point is left of edge
 				{
 					++WindingNumber;
 				}
@@ -113,8 +114,9 @@ bool FGeometryUtils::PointInPolygon(const TArray<FVector2D>& PolygonVertices, co
 		{
 			if (V2.Y <= Point.Y) // Downward crossing
 			{
-				const float CrossProduct = (V2.X - V1.X) * (Point.Y - V1.Y) - (V2.Y - V1.Y) * (Point.X - V1.X);
-				if (CrossProduct < 0) // Point is right of edge
+				// Cross product in double to match the clipping pipeline and stay consistent on near-collinear edges.
+				const double CrossProduct = (double(V2.X) - V1.X) * (double(Point.Y) - V1.Y) - (double(V2.Y) - V1.Y) * (double(Point.X) - V1.X);
+				if (CrossProduct < 0.0) // Point is right of edge
 				{
 					--WindingNumber;
 				}
@@ -604,7 +606,10 @@ void FGeometryUtils::OffsetPolylineToRibbon(const TArray<FVector2D>& Polyline, c
 	Nrm[N - 1] = SegNormal(N - 2, N - 1);
 	for (int32 i = 1; i < N - 1; ++i)
 	{
-		Nrm[i] = (SegNormal(i - 1, i) + SegNormal(i, i + 1)).GetSafeNormal();
+		const FVector2D Averaged = (SegNormal(i - 1, i) + SegNormal(i, i + 1)).GetSafeNormal();
+		// At an exact 180-degree reversal the two segment normals cancel to zero, which would pinch the
+		// ribbon to zero width. Fall back to the incoming segment's perpendicular so the width is preserved.
+		Nrm[i] = Averaged.IsNearlyZero() ? SegNormal(i - 1, i) : Averaged;
 	}
 	const float H = Width * 0.5f;
 	for (int32 i = 0; i < N; ++i)

@@ -197,6 +197,10 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 {
 	const double StartTime = FPlatformTime::Seconds();
 
+	// Re-seed from the configured seed so a fixed seed yields identical output regardless of any prior
+	// Generate() call on this instance (idempotent reuse).
+	InitializeRandomStream();
+
 	// Build the placement queue (type indices expanded by Weight). Optionally shuffled for variety.
 	TArray<int32> Queue = BuildRoomQueue(RoomTypes, bShuffleRoomOrder, RandomStream);
 	const int32	  RequestedRoomCount = Queue.Num();

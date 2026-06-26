@@ -51,6 +51,12 @@ void ADrunkardWalk2DVisualizer::OnConstruction(const FTransform& Transform)
 		return;
 	}
 
+	if (!GetWorld())
+	{
+		UE_LOG(LogDWVisualizer, Verbose, TEXT("OnConstruction: No world, skipping generation."));
+		return;
+	}
+
 	FDrunkardWalkResolvedParams Params = Config.Resolve();
 
 	UDrunkardWalkGenerator2D* Generator = NewObject<UDrunkardWalkGenerator2D>();

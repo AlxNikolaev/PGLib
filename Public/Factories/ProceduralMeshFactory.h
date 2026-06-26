@@ -22,6 +22,9 @@ struct PROCEDURALGEOMETRY_API FMeshGenerationParams
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	float UVScale = 0.01f;
 
+	/** NOTE: not consumed by the factory — the mesh data it produces carries no collision flag. Collision is
+	 *  decided downstream by the consumer's UProceduralMeshComponent::CreateMeshSection (bCreateCollision) call.
+	 *  This field is a hint passed through to that consumer, not an input to mesh generation here. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	bool bGenerateCollision = true;
 
