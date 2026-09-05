@@ -3,6 +3,231 @@
 #include "GridBudget.h"
 #include "ProceduralGeometry.h"
 
+namespace
+{
+	/**
+	 * Boundary cells of one region plus a uniform bucket grid over them (built on the first query), used to answer
+	 * "which cell of this region is nearest to point P" without scanning the region.
+	 *
+	 * Only boundary cells can win: from a cell whose four orthogonal neighbours all belong to the same region, the
+	 * single-axis step toward any cell of another region stays inside the region and strictly shortens the distance,
+	 * so an interior cell is never a minimiser. Ties resolve to the lowest position in the region's own cell array,
+	 * and the boundary subset keeps that array's order, so the pair reported here is the same pair a full double
+	 * loop over both regions would settle on.
+	 */
+	struct FCACorridorBoundaryIndex
+	{
+		/** Boundary cells in the source region's original order. */
+		TArray<FIntPoint> Cells;
+
+		void Build(const TArray<FIntPoint>& RegionCells, const TArray<int32>& RegionIds, int32 RegionId, int32 GridWidth, int32 GridHeight)
+		{
+			const bool			   bRegionIdsUsable = RegionIds.Num() == GridWidth * GridHeight;
+			static constexpr int32 DX[] = { 1, -1, 0, 0 };
+			static constexpr int32 DY[] = { 0, 0, 1, -1 };
+
+			Cells.Reset();
+			for (const FIntPoint& Cell : RegionCells)
+			{
+				bool bIsBoundary = !bRegionIdsUsable;
+
+				for (int32 Dir = 0; Dir < 4 && !bIsBoundary; ++Dir)
+				{
+					const int32 NX = Cell.X + DX[Dir];
+					const int32 NY = Cell.Y + DY[Dir];
+
+					// Off the grid counts as "not this region", so grid-edge cells are always boundary.
+					bIsBoundary = (NX < 0 || NX >= GridWidth || NY < 0 || NY >= GridHeight) || RegionIds[NY * GridWidth + NX] != RegionId;
+				}
+
+				if (bIsBoundary)
+				{
+					Cells.Add(Cell);
+				}
+			}
+
+			if (Cells.IsEmpty())
+			{
+				Cells = RegionCells;
+			}
+
+			bBucketsBuilt = false;
+		}
+
+		/** Nearest cell to From, ties to the lowest index in Cells. Returns false when the index holds no cells. */
+		bool FindNearest(const FIntPoint& From, float& OutBestDistSq, int32& OutBestIndex)
+		{
+			OutBestDistSq = FLT_MAX;
+			OutBestIndex = INDEX_NONE;
+
+			if (Cells.IsEmpty())
+			{
+				return false;
+			}
+
+			// The boundary set has to be collected while RegionIds is still pre-carve, but the buckets over it are a
+			// pure function of that set, so most substrates (every pair already diagram-adjacent, or the probability
+			// roll rejecting every pair) never pay for them.
+			if (!bBucketsBuilt)
+			{
+				BuildBuckets();
+				bBucketsBuilt = true;
+			}
+
+			const int32 FromBucketX = FMath::FloorToInt(static_cast<double>(From.X - MinX) / BucketSize);
+			const int32 FromBucketY = FMath::FloorToInt(static_cast<double>(From.Y - MinY) / BucketSize);
+
+			const int32 MaxRing = FMath::Max(FMath::Max(FMath::Abs(FromBucketX), FMath::Abs(NumBucketsX - 1 - FromBucketX)),
+				FMath::Max(FMath::Abs(FromBucketY), FMath::Abs(NumBucketsY - 1 - FromBucketY)));
+
+			// From is usually outside this region's bucket grid entirely; the rings below that first ring hold no
+			// buckets at all, so skipping straight to it keeps a distant query from sweeping empty rings.
+			const int32 GapX = FMath::Max(0, FMath::Max(-FromBucketX, FromBucketX - (NumBucketsX - 1)));
+			const int32 GapY = FMath::Max(0, FMath::Max(-FromBucketY, FromBucketY - (NumBucketsY - 1)));
+
+			for (int32 Ring = FMath::Max(GapX, GapY); Ring <= MaxRing; ++Ring)
+			{
+				// Every cell in a bucket Ring steps away sits at least (Ring - 1) * BucketSize from From, so once that
+				// bound passes the best distance found no further ring can beat it — or tie it, which matters because
+				// a tie at a lower index would win. The slack keeps float rounding of a squared integer distance from
+				// making a tie look one ulp farther than the bound.
+				if (OutBestIndex != INDEX_NONE && Ring > 0)
+				{
+					const double RingFloor = static_cast<double>(Ring - 1) * BucketSize;
+					if (RingFloor * RingFloor > static_cast<double>(OutBestDistSq) * 1.000001 + 1.0)
+					{
+						break;
+					}
+				}
+
+				VisitRing(From, FromBucketX, FromBucketY, Ring, OutBestDistSq, OutBestIndex);
+			}
+
+			return OutBestIndex != INDEX_NONE;
+		}
+
+	private:
+		/** Compressed bucket rows: BucketStart[b]..BucketStart[b+1] indexes BucketItems, which holds Cells indices. */
+		TArray<int32> BucketStart;
+		TArray<int32> BucketItems;
+		int32		  MinX = 0;
+		int32		  MinY = 0;
+		int32		  BucketSize = 1;
+		int32		  NumBucketsX = 1;
+		int32		  NumBucketsY = 1;
+		bool		  bBucketsBuilt = false;
+
+		void BuildBuckets()
+		{
+			BucketStart.Reset();
+			BucketItems.Reset();
+
+			if (Cells.IsEmpty())
+			{
+				return;
+			}
+
+			int32 MaxX = Cells[0].X;
+			int32 MaxY = Cells[0].Y;
+			MinX = Cells[0].X;
+			MinY = Cells[0].Y;
+			for (const FIntPoint& Cell : Cells)
+			{
+				MinX = FMath::Min(MinX, Cell.X);
+				MinY = FMath::Min(MinY, Cell.Y);
+				MaxX = FMath::Max(MaxX, Cell.X);
+				MaxY = FMath::Max(MaxY, Cell.Y);
+			}
+
+			// Aim for roughly one cell per bucket, then coarsen until the bucket array cannot outgrow the cell list
+			// it indexes (a sparse ring of cells around a large empty middle would otherwise allocate by area).
+			const int64 SpanX = static_cast<int64>(MaxX - MinX) + 1;
+			const int64 SpanY = static_cast<int64>(MaxY - MinY) + 1;
+			BucketSize = FMath::Max(1, FMath::FloorToInt(FMath::Sqrt(static_cast<double>(SpanX * SpanY) / Cells.Num())));
+
+			const int64 BucketBudget = static_cast<int64>(Cells.Num()) * 4 + 64;
+			NumBucketsX = static_cast<int32>(FMath::DivideAndRoundUp(SpanX, static_cast<int64>(BucketSize)));
+			NumBucketsY = static_cast<int32>(FMath::DivideAndRoundUp(SpanY, static_cast<int64>(BucketSize)));
+
+			while (static_cast<int64>(NumBucketsX) * NumBucketsY > BucketBudget)
+			{
+				BucketSize *= 2;
+				NumBucketsX = static_cast<int32>(FMath::DivideAndRoundUp(SpanX, static_cast<int64>(BucketSize)));
+				NumBucketsY = static_cast<int32>(FMath::DivideAndRoundUp(SpanY, static_cast<int64>(BucketSize)));
+			}
+
+			const int32 NumBuckets = NumBucketsX * NumBucketsY;
+			BucketStart.Init(0, NumBuckets + 1);
+
+			for (const FIntPoint& Cell : Cells)
+			{
+				++BucketStart[BucketIndexOf(Cell) + 1];
+			}
+			for (int32 Bucket = 0; Bucket < NumBuckets; ++Bucket)
+			{
+				BucketStart[Bucket + 1] += BucketStart[Bucket];
+			}
+
+			TArray<int32> FillCursor = BucketStart;
+			BucketItems.SetNumUninitialized(Cells.Num());
+			for (int32 Index = 0; Index < Cells.Num(); ++Index)
+			{
+				BucketItems[FillCursor[BucketIndexOf(Cells[Index])]++] = Index;
+			}
+		}
+
+		int32 BucketIndexOf(const FIntPoint& Cell) const
+		{
+			const int32 BucketX = FMath::Clamp((Cell.X - MinX) / BucketSize, 0, NumBucketsX - 1);
+			const int32 BucketY = FMath::Clamp((Cell.Y - MinY) / BucketSize, 0, NumBucketsY - 1);
+			return BucketY * NumBucketsX + BucketX;
+		}
+
+		void VisitBucket(const FIntPoint& From, int32 BucketX, int32 BucketY, float& InOutBestDistSq, int32& InOutBestIndex) const
+		{
+			if (BucketX < 0 || BucketX >= NumBucketsX || BucketY < 0 || BucketY >= NumBucketsY)
+			{
+				return;
+			}
+
+			const int32 Bucket = BucketY * NumBucketsX + BucketX;
+			for (int32 Slot = BucketStart[Bucket]; Slot < BucketStart[Bucket + 1]; ++Slot)
+			{
+				const int32		 Index = BucketItems[Slot];
+				const FIntPoint& Cell = Cells[Index];
+
+				// Same arithmetic and same float rounding as a plain double loop, so equal distances compare equal.
+				const float DistSq = static_cast<float>(FMath::Square(From.X - Cell.X) + FMath::Square(From.Y - Cell.Y));
+				if (DistSq < InOutBestDistSq || (DistSq == InOutBestDistSq && Index < InOutBestIndex))
+				{
+					InOutBestDistSq = DistSq;
+					InOutBestIndex = Index;
+				}
+			}
+		}
+
+		void VisitRing(const FIntPoint& From, int32 CenterX, int32 CenterY, int32 Ring, float& InOutBestDistSq, int32& InOutBestIndex) const
+		{
+			if (Ring == 0)
+			{
+				VisitBucket(From, CenterX, CenterY, InOutBestDistSq, InOutBestIndex);
+				return;
+			}
+
+			for (int32 BucketX = CenterX - Ring; BucketX <= CenterX + Ring; ++BucketX)
+			{
+				VisitBucket(From, BucketX, CenterY - Ring, InOutBestDistSq, InOutBestIndex);
+				VisitBucket(From, BucketX, CenterY + Ring, InOutBestDistSq, InOutBestIndex);
+			}
+			for (int32 BucketY = CenterY - Ring + 1; BucketY <= CenterY + Ring - 1; ++BucketY)
+			{
+				VisitBucket(From, CenterX - Ring, BucketY, InOutBestDistSq, InOutBestIndex);
+				VisitBucket(From, CenterX + Ring, BucketY, InOutBestDistSq, InOutBestIndex);
+			}
+		}
+	};
+} // namespace
+
 UCellularAutomataGenerator2D::UCellularAutomataGenerator2D()
 {
 	Bounds = FBox2D(FVector2D(-500, -500), FVector2D(500, 500));
@@ -373,6 +598,20 @@ void UCellularAutomataGenerator2D::CarveCorridors(FCellularAutomataGridData& Gri
 		return;
 	}
 
+	// Built while RegionIds still describes the pre-carve layout, which is also what GridData.Regions holds: the
+	// carve below rewrites RegionIds for the cells it opens but never touches Regions, so the pair search must keep
+	// reading the original membership.
+	TArray<FCACorridorBoundaryIndex> BoundaryIndexes;
+	BoundaryIndexes.SetNum(SurvivingIds.Num());
+	for (int32 Slot = 0; Slot < SurvivingIds.Num(); ++Slot)
+	{
+		const int32 RegionId = SurvivingIds[Slot];
+		if (GridData.Regions.IsValidIndex(RegionId))
+		{
+			BoundaryIndexes[Slot].Build(GridData.Regions[RegionId], GridData.RegionIds, RegionId, GridData.GridWidth, GridData.GridHeight);
+		}
+	}
+
 	// Build neighbor set from current diagram for surviving regions
 	TMap<int32, int32> RegionToDiagramCell;
 	for (int32 CellIdx = 0; CellIdx < GridData.Diagram.Cells.Num(); ++CellIdx)
@@ -427,27 +666,26 @@ void UCellularAutomataGenerator2D::CarveCorridors(FCellularAutomataGridData& Gri
 			}
 
 			// Find nearest cells between the two regions
-			const int32				 RegionIdA = SurvivingIds[a];
-			const int32				 RegionIdB = SurvivingIds[b];
-			const TArray<FIntPoint>& RegionCellsA = GridData.Regions[RegionIdA];
-			const TArray<FIntPoint>& RegionCellsB = GridData.Regions[RegionIdB];
+			const int32						RegionIdA = SurvivingIds[a];
+			const FCACorridorBoundaryIndex& IndexA = BoundaryIndexes[a];
+			FCACorridorBoundaryIndex&		IndexB = BoundaryIndexes[b];
 
-			// Find the closest pair of cells between the two regions
+			// First strictly-closest pair in region order: each A cell contributes its own nearest B cell (ties to
+			// the lowest B position), and only a strict improvement replaces the running best.
 			float	  BestDistSq = FLT_MAX;
 			FIntPoint BestA(0, 0);
 			FIntPoint BestB(0, 0);
 
-			for (const FIntPoint& CellPtA : RegionCellsA)
+			for (const FIntPoint& CellPtA : IndexA.Cells)
 			{
-				for (const FIntPoint& CellPtB : RegionCellsB)
+				float CandidateDistSq = FLT_MAX;
+				int32 CandidateIndex = INDEX_NONE;
+
+				if (IndexB.FindNearest(CellPtA, CandidateDistSq, CandidateIndex) && CandidateDistSq < BestDistSq)
 				{
-					const float DistSq = static_cast<float>(FMath::Square(CellPtA.X - CellPtB.X) + FMath::Square(CellPtA.Y - CellPtB.Y));
-					if (DistSq < BestDistSq)
-					{
-						BestDistSq = DistSq;
-						BestA = CellPtA;
-						BestB = CellPtB;
-					}
+					BestDistSq = CandidateDistSq;
+					BestA = CellPtA;
+					BestB = IndexB.Cells[CandidateIndex];
 				}
 			}
 

@@ -527,4 +527,342 @@ bool FCellularAutomataCarveCorridorsWidthTest::RunTest(const FString& Parameters
 	return true;
 }
 
+// ============================================================
+// CarveCorridors nearest-pair equivalence
+// ============================================================
+
+namespace
+{
+	/**
+	 * Reference CarveCorridors: the plain double loop over every cell of both regions, kept so the indexed search in
+	 * the generator can be proven to pick the same pair. Every other step — pair ordering, the adjacency skip, the
+	 * probability draw, the Bresenham walk and the carve band — is a literal copy, so the two runs consume the random
+	 * stream identically and any divergence in the output grid is a divergence in the chosen pair.
+	 */
+	void CACorridorRef_CarveCorridorsBruteForce(FCellularAutomataGridData& GridData, float Probability, int32 Width, FRandomStream& InRandomStream)
+	{
+		if (Probability <= 0.0f)
+		{
+			return;
+		}
+
+		Width = FMath::Max(1, Width);
+
+		TArray<int32> SurvivingIds;
+		for (int32 i = 0; i < GridData.SurvivingRegions.Num(); ++i)
+		{
+			if (GridData.SurvivingRegions[i])
+			{
+				SurvivingIds.Add(i);
+			}
+		}
+
+		if (SurvivingIds.Num() < 2)
+		{
+			return;
+		}
+
+		TMap<int32, int32> RegionToDiagramCell;
+		for (int32 CellIdx = 0; CellIdx < GridData.Diagram.Cells.Num(); ++CellIdx)
+		{
+			if (CellIdx < SurvivingIds.Num())
+			{
+				RegionToDiagramCell.Add(SurvivingIds[CellIdx], CellIdx);
+			}
+		}
+
+		TSet<TPair<int32, int32>> ConnectedPairs;
+		for (int32 CellIdx = 0; CellIdx < GridData.Diagram.Cells.Num(); ++CellIdx)
+		{
+			for (int32 NeighborIdx : GridData.Diagram.Cells[CellIdx].Neighbors)
+			{
+				ConnectedPairs.Add(TPair<int32, int32>(FMath::Min(CellIdx, NeighborIdx), FMath::Max(CellIdx, NeighborIdx)));
+			}
+		}
+
+		for (int32 a = 0; a < SurvivingIds.Num(); ++a)
+		{
+			for (int32 b = a + 1; b < SurvivingIds.Num(); ++b)
+			{
+				const int32* CellA = RegionToDiagramCell.Find(SurvivingIds[a]);
+				const int32* CellB = RegionToDiagramCell.Find(SurvivingIds[b]);
+
+				if (!CellA || !CellB)
+				{
+					continue;
+				}
+
+				if (ConnectedPairs.Contains(TPair<int32, int32>(FMath::Min(*CellA, *CellB), FMath::Max(*CellA, *CellB))))
+				{
+					continue;
+				}
+
+				if (InRandomStream.FRand() > Probability)
+				{
+					continue;
+				}
+
+				const int32				 RegionIdA = SurvivingIds[a];
+				const int32				 RegionIdB = SurvivingIds[b];
+				const TArray<FIntPoint>& RegionCellsA = GridData.Regions[RegionIdA];
+				const TArray<FIntPoint>& RegionCellsB = GridData.Regions[RegionIdB];
+
+				float	  BestDistSq = FLT_MAX;
+				FIntPoint BestA(0, 0);
+				FIntPoint BestB(0, 0);
+
+				for (const FIntPoint& CellPtA : RegionCellsA)
+				{
+					for (const FIntPoint& CellPtB : RegionCellsB)
+					{
+						const float DistSq = static_cast<float>(FMath::Square(CellPtA.X - CellPtB.X) + FMath::Square(CellPtA.Y - CellPtB.Y));
+						if (DistSq < BestDistSq)
+						{
+							BestDistSq = DistSq;
+							BestA = CellPtA;
+							BestB = CellPtB;
+						}
+					}
+				}
+
+				const int32 HalfWidth = Width / 2;
+
+				int32		X0 = BestA.X, Y0 = BestA.Y;
+				const int32 X1 = BestB.X, Y1 = BestB.Y;
+				const int32 DX = FMath::Abs(X1 - X0);
+				const int32 DY = -FMath::Abs(Y1 - Y0);
+				const int32 SX = X0 < X1 ? 1 : -1;
+				const int32 SY = Y0 < Y1 ? 1 : -1;
+				int32		Err = DX + DY;
+
+				while (true)
+				{
+					for (int32 OffY = -HalfWidth; OffY <= HalfWidth; ++OffY)
+					{
+						for (int32 OffX = -HalfWidth; OffX <= HalfWidth; ++OffX)
+						{
+							const int32 CX = X0 + OffX;
+							const int32 CY = Y0 + OffY;
+
+							if (CX > 0 && CX < GridData.GridWidth - 1 && CY > 0 && CY < GridData.GridHeight - 1)
+							{
+								const int32 Idx = CY * GridData.GridWidth + CX;
+								if (!GridData.Grid[Idx])
+								{
+									GridData.Grid[Idx] = true;
+									GridData.RegionIds[Idx] = RegionIdA;
+								}
+							}
+						}
+					}
+
+					if (X0 == X1 && Y0 == Y1)
+					{
+						break;
+					}
+
+					const int32 E2 = 2 * Err;
+					if (E2 >= DY)
+					{
+						Err += DY;
+						X0 += SX;
+					}
+					if (E2 <= DX)
+					{
+						Err += DX;
+						Y0 += SY;
+					}
+				}
+			}
+		}
+	}
+
+	/** Hand-built grid of solid blobs separated by walls, so a carve is guaranteed regardless of CA randomness. */
+	FCellularAutomataGridData CACorridorRef_MakeBlobGrid(int32 GridW, int32 GridH, const TArray<FIntRect>& Blobs)
+	{
+		FCellularAutomataGridData Data;
+		Data.GridWidth = GridW;
+		Data.GridHeight = GridH;
+		Data.CellSize = 100.0f;
+		Data.CenterRegionId = -1;
+		Data.Grid.Init(false, GridW * GridH);
+		Data.RegionIds.Init(-1, GridW * GridH);
+		Data.Regions.SetNum(Blobs.Num());
+
+		for (int32 RegionId = 0; RegionId < Blobs.Num(); ++RegionId)
+		{
+			const FIntRect& Blob = Blobs[RegionId];
+			for (int32 Y = Blob.Min.Y; Y <= Blob.Max.Y; ++Y)
+			{
+				for (int32 X = Blob.Min.X; X <= Blob.Max.X; ++X)
+				{
+					const int32 Index = Y * GridW + X;
+					Data.Grid[Index] = true;
+					Data.RegionIds[Index] = RegionId;
+					Data.Regions[RegionId].Add(FIntPoint(X, Y));
+				}
+			}
+		}
+
+		Data.SurvivingRegions.Init(true, Blobs.Num());
+
+		// CarveCorridors reads adjacency off the diagram; neighbourless cells are exactly the disconnected pairs.
+		Data.Diagram.Cells.SetNum(Blobs.Num());
+		for (int32 CellIdx = 0; CellIdx < Blobs.Num(); ++CellIdx)
+		{
+			Data.Diagram.Cells[CellIdx].CellIndex = CellIdx;
+		}
+
+		return Data;
+	}
+
+	/**
+	 * Lattice of irregular pockets, one per slot, each grown by a seeded walk confined to its slot interior so a
+	 * one-cell wall always separates neighbouring slots. Emergent CA substrates were tried first and rejected: their
+	 * surviving regions are usually diagram-adjacent (or collapse to one region), which makes CarveCorridors skip
+	 * every pair and turns the comparison vacuous. The pockets are concave and ragged, which is what the boundary
+	 * pruning in the indexed search has to survive; convex rectangles would not exercise it.
+	 */
+	FCellularAutomataGridData CACorridorRef_MakePocketGrid(int32 SlotsX, int32 SlotsY, int32 SlotPitch, int32 WalkSteps, int32 Seed)
+	{
+		const int32 GridW = SlotsX * SlotPitch + 1;
+		const int32 GridH = SlotsY * SlotPitch + 1;
+
+		FCellularAutomataGridData Data;
+		Data.GridWidth = GridW;
+		Data.GridHeight = GridH;
+		Data.CellSize = 100.0f;
+		Data.CenterRegionId = -1;
+		Data.Grid.Init(false, GridW * GridH);
+		Data.RegionIds.Init(-1, GridW * GridH);
+		Data.Regions.SetNum(SlotsX * SlotsY);
+
+		FRandomStream Stream(Seed);
+
+		for (int32 SlotY = 0; SlotY < SlotsY; ++SlotY)
+		{
+			for (int32 SlotX = 0; SlotX < SlotsX; ++SlotX)
+			{
+				const int32 RegionId = SlotY * SlotsX + SlotX;
+
+				// The slot's writable interior; the +1 margin on each side is the wall that keeps pockets apart.
+				const int32 MinX = SlotX * SlotPitch + 1;
+				const int32 MinY = SlotY * SlotPitch + 1;
+				const int32 MaxX = MinX + SlotPitch - 2;
+				const int32 MaxY = MinY + SlotPitch - 2;
+
+				int32 X = (MinX + MaxX) / 2;
+				int32 Y = (MinY + MaxY) / 2;
+
+				for (int32 Step = 0; Step < WalkSteps; ++Step)
+				{
+					const int32 Index = Y * GridW + X;
+					if (!Data.Grid[Index])
+					{
+						Data.Grid[Index] = true;
+						Data.RegionIds[Index] = RegionId;
+						Data.Regions[RegionId].Add(FIntPoint(X, Y));
+					}
+
+					switch (Stream.RandRange(0, 3))
+					{
+						case 0:
+							X = FMath::Min(X + 1, MaxX);
+							break;
+						case 1:
+							X = FMath::Max(X - 1, MinX);
+							break;
+						case 2:
+							Y = FMath::Min(Y + 1, MaxY);
+							break;
+						default:
+							Y = FMath::Max(Y - 1, MinY);
+							break;
+					}
+				}
+			}
+		}
+
+		Data.SurvivingRegions.Init(true, Data.Regions.Num());
+
+		// CarveCorridors reads adjacency off the diagram; neighbourless cells are exactly the disconnected pairs.
+		Data.Diagram.Cells.SetNum(Data.Regions.Num());
+		for (int32 CellIdx = 0; CellIdx < Data.Regions.Num(); ++CellIdx)
+		{
+			Data.Diagram.Cells[CellIdx].CellIndex = CellIdx;
+		}
+
+		return Data;
+	}
+} // namespace
+
+// Test 14: the indexed nearest-pair search must carve exactly what the full double loop carves
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCellularAutomataCarveCorridorsNearestPairTest,
+	"ProceduralGeometry.CellularAutomata.CarveCorridors.NearestPairMatchesBruteForce",
+	DefaultTestFlags)
+
+bool FCellularAutomataCarveCorridorsNearestPairTest::RunTest(const FString& Parameters)
+{
+	// Each case asserts its own carve count: a shared total would let the two hand-built blob cases, which carve by
+	// construction, mask a SwissCheese case that silently stopped producing disconnected pairs.
+	auto CompareRun = [this](const FString& CaseName, const FCellularAutomataGridData& Source, int32 CorridorWidth) {
+		FCellularAutomataGridData Indexed = Source;
+		FRandomStream			  IndexedStream(4242);
+		UCellularAutomataGenerator2D::CarveCorridors(Indexed, 1.0f, CorridorWidth, IndexedStream);
+
+		FCellularAutomataGridData Reference = Source;
+		FRandomStream			  ReferenceStream(4242);
+		CACorridorRef_CarveCorridorsBruteForce(Reference, 1.0f, CorridorWidth, ReferenceStream);
+
+		int32 Mismatches = 0;
+		int32 Carved = 0;
+		for (int32 Index = 0; Index < Source.Grid.Num(); ++Index)
+		{
+			if (Indexed.Grid[Index] != Reference.Grid[Index] || Indexed.RegionIds[Index] != Reference.RegionIds[Index])
+			{
+				++Mismatches;
+			}
+			if (Indexed.Grid[Index] && !Source.Grid[Index])
+			{
+				++Carved;
+			}
+		}
+
+		int32 SurvivingCount = 0;
+		for (const bool bSurvives : Source.SurvivingRegions)
+		{
+			SurvivingCount += bSurvives ? 1 : 0;
+		}
+
+		TestEqual(FString::Printf(TEXT("%s: indexed carve matches the brute-force carve cell for cell"), *CaseName), Mismatches, 0);
+		TestTrue(FString::Printf(TEXT("%s: substrate has at least two surviving regions to connect (%d)"), *CaseName, SurvivingCount),
+			SurvivingCount >= 2);
+		TestTrue(FString::Printf(TEXT("%s: at least one cell was carved, so the comparison is not vacuous"), *CaseName), Carved > 0);
+	};
+
+	// Hand-built blobs: four separated rectangles guarantee carving, and the asymmetric layout makes a wrong pair
+	// choice move the corridor by a visible number of cells.
+	{
+		const TArray<FIntRect> Blobs = { FIntRect(FIntPoint(2, 2), FIntPoint(9, 9)),
+			FIntRect(FIntPoint(20, 3), FIntPoint(28, 12)),
+			FIntRect(FIntPoint(4, 20), FIntPoint(14, 27)),
+			FIntRect(FIntPoint(22, 22), FIntPoint(27, 26)) };
+
+		const FCellularAutomataGridData Blobbed = CACorridorRef_MakeBlobGrid(31, 31, Blobs);
+		CompareRun(TEXT("FourBlobs width 1"), Blobbed, 1);
+		CompareRun(TEXT("FourBlobs width 3"), Blobbed, 3);
+	}
+
+	// Many small irregular pockets: the many-region case the index exists for, and the shape class that makes the
+	// boundary pruning non-trivial.
+	const TArray<int32> PocketSeeds = { 101, 202, 303, 404 };
+	for (const int32 PocketSeed : PocketSeeds)
+	{
+		const FCellularAutomataGridData Pockets = CACorridorRef_MakePocketGrid(5, 5, 7, 24, PocketSeed);
+		CompareRun(FString::Printf(TEXT("Pockets seed %d"), PocketSeed), Pockets, 2);
+	}
+
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

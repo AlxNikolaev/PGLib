@@ -69,6 +69,19 @@ FLayoutDiagram2D ULayoutGenerator::ConvertGridToDiagram(const TArray<bool>& Grid
 	TArray<int32> GridToCellIndex;
 	GridToCellIndex.Init(INDEX_NONE, GridWidth * GridHeight);
 
+	// One cell per carved grid position, so a near-budget grid emits on the order of a million of them. Sizing the
+	// array up front removes the reallocation chain, and building each cell in place removes a per-cell copy of its
+	// vertex and neighbour arrays.
+	int32 CarvedCount = 0;
+	for (const bool bIsFloor : Grid)
+	{
+		if (bIsFloor)
+		{
+			++CarvedCount;
+		}
+	}
+	Diagram.Cells.Reserve(CarvedCount);
+
 	// First pass: create cells for carved grid positions
 	for (int32 Y = 0; Y < GridHeight; ++Y)
 	{
@@ -83,7 +96,7 @@ FLayoutDiagram2D ULayoutGenerator::ConvertGridToDiagram(const TArray<bool>& Grid
 			const int32 CellIndex = Diagram.Cells.Num();
 			GridToCellIndex[GridIndex] = CellIndex;
 
-			FLayoutCell2D Cell;
+			FLayoutCell2D& Cell = Diagram.Cells.AddDefaulted_GetRef();
 			Cell.CellIndex = CellIndex;
 
 			// CCW rectangle vertices
@@ -102,8 +115,6 @@ FLayoutDiagram2D ULayoutGenerator::ConvertGridToDiagram(const TArray<bool>& Grid
 
 			// bIsExterior: on grid boundary or adjacent to an uncarved cell at grid edge
 			Cell.bIsExterior = (X == 0 || X == GridWidth - 1 || Y == 0 || Y == GridHeight - 1);
-
-			Diagram.Cells.Add(Cell);
 		}
 	}
 

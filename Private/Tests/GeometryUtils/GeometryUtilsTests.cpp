@@ -1,4 +1,4 @@
-#include "GeometryUtils/GeometryFunctionLibrary.h"
+﻿#include "GeometryUtils/GeometryFunctionLibrary.h"
 #include "../ProceduralGeometryTestFlags.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
@@ -9,6 +9,92 @@ namespace
 	TArray<FVector2D> MakeSquare100()
 	{
 		return { FVector2D(0, 0), FVector2D(100, 0), FVector2D(100, 100), FVector2D(0, 100) };
+	}
+
+	/**
+	 * Reference Poisson sampler: same RNG draws and same candidate acceptance as FGeometryUtils::PoissonDiskSampling,
+	 * but the rejection test scans every accepted point instead of a bucket ring. The library's ring width is only an
+	 * acceleration claim, so any ring that is too narrow shows up as a divergence from this sequence.
+	 */
+	void PoissonRef_SampleWithLinearRejection(
+		const TArray<FVector2D>& PolygonVertices, float Radius, int32 MaxPoints, FRandomStream& RandomStream, TArray<FVector2D>& OutPoints)
+	{
+		OutPoints.Empty();
+
+		if (PolygonVertices.Num() < 3 || Radius < UE_KINDA_SMALL_NUMBER || MaxPoints <= 0)
+		{
+			return;
+		}
+
+		FVector2D MinBounds(FLT_MAX, FLT_MAX);
+		FVector2D MaxBounds(-FLT_MAX, -FLT_MAX);
+		for (const FVector2D& Vertex : PolygonVertices)
+		{
+			MinBounds.X = FMath::Min(MinBounds.X, Vertex.X);
+			MinBounds.Y = FMath::Min(MinBounds.Y, Vertex.Y);
+			MaxBounds.X = FMath::Max(MaxBounds.X, Vertex.X);
+			MaxBounds.Y = FMath::Max(MaxBounds.Y, Vertex.Y);
+		}
+
+		FVector2D InitialPoint;
+		bool	  bFoundInitial = false;
+		for (int32 Attempts = 0; Attempts < 100 && !bFoundInitial; ++Attempts)
+		{
+			InitialPoint.X = RandomStream.FRandRange(MinBounds.X, MaxBounds.X);
+			InitialPoint.Y = RandomStream.FRandRange(MinBounds.Y, MaxBounds.Y);
+			bFoundInitial = FGeometryUtils::PointInPolygon(PolygonVertices, InitialPoint);
+		}
+
+		if (!bFoundInitial)
+		{
+			return;
+		}
+
+		OutPoints.Add(InitialPoint);
+
+		TArray<int32> ActivePoints;
+		ActivePoints.Add(0);
+
+		while (ActivePoints.Num() > 0 && OutPoints.Num() < MaxPoints)
+		{
+			const int32		 ActiveIndex = RandomStream.RandRange(0, ActivePoints.Num() - 1);
+			const FVector2D& ActivePoint = OutPoints[ActivePoints[ActiveIndex]];
+
+			bool bFoundValidCandidate = false;
+			for (int32 Candidate = 0; Candidate < 30; ++Candidate)
+			{
+				const float Angle = RandomStream.FRandRange(0, 2.0f * PI);
+				const float Distance = RandomStream.FRandRange(Radius, 2.0f * Radius);
+
+				const FVector2D CandidatePoint = ActivePoint + FVector2D(FMath::Cos(Angle) * Distance, FMath::Sin(Angle) * Distance);
+				if (!FGeometryUtils::PointInPolygon(PolygonVertices, CandidatePoint))
+				{
+					continue;
+				}
+
+				bool bTooClose = false;
+				for (const FVector2D& Existing : OutPoints)
+				{
+					if (FVector2D::DistSquared(CandidatePoint, Existing) < Radius * Radius)
+					{
+						bTooClose = true;
+						break;
+					}
+				}
+
+				if (!bTooClose)
+				{
+					ActivePoints.Add(OutPoints.Add(CandidatePoint));
+					bFoundValidCandidate = true;
+					break;
+				}
+			}
+
+			if (!bFoundValidCandidate)
+			{
+				ActivePoints.RemoveAt(ActiveIndex);
+			}
+		}
 	}
 
 	/** Check all vertices are finite (no NaN/Inf) */
@@ -589,6 +675,133 @@ bool FDistanceToBoundaryEdgeTest::RunTest(const FString& Parameters)
 	// Degenerate
 	float DistDegen = FGeometryUtils::DistanceToPolygonBoundary({}, FVector2D(50, 50));
 	TestEqual("Degenerate polygon → distance 0", DistDegen, 0.0f, 0.01f);
+
+	return true;
+}
+
+// ============================================================
+// PoissonDiskSampling / MaxInscribedCircle robustness
+// ============================================================
+
+// Test 25: A kilometre-scale bounds asks for billions of acceleration cells to hold a handful of points; the sampler
+// must bound that grid instead of overflowing the cell-count product.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPoissonHugeBoundsTest, "ProceduralGeometry.GeometryUtils.PoissonDiskSampling.HugeBoundsIsBounded", DefaultTestFlags)
+
+bool FPoissonHugeBoundsTest::RunTest(const FString& Parameters)
+{
+	const TArray<FVector2D> Huge = { FVector2D(0, 0), FVector2D(500000, 0), FVector2D(500000, 500000), FVector2D(0, 500000) };
+	constexpr float			Radius = 10.0f;
+	constexpr int32			MaxPoints = 50;
+
+	FRandomStream	  Stream(20260905);
+	TArray<FVector2D> Points;
+	FGeometryUtils::PoissonDiskSampling(Huge, Radius, MaxPoints, Stream, Points);
+
+	TestTrue(TEXT("Huge bounds still produce points"), Points.Num() > 0);
+	TestTrue(TEXT("Huge bounds never exceed MaxPoints"), Points.Num() <= MaxPoints);
+
+	for (int32 i = 0; i < Points.Num(); ++i)
+	{
+		TestTrue(FString::Printf(TEXT("Point %d is inside the polygon"), i), FGeometryUtils::PointInPolygon(Huge, Points[i]));
+
+		for (int32 j = i + 1; j < Points.Num(); ++j)
+		{
+			const float Dist = FVector2D::Distance(Points[i], Points[j]);
+			TestTrue(FString::Printf(TEXT("Points %d and %d are at least Radius apart (%.3f)"), i, j, Dist), Dist >= Radius - 0.01f);
+		}
+	}
+
+	return true;
+}
+
+// Test 26: For inputs that already fit the budget the bucket ring must still see every point within Radius, so the
+// accepted sequence has to match a sampler that rejects against every accepted point.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FPoissonMatchesLinearRejectionTest, "ProceduralGeometry.GeometryUtils.PoissonDiskSampling.UnchangedForNormalInputs", DefaultTestFlags)
+
+bool FPoissonMatchesLinearRejectionTest::RunTest(const FString& Parameters)
+{
+	struct FCase
+	{
+		TArray<FVector2D> Polygon;
+		float			  Radius;
+		int32			  MaxPoints;
+		int32			  Seed;
+	};
+
+	const TArray<FVector2D> Square1000 = { FVector2D(0, 0), FVector2D(1000, 0), FVector2D(1000, 1000), FVector2D(0, 1000) };
+	const TArray<FVector2D> Square500 = { FVector2D(0, 0), FVector2D(500, 0), FVector2D(500, 500), FVector2D(0, 500) };
+	const TArray<FVector2D> Triangle = { FVector2D(-400, -300), FVector2D(600, -300), FVector2D(100, 500) };
+
+	// The last case is the one that exercises the coarsened grid: 1000/(10/sqrt2) projects 142x142 = 20164 buckets
+	// against a 64*60 = 3840 budget, so the sampler coarsens twice and narrows its neighbour ring to 1. If that ring
+	// were one bucket too narrow the accepted sequence would diverge from the linear-rejection reference here.
+	const TArray<FCase> Cases = { { Square1000, 50.0f, 100, 12345 },
+		{ Square1000, 80.0f, 50, 42 },
+		{ Square500, 40.0f, 50, 99999 },
+		{ Triangle, 35.0f, 120, 7 },
+		{ Triangle, 12.0f, 400, 202609 },
+		{ Square1000, 10.0f, 60, 55501 } };
+
+	int32 TotalPoints = 0;
+
+	for (int32 CaseIndex = 0; CaseIndex < Cases.Num(); ++CaseIndex)
+	{
+		const FCase& Case = Cases[CaseIndex];
+
+		FRandomStream	  LibraryStream(Case.Seed);
+		TArray<FVector2D> LibraryPoints;
+		FGeometryUtils::PoissonDiskSampling(Case.Polygon, Case.Radius, Case.MaxPoints, LibraryStream, LibraryPoints);
+
+		FRandomStream	  ReferenceStream(Case.Seed);
+		TArray<FVector2D> ReferencePoints;
+		PoissonRef_SampleWithLinearRejection(Case.Polygon, Case.Radius, Case.MaxPoints, ReferenceStream, ReferencePoints);
+
+		TotalPoints += LibraryPoints.Num();
+
+		TestEqual(FString::Printf(TEXT("Case %d point count matches the linear-rejection reference"), CaseIndex),
+			LibraryPoints.Num(),
+			ReferencePoints.Num());
+
+		for (int32 i = 0; i < FMath::Min(LibraryPoints.Num(), ReferencePoints.Num()); ++i)
+		{
+			TestTrue(FString::Printf(TEXT("Case %d point %d matches the reference exactly"), CaseIndex, i), LibraryPoints[i] == ReferencePoints[i]);
+		}
+	}
+
+	TestTrue(TEXT("The comparison actually sampled points"), TotalPoints > 0);
+
+	return true;
+}
+
+// Test 27: A sliver polygon far from the origin has a cell size below the float spacing at its coordinates; the grid
+// must still be walked to completion instead of spinning on an accumulator that cannot advance.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FMaxInscribedCircleFarFromOriginTest, "ProceduralGeometry.GeometryUtils.MaxInscribedCircle.FarFromOrigin", DefaultTestFlags)
+
+bool FMaxInscribedCircleFarFromOriginTest::RunTest(const FString& Parameters)
+{
+	// The thin axis fixes the cell size at 0.0025 while the float spacing at x = 2e6 is 0.125, which is the whole
+	// point of the case; the long axis only has to be long enough to make the grid worth walking, so it stays at
+	// 100 rather than the thousands that would reserve tens of megabytes of seed cells to prove the same thing.
+	constexpr double BaseX = 2000000.0;
+	constexpr double Width = 0.01;
+	constexpr double Height = 100.0;
+
+	const TArray<FVector2D> Sliver = {
+		FVector2D(BaseX, 0.0), FVector2D(BaseX + Width, 0.0), FVector2D(BaseX + Width, Height), FVector2D(BaseX, Height)
+	};
+
+	FVector2D Center = FVector2D::ZeroVector;
+	float	  Radius = -1.0f;
+
+	const bool bResult = FGeometryUtils::MaxInscribedCircle(Sliver, Center, Radius);
+
+	TestTrue(TEXT("Sliver polygon far from the origin yields a circle"), bResult);
+	TestTrue(TEXT("Radius is positive"), Radius > 0.0f);
+	TestTrue(FString::Printf(TEXT("Radius %.6f cannot exceed half the thin extent"), Radius), Radius <= 0.5f * static_cast<float>(Width) + 1e-4f);
+	TestTrue(TEXT("Center X lies inside the sliver"), Center.X >= BaseX && Center.X <= BaseX + Width);
+	TestTrue(TEXT("Center Y lies inside the sliver"), Center.Y >= 0.0 && Center.Y <= Height);
 
 	return true;
 }

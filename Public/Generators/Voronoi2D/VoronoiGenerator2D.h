@@ -3,6 +3,8 @@
 #include "CoreMinimal.h"
 #include "VoronoiGenerator2D.generated.h"
 
+class FVoronoiSiteIndex;
+
 USTRUCT()
 struct PROCEDURALGEOMETRY_API FVoronoiCell2D
 {
@@ -72,6 +74,20 @@ struct PROCEDURALGEOMETRY_API FVoronoiDiagram2D
 	int32 FindCellContainingPoint(const FVector2D& Point) const;
 	bool  GetSharedEdge(int32 CellA, int32 CellB, FVector2D& OutStart, FVector2D& OutEnd) const;
 	int32 FindClosestCellBySite(const FVector2D& Point) const;
+
+	/**
+	 * Indexed form of FindCellContainingPoint: probes the cell of the site nearest Point and confirms
+	 * containment with the same polygon test, falling back to the full scan when that cell does not hold the
+	 * point. Index must have been built over this diagram's Sites.
+	 *
+	 * The answer can only differ from the unindexed scan when two valid cells genuinely overlap and the
+	 * overlapping pair is not led by the nearest site, which a well-formed diagram cannot produce: cells are
+	 * disjoint half-plane intersections around distinct sites.
+	 */
+	int32 FindCellContainingPoint(const FVector2D& Point, const FVoronoiSiteIndex& Index) const;
+
+	/** Indexed form of the nearest-site scan; resolves ties to the lowest index exactly as the scan does. */
+	int32 FindClosestCellBySite(const FVector2D& Point, const FVoronoiSiteIndex& Index) const;
 };
 
 /**
@@ -103,6 +119,19 @@ namespace VoronoiUtils
 	 */
 	PROCEDURALGEOMETRY_API bool GetSharedEdge(
 		const TArray<FVector2D>& VertsA, const TArray<FVector2D>& VertsB, float Tolerance, FVector2D& OutStart, FVector2D& OutEnd);
+
+#if WITH_DEV_AUTOMATION_TESTS
+	/**
+	 * Half-plane clips the cell build has performed on the calling thread since the last reset. What spatial
+	 * pruning claims is a claim about this count, so the suite asserts on it; a duration on a shared build
+	 * machine measures the machine as much as the algorithm and is only ever recorded, never asserted.
+	 *
+	 * The tally is per-thread because the substrate build runs the cell build from ParallelFor workers: a shared
+	 * counter would serialise them and would make the number depend on how the work happened to be split.
+	 */
+	PROCEDURALGEOMETRY_API void	 ResetHalfPlaneClipCount();
+	PROCEDURALGEOMETRY_API int64 GetHalfPlaneClipCount();
+#endif
 } // namespace VoronoiUtils
 
 UCLASS()
@@ -139,7 +168,13 @@ private:
 	void InitializeRandomStream();
 
 	void ComputeVoronoiCells(const TArray<FVector2D>& Sites, FVoronoiDiagram2D& OutDiagram, bool bComputeNeighbors = true) const;
-	void ComputeCellForSite(FVoronoiCell2D& OutCell, int32 SiteIndex, const TArray<FVector2D>& AllSites) const;
+
+	/**
+	 * Clips the cell of AllSites[SiteIndex] against the bisectors of the other sites, in ascending site order.
+	 * A non-null Index skips the sites whose bisector provably cannot touch the working polygon; the sequence
+	 * of clips that do happen, and therefore the resulting vertex list, is the same either way.
+	 */
+	void ComputeCellForSite(FVoronoiCell2D& OutCell, int32 SiteIndex, const TArray<FVector2D>& AllSites, const FVoronoiSiteIndex* Index) const;
 
 	void RelaxSites(TArray<FVector2D>& Sites);
 };

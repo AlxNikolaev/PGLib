@@ -1,5 +1,45 @@
 ﻿#include "GeometryUtils/GeometryFunctionLibrary.h"
 
+#include "GridBudget.h"
+#include "ProceduralGeometry.h"
+
+namespace
+{
+	/**
+	 * Cells needed to span Extent at InCellSize. Evaluated in double and clamped, so a non-finite or absurd extent
+	 * cannot narrow into a negative cell count on its way into an allocation.
+	 */
+	int64 GeomLib_ProjectGridAxis(double Extent, double InCellSize)
+	{
+		const double Cells = FMath::CeilToDouble(Extent / InCellSize);
+		if (!FMath::IsFinite(Cells) || Cells <= 0.0)
+		{
+			return 0;
+		}
+		return static_cast<int64>(FMath::Min(Cells, static_cast<double>(PGGrid::MaxGridCells)));
+	}
+
+	/**
+	 * Doubles InOutCellSize until the projected grid fits CellBudget, so every grid in this file shares one finite
+	 * guard, one clamp and one pass bound. Each pass halves both axis counts, so any finite extent reaches the
+	 * budget within a few dozen passes; the pass bound is the backstop that keeps a caller from spinning here.
+	 * A caller that still exceeds CellBudget on return has an input no cell size can accommodate and must bail.
+	 */
+	void GeomLib_CoarsenToCellBudget(double ExtentX, double ExtentY, int64 CellBudget, double& InOutCellSize, int64& OutNumX, int64& OutNumY)
+	{
+		OutNumX = GeomLib_ProjectGridAxis(ExtentX, InOutCellSize);
+		OutNumY = GeomLib_ProjectGridAxis(ExtentY, InOutCellSize);
+
+		constexpr int32 MaxCoarsenPasses = 64;
+		for (int32 Pass = 0; Pass < MaxCoarsenPasses && OutNumX > 0 && OutNumY > 0 && OutNumX * OutNumY > CellBudget; ++Pass)
+		{
+			InOutCellSize *= 2.0;
+			OutNumX = GeomLib_ProjectGridAxis(ExtentX, InOutCellSize);
+			OutNumY = GeomLib_ProjectGridAxis(ExtentY, InOutCellSize);
+		}
+	}
+} // namespace
+
 bool FGeometryUtils::SortPlaneVerticesByAngle(const TArray<FVector2D>& InVertices, TArray<FVector2D>& OutSortedVertices)
 {
 	if (InVertices.Num() < 3)
@@ -197,10 +237,42 @@ bool FGeometryUtils::MaxInscribedCircle(const TArray<FVector2D>& PolygonVertices
 	// Initial grid size
 	const float GridSize = FMath::Min(MaxBounds.X - MinBounds.X, MaxBounds.Y - MinBounds.Y) / 4.0f;
 
-	// Degenerate (collinear / zero-area) polygon: one axis has zero extent, so CellSize would be 0 and the
-	// grid loop below (x += CellSize) would never advance — an infinite hang on the game thread. There is no
-	// inscribed circle of positive radius for such a polygon, so bail.
+	// Degenerate (collinear / zero-area) polygon: one axis has zero extent, so the cell size is 0 and the grid
+	// below has no finite cell count. There is no inscribed circle of positive radius for such a polygon, so bail.
 	if (!(GridSize > UE_KINDA_SMALL_NUMBER))
+	{
+		return false;
+	}
+
+	// Cell i sits at MinBounds + i * CellSize rather than at a stepped position, so cells stay distinct however far
+	// the polygon is from the origin. A step below the representable spacing at those coordinates makes every cell
+	// identical, which no addressing scheme can rescue — reject it.
+	const double MaxMagnitude =
+		FMath::Max(FMath::Max(FMath::Abs(MinBounds.X), FMath::Abs(MaxBounds.X)), FMath::Max(FMath::Abs(MinBounds.Y), FMath::Abs(MaxBounds.Y)));
+	double CellSizeD = GridSize;
+
+	if (MaxMagnitude + CellSizeD == MaxMagnitude)
+	{
+		UE_LOG(LogRoguelikeGeometry,
+			Warning,
+			TEXT("[Geometry] MaxInscribedCircle: cell size %g is below the representable step at coordinate magnitude %g — no usable grid"),
+			CellSizeD,
+			MaxMagnitude);
+		return false;
+	}
+
+	// A sliver polygon (one axis thousands of times longer than the other) projects a seed grid whose cell count is
+	// bounded only by that ratio, so coarsen the cells until it fits. The budget is far below the rasterization
+	// ceiling in GridBudget.h because a cell here is a 32-byte FCell carrying an eagerly evaluated point-in-polygon
+	// distance, not one byte of a mask; coarsening only lowers the starting resolution, which the subdivision loop
+	// below recovers where it matters.
+	constexpr int64 SeedGridBudget = 65'536;
+
+	int64 NumX = 0;
+	int64 NumY = 0;
+	GeomLib_CoarsenToCellBudget(MaxBounds.X - MinBounds.X, MaxBounds.Y - MinBounds.Y, SeedGridBudget, CellSizeD, NumX, NumY);
+
+	if (NumX <= 0 || NumY <= 0 || NumX * NumY > SeedGridBudget)
 	{
 		return false;
 	}
@@ -208,13 +280,22 @@ bool FGeometryUtils::MaxInscribedCircle(const TArray<FVector2D>& PolygonVertices
 	// Start with bounding box center
 	FCell BestCell(GetPolygonCentroid(PolygonVertices), 0, PolygonVertices);
 
+	// Max-heap by potential: the best candidate is always the top, so subdividing one cell costs a push per child
+	// instead of re-sorting the whole queue.
+	auto ByDescendingPotential = [](const FCell& A, const FCell& B) { return A.Potential > B.Potential; };
+
 	// Create initial grid
-	const float CellSize = GridSize;
-	for (float x = MinBounds.X; x < MaxBounds.X; x += CellSize)
+	const float HalfCell = static_cast<float>(CellSizeD * 0.5);
+	CellQueue.Reserve(static_cast<int32>(NumX * NumY));
+
+	for (int64 i = 0; i < NumX; ++i)
 	{
-		for (float y = MinBounds.Y; y < MaxBounds.Y; y += CellSize)
+		const double x = MinBounds.X + i * CellSizeD;
+		for (int64 j = 0; j < NumY; ++j)
 		{
-			FCell NewCell(FVector2D(x + CellSize * 0.5f, y + CellSize * 0.5f), CellSize * 0.5f, PolygonVertices);
+			const double y = MinBounds.Y + j * CellSizeD;
+
+			FCell NewCell(FVector2D(x + CellSizeD * 0.5, y + CellSizeD * 0.5), HalfCell, PolygonVertices);
 			if (NewCell.Distance > BestCell.Distance)
 			{
 				BestCell = NewCell;
@@ -223,14 +304,13 @@ bool FGeometryUtils::MaxInscribedCircle(const TArray<FVector2D>& PolygonVertices
 		}
 	}
 
-	// Sort by potential (ascending — best candidate at back for O(1) Pop)
-	CellQueue.Sort([](const FCell& A, const FCell& B) { return A.Potential < B.Potential; });
+	CellQueue.Heapify(ByDescendingPotential);
 
 	// Main polylabel loop
-	while (CellQueue.Num() > 0 && CellQueue.Last().Potential - BestCell.Distance > Epsilon)
+	while (CellQueue.Num() > 0 && CellQueue.HeapTop().Potential - BestCell.Distance > Epsilon)
 	{
-		FCell CurrentCell = CellQueue.Last();
-		CellQueue.Pop();
+		FCell CurrentCell = CellQueue.HeapTop();
+		CellQueue.HeapPopDiscard(ByDescendingPotential);
 
 		// Don't subdivide further if we can't possibly get better
 		if (CurrentCell.Potential - BestCell.Distance <= Epsilon)
@@ -259,12 +339,9 @@ bool FGeometryUtils::MaxInscribedCircle(const TArray<FVector2D>& PolygonVertices
 			}
 			if (SubCell.Potential - BestCell.Distance > Epsilon)
 			{
-				CellQueue.Add(SubCell);
+				CellQueue.HeapPush(SubCell, ByDescendingPotential);
 			}
 		}
-
-		// Re-sort queue (ascending — best at back)
-		CellQueue.Sort([](const FCell& A, const FCell& B) { return A.Potential < B.Potential; });
 	}
 
 	OutCenter = BestCell.Center;
@@ -286,15 +363,46 @@ void FGeometryUtils::PoissonDiskSampling(
 	FVector2D MinBounds, MaxBounds;
 	GetPolygonBounds(PolygonVertices, MinBounds, MaxBounds);
 
-	// Grid for spatial acceleration
-	const float CellSize = Radius / FMath::Sqrt(2.0f);
-	const int32 GridWidth = FMath::CeilToInt((MaxBounds.X - MinBounds.X) / CellSize);
-	const int32 GridHeight = FMath::CeilToInt((MaxBounds.Y - MinBounds.Y) / CellSize);
+	// Grid for spatial acceleration. Its natural cell size holds at most one point per cell, so the cell count is a
+	// function of the bounds alone and is unrelated to the MaxPoints the sampler can ever store: a kilometre-scale
+	// bounds asks for billions of buckets, which overflows an int32 product into TArray::SetNum and otherwise dies
+	// in the allocator. Tie the bucket budget to MaxPoints and coarsen the cells until the grid fits it.
+	const int64 BucketBudget = FMath::Clamp(static_cast<int64>(MaxPoints) * 64, static_cast<int64>(1024), PGGrid::MaxGridCells);
 
-	if (GridWidth <= 0 || GridHeight <= 0)
+	// Computed at float width, matching the cell size every caller under the budget receives.
+	const double RequestedCellSize = Radius / FMath::Sqrt(2.0f);
+	double		 CellSizeD = RequestedCellSize;
+	int64		 GridWidth64 = 0;
+	int64		 GridHeight64 = 0;
+	GeomLib_CoarsenToCellBudget(MaxBounds.X - MinBounds.X, MaxBounds.Y - MinBounds.Y, BucketBudget, CellSizeD, GridWidth64, GridHeight64);
+
+	if (GridWidth64 <= 0 || GridHeight64 <= 0 || GridWidth64 * GridHeight64 > BucketBudget)
 	{
 		return;
 	}
+
+	if (CellSizeD > RequestedCellSize)
+	{
+		// A bucket is only an address for the rejection test, and NeighborRing below is derived from the cell size so
+		// the searched ring always spans Radius. The emitted points are therefore the same at any bucket size, which
+		// is why this is a lifecycle fact and not a designer-actionable degradation.
+		UE_LOG(LogRoguelikeGeometry,
+			Verbose,
+			TEXT("[Geometry] PoissonDiskSampling: acceleration grid coarsened from cell %.3f to %.3f to fit %lld buckets for MaxPoints=%d "
+				 "(sampled points are unaffected)"),
+			RequestedCellSize,
+			CellSizeD,
+			static_cast<long long>(BucketBudget),
+			MaxPoints);
+	}
+
+	const float CellSize = static_cast<float>(CellSizeD);
+	const int32 GridWidth = static_cast<int32>(GridWidth64);
+	const int32 GridHeight = static_cast<int32>(GridHeight64);
+
+	// Two points within Radius of each other differ by at most this many buckets on either axis. At the natural cell
+	// size that is the classic 2-cell ring; a coarsened grid needs a narrower ring, never a wider one.
+	const int32 NeighborRing = FMath::FloorToInt(Radius / CellSize) + 1;
 
 	// Grid to store point indices per cell
 	TArray<TArray<int32>> Grid;
@@ -365,9 +473,9 @@ void FGeometryUtils::PoissonDiskSampling(
 			const int32 CandidateGridX = FMath::FloorToInt((CandidatePoint.X - MinBounds.X) / CellSize);
 			const int32 CandidateGridY = FMath::FloorToInt((CandidatePoint.Y - MinBounds.Y) / CellSize);
 
-			for (int32 dx = -2; dx <= 2 && !bTooClose; ++dx)
+			for (int32 dx = -NeighborRing; dx <= NeighborRing && !bTooClose; ++dx)
 			{
-				for (int32 dy = -2; dy <= 2 && !bTooClose; ++dy)
+				for (int32 dy = -NeighborRing; dy <= NeighborRing && !bTooClose; ++dy)
 				{
 					const int32 CheckX = CandidateGridX + dx;
 					const int32 CheckY = CandidateGridY + dy;

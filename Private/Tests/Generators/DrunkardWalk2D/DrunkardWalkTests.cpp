@@ -799,4 +799,113 @@ bool FDrunkardWalkCorridorBranchProbabilityTest::RunTest(const FString& Paramete
 	return true;
 }
 
+// ============================================================
+// Grid-to-diagram conversion
+// ============================================================
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDrunkardWalkGridToDiagramTest, "ProceduralGeometry.DrunkardWalk.GridToDiagramMatchesGrid", DefaultTestFlags)
+
+bool FDrunkardWalkGridToDiagramTest::RunTest(const FString& Parameters)
+{
+	UDrunkardWalkGenerator2D*	Gen = MakeDrunkardGenerator(TEXT("GridToDiagram"), 6);
+	const FDrunkardWalkGridData Data = Gen->GenerateWithGridData();
+
+	const FLayoutDiagram2D& Diagram = Data.Diagram;
+	const int32				GridWidth = Data.GridWidth;
+	const int32				GridHeight = Data.GridHeight;
+	const float				CellSize = Data.CellSize;
+
+	// The conversion narrows the bounds origin to float before positioning vertices, so the reference below has to
+	// do its arithmetic at the same width or the comparison fails on rounding rather than on behaviour.
+	const float MinX = static_cast<float>(Diagram.Bounds.Min.X);
+	const float MinY = static_cast<float>(Diagram.Bounds.Min.Y);
+
+	TestTrue(TEXT("Conversion produced cells"), Diagram.Cells.Num() > 0);
+
+	// A degraded grid rescales the reported cell size away from the configured pitch the conversion uses, which
+	// would make the reference below compare against the wrong rectangle; this config is far under budget.
+	TestFalse(TEXT("This config does not degrade resolution"), Data.bDegradedResolution);
+
+	// Rebuild the mapping the conversion is specified to produce: one cell per carved grid position, in row-major
+	// order, each a CCW rectangle of one grid pitch, neighbours in +X/-X/+Y/-Y order, center cell the first closest
+	// to CenterPoint. Comparing against this pins the emitted values, not just their count.
+	if (Data.Grid.Num() != GridWidth * GridHeight)
+	{
+		AddError(TEXT("Grid array size does not match the reported grid dimensions"));
+		return false;
+	}
+
+	TArray<int32> ExpectedCellIndex;
+	ExpectedCellIndex.Init(INDEX_NONE, GridWidth * GridHeight);
+	int32 ExpectedCount = 0;
+	for (int32 GridIndex = 0; GridIndex < Data.Grid.Num(); ++GridIndex)
+	{
+		if (Data.Grid[GridIndex])
+		{
+			ExpectedCellIndex[GridIndex] = ExpectedCount++;
+		}
+	}
+
+	TestEqual(TEXT("One diagram cell per carved grid cell"), Diagram.Cells.Num(), ExpectedCount);
+
+	static constexpr int32 DX[] = { 1, -1, 0, 0 };
+	static constexpr int32 DY[] = { 0, 0, 1, -1 };
+
+	float ExpectedBestDistSq = FLT_MAX;
+	int32 ExpectedCenterCell = INDEX_NONE;
+	int32 Mismatches = 0;
+
+	for (int32 Y = 0; Y < GridHeight && Mismatches == 0; ++Y)
+	{
+		for (int32 X = 0; X < GridWidth && Mismatches == 0; ++X)
+		{
+			const int32 GridIndex = Y * GridWidth + X;
+			const int32 CellIndex = ExpectedCellIndex[GridIndex];
+			if (CellIndex == INDEX_NONE || !Diagram.Cells.IsValidIndex(CellIndex))
+			{
+				continue;
+			}
+
+			const FLayoutCell2D& Cell = Diagram.Cells[CellIndex];
+
+			const float X0 = MinX + X * CellSize;
+			const float Y0 = MinY + Y * CellSize;
+			const float X1 = MinX + (X + 1) * CellSize;
+			const float Y1 = MinY + (Y + 1) * CellSize;
+
+			const TArray<FVector2D> ExpectedVertices = { FVector2D(X0, Y0), FVector2D(X1, Y0), FVector2D(X1, Y1), FVector2D(X0, Y1) };
+			const FVector2D			ExpectedCenter(MinX + (X + 0.5f) * CellSize, MinY + (Y + 0.5f) * CellSize);
+
+			TArray<int32> ExpectedNeighbors;
+			for (int32 Dir = 0; Dir < 4; ++Dir)
+			{
+				const int32 NX = X + DX[Dir];
+				const int32 NY = Y + DY[Dir];
+				if (NX >= 0 && NX < GridWidth && NY >= 0 && NY < GridHeight && ExpectedCellIndex[NY * GridWidth + NX] != INDEX_NONE)
+				{
+					ExpectedNeighbors.Add(ExpectedCellIndex[NY * GridWidth + NX]);
+				}
+			}
+
+			const float DistSq = FVector2D::DistSquared(ExpectedCenter, Diagram.CenterPoint);
+			if (DistSq < ExpectedBestDistSq)
+			{
+				ExpectedBestDistSq = DistSq;
+				ExpectedCenterCell = CellIndex;
+			}
+
+			if (Cell.CellIndex != CellIndex || Cell.Vertices != ExpectedVertices || Cell.Center != ExpectedCenter
+				|| Cell.Neighbors != ExpectedNeighbors || Cell.bIsExterior != (X == 0 || X == GridWidth - 1 || Y == 0 || Y == GridHeight - 1))
+			{
+				++Mismatches;
+				AddError(FString::Printf(TEXT("Diagram cell %d (grid %d,%d) does not match the expected conversion"), CellIndex, X, Y));
+			}
+		}
+	}
+
+	TestEqual(TEXT("Every diagram cell matches the expected conversion"), Mismatches, 0);
+	TestEqual(TEXT("CenterCellIndex is the first cell closest to CenterPoint"), Diagram.CenterCellIndex, ExpectedCenterCell);
+
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

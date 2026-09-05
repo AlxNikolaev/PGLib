@@ -12,7 +12,7 @@ bool UProceduralMeshFactory::CreatePrismMesh(const FMeshGenerationParams& Params
 		return false;
 	}
 
-	OutMeshData.Clear();
+	OutMeshData.Reset();
 
 	const int32 VertexCount = Params.FoundationVertices.Num();
 
@@ -157,7 +157,7 @@ void UProceduralMeshFactory::BuildVertices(const FMeshGenerationParams& Params, 
 	}
 }
 
-void UProceduralMeshFactory::ComposeFaceTriangles(const TArray<FVector2D>& FoundationVertices, TArray<int32>& Triangles)
+void UProceduralMeshFactory::ComposeFaceTriangles(const TArrayView<const FVector2D> FoundationVertices, TArray<int32>& Triangles)
 {
 	const int32 VertexCount = FoundationVertices.Num();
 	const int32 TopBase = VertexCount;
