@@ -37,10 +37,14 @@ class PROCEDURALGEOMETRY_API ADrunkardWalk2DVisualizer : public AActor
 	UPROPERTY(EditInstanceOnly, Category = "Visualization Layers", meta = (ToolTip = "Wall/floor cell fill."))
 	bool bShowGridCells = true;
 
-	UPROPERTY(EditInstanceOnly, Category = "Visualization Layers", meta = (ToolTip = "Per-region distinct hue tinting on floor cells."))
+	UPROPERTY(EditInstanceOnly,
+		Category = "Visualization Layers",
+		meta = (EditCondition = "bShowRoomHighlights", ToolTip = "Distinct hue per room. Off: every room shares one flat floor tint."))
 	bool bShowRegionColors = true;
 
-	UPROPERTY(EditInstanceOnly, Category = "Visualization Layers", meta = (ToolTip = "Distinct tint overlay for room cells vs corridor cells."))
+	UPROPERTY(EditInstanceOnly,
+		Category = "Visualization Layers",
+		meta = (ToolTip = "Tints room cells apart from corridor cells. Off: rooms render in the corridor color."))
 	bool bShowRoomHighlights = true;
 
 	UPROPERTY(EditInstanceOnly, Category = "Visualization Layers", meta = (ToolTip = "Thin lines at cell boundaries."))

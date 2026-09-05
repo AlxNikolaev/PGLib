@@ -4,6 +4,7 @@
 #include "Generators/CellularAutomata2D/CellularAutomataGenerator2D.h"
 #include "Generators/VisualizerCellMesh.h"
 #include "GeometryUtils/GeometryFunctionLibrary.h"
+#include "SeedHashing.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogCAVisualizer, Log, All);
 
@@ -81,7 +82,24 @@ void ACellularAutomata2DVisualizer::OnConstruction(const FTransform& Transform)
 
 	const double			  StartTime = FPlatformTime::Seconds();
 	FCellularAutomataGridData GridData = Generator->GenerateWithGridData();
-	const double			  GenerationTimeMs = (FPlatformTime::Seconds() - StartTime) * 1000.0;
+
+	// The runtime cave path reconnects isolated regions before it converts the diagram, and styles such as
+	// SwissCheese are only usable with that pass; carving here with the same derived stream keeps the preview
+	// structurally identical to the cave the same config ships. CorridorProbability/CorridorWidth are absent
+	// from FCellularAutomataResolvedParams, so they are read off the config directly, as the runtime does.
+	if (CaveConfig.CorridorProbability > 0.0f)
+	{
+		FRandomStream CorridorStream(static_cast<int32>(PGSeed::HashSeedString(Seed) ^ 0xCA55u));
+		UCellularAutomataGenerator2D::CarveCorridors(GridData, CaveConfig.CorridorProbability, CaveConfig.CorridorWidth, CorridorStream);
+		Generator->RebuildDiagram(GridData);
+
+		// RebuildDiagram re-floods Regions from the carved grid but leaves SurvivingRegions holding the
+		// pre-carve labelling, whose indices no longer name the same regions. Culled cells are already walls
+		// in Grid, so every region the re-flood found is a surviving one.
+		GridData.SurvivingRegions.Init(true, GridData.Regions.Num());
+	}
+
+	const double GenerationTimeMs = (FPlatformTime::Seconds() - StartTime) * 1000.0;
 
 	// Clear previous state — FlushDebugStrings is needed separately because
 	// FlushPersistentDebugLines does not clear DrawDebugString text.

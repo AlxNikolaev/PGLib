@@ -688,4 +688,115 @@ bool FDrunkardWalkDoorWidthTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+// ============================================================
+// Test 19: RoomBorderMargin = 0 ("rooms may touch") still refuses to build on committed geometry.
+// Margin 0 is the value at which the clearance ring collapses onto the candidate cell itself, which
+// every pending cell is exempt from; if the overlap test lives inside that ring, the solver stops
+// consulting committed geometry entirely and stamps rooms straight through earlier ones.
+// ============================================================
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FDrunkardWalkRoomBorderMarginZeroTest, "ProceduralGeometry.DrunkardWalk.RoomBorderMarginZero_NoRoomOverlap", DefaultTestFlags)
+
+bool FDrunkardWalkRoomBorderMarginZeroTest::RunTest(const FString& Parameters)
+{
+	constexpr int32 SeedCount = 80;
+	constexpr int32 RoomCount = 10;
+
+	int32 SampleCount = 0;
+	int32 OverlapCount = 0;
+
+	for (int32 SeedIndex = 0; SeedIndex < SeedCount; ++SeedIndex)
+	{
+		UDrunkardWalkGenerator2D* Gen = MakeDrunkardGenerator(FString::Printf(TEXT("MarginZero%d"), SeedIndex), RoomCount);
+		Gen->SetRoomBorderMargin(0);
+		Gen->SetCorridorTurnProbability(0.0f);
+		Gen->SetCorridorBranchProbability(0.0f);
+		// Growing from a random open room instead of the newest one folds the layout back over itself,
+		// which is where a candidate is offered cells an earlier room already owns.
+		Gen->SetBranchProbability(0.5f);
+
+		const FDrunkardWalkGridData Data = Gen->GenerateWithGridData();
+		if (Data.bDegradedResolution)
+		{
+			continue; // downsampling merges coordinates, so two distinct footprints can legitimately fuse
+		}
+
+		++SampleCount;
+		for (int32 A = 0; A < Data.PlacedRooms.Num(); ++A)
+		{
+			for (int32 B = A + 1; B < Data.PlacedRooms.Num(); ++B)
+			{
+				const FDrunkardWalkPlacedRoom& RA = Data.PlacedRooms[A];
+				const FDrunkardWalkPlacedRoom& RB = Data.PlacedRooms[B];
+
+				const bool bDisjoint = RA.Min.X + RA.Width <= RB.Min.X || RB.Min.X + RB.Width <= RA.Min.X || RA.Min.Y + RA.Height <= RB.Min.Y
+					|| RB.Min.Y + RB.Height <= RA.Min.Y;
+				if (bDisjoint)
+				{
+					continue;
+				}
+
+				++OverlapCount;
+				if (OverlapCount == 1)
+				{
+					AddError(FString::Printf(TEXT("RoomBorderMarginZero: seed %d - room %d [%d,%d]+%dx%d overlaps room %d [%d,%d]+%dx%d"),
+						SeedIndex,
+						A,
+						RA.Min.X,
+						RA.Min.Y,
+						RA.Width,
+						RA.Height,
+						B,
+						RB.Min.X,
+						RB.Min.Y,
+						RB.Width,
+						RB.Height));
+				}
+			}
+		}
+	}
+
+	TestTrue(TEXT("RoomBorderMarginZero: the seed sweep produced usable samples"), SampleCount > 0);
+	TestEqual(TEXT("RoomBorderMarginZero: no two placed rooms share a cell"), OverlapCount, 0);
+
+	return true;
+}
+
+// ============================================================
+// Test 20: CorridorBranchProbability actually places side branches.
+// A fork is seeded one cell off its parent's rail, so the parent's own band sits inside the fork's
+// first clearance ring; unless that band is exempt every fork is rejected and the knob only reshuffles
+// the layout through the RNG it consumes.
+// ============================================================
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FDrunkardWalkCorridorBranchProbabilityTest, "ProceduralGeometry.DrunkardWalk.CorridorBranchProbability_PlacesForks", DefaultTestFlags)
+
+bool FDrunkardWalkCorridorBranchProbabilityTest::RunTest(const FString& Parameters)
+{
+	constexpr int32 SeedCount = 20;
+	constexpr int32 RoomCount = 10;
+
+	int32 ForksWhenBranching = 0;
+	int32 ForksWhenStraight = 0;
+
+	for (int32 SeedIndex = 0; SeedIndex < SeedCount; ++SeedIndex)
+	{
+		// Same seed and same room queue on both runs, so the fork probability is the only difference.
+		const FString Seed = FString::Printf(TEXT("CorridorFork%d"), SeedIndex);
+
+		UDrunkardWalkGenerator2D* Branching = MakeDrunkardGenerator(Seed, RoomCount);
+		Branching->SetCorridorBranchProbability(1.0f);
+		ForksWhenBranching += Branching->GenerateWithGridData().ForksPlaced;
+
+		UDrunkardWalkGenerator2D* Straight = MakeDrunkardGenerator(Seed, RoomCount);
+		Straight->SetCorridorBranchProbability(0.0f);
+		ForksWhenStraight += Straight->GenerateWithGridData().ForksPlaced;
+	}
+
+	TestTrue(TEXT("CorridorBranchProbability: probability 1 places forks"), ForksWhenBranching > 0);
+	TestEqual(TEXT("CorridorBranchProbability: probability 0 places none"), ForksWhenStraight, 0);
+
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

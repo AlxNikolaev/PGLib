@@ -18,6 +18,10 @@ namespace
 	// Corridor color: muted blue-gray, distinct from the saturated room colors
 	const FLinearColor CorridorLinearColor(0.28f, 0.30f, 0.38f);
 
+	// Flat room color used when room highlights are on but per-room hues are off.
+	// Prefixed because adaptive unity can pack this file next to the CA visualizer, which names its own.
+	const FLinearColor DWDefaultFloorLinearColor(0.7f, 0.7f, 0.7f);
+
 	/** Distinct, saturated color per placed room (offset hue so rooms differ strongly from corridors). */
 	FLinearColor GetRoomDistinctColor(int32 RoomIndex)
 	{
@@ -159,8 +163,13 @@ void ADrunkardWalk2DVisualizer::OnConstruction(const FTransform& Transform)
 				}
 			}
 
-			// Always color rooms distinctly so adjacent rooms are visually separable.
-			const FLinearColor RoomColor = GetRoomDistinctColor(RoomId);
+			// Room highlights separate rooms from corridors; region colors separate rooms from each other.
+			// With highlights off, rooms take the corridor color so the layout reads as one undifferentiated floor.
+			FLinearColor RoomColor = CorridorLinearColor;
+			if (bShowRoomHighlights)
+			{
+				RoomColor = bShowRegionColors ? GetRoomDistinctColor(RoomId) : DWDefaultFloorLinearColor;
+			}
 			ProcGen_BuildCellMeshSection(GridMeshComponent, DebugMaterial, SectionIndex, RoomCells, CS, LocalBounds.Min, RoomColor, 1.5f);
 			++SectionIndex;
 		}

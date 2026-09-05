@@ -344,17 +344,23 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 	int32 StatRejectClearance = 0; // candidate touched committed geometry
 	int32 StatTurns = 0;		   // total corridor bends
 	int32 StatForkSeeds = 0;	   // fork opportunities raised
-	int32 StatForksPlaced = 0;	   // forks that became rooms
+	int32 StatForksPlaced = 0;	   // forks that became rooms in a committed attempt
 	int32 StatBacktracks = 0;	   // open-room drops (cornered sources)
+
+	// Cells of the most recent successful trace, so a fork can be handed the rail it grows off as ExemptCells.
+	TSet<FIntPoint>		  LastTraceCorridorCells;
+	const TSet<FIntPoint> NoExemptCells;
 
 	// Traces one corridor (bending + variable width via bounded random walk) from StartOutside heading
 	// InitialDir, then places its room (next from the queue) at the terminal. Appends geometry to the
-	// pending accumulators. When bCollectForks, fork seeds (cell + dir) are appended to OutForkSeeds.
+	// pending accumulators. ExemptCells are ignored by the clearance test (the corridor a fork grows off).
+	// When bCollectForks, fork seeds (cell + dir) are appended to OutForkSeeds.
 	// Returns true if the room fit (geometry appended), false otherwise (nothing appended).
 	auto TraceOne = [&](FIntPoint							 StartOutside,
 						FIntPoint							 InitialDir,
 						int32								 InitialWidth,
 						int32								 SourcePlacedForGraph,
+						const TSet<FIntPoint>&				 ExemptCells,
 						bool								 bCollectForks,
 						TArray<TPair<FIntPoint, FIntPoint>>& OutForkSeeds) -> bool {
 		if (LocalQueueCursor >= Queue.Num())
@@ -433,6 +439,13 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 						{
 							continue;
 						}
+						// A fork is seeded just off its parent's rail, so the parent's band is inside the fork's
+						// first two clearance rings; further along, honouring the exemption would let a turning
+						// fork run back over its parent unrejected.
+						if (k <= 1 && ExemptCells.Contains(N))
+						{
+							continue;
+						}
 						if (SelfSet.Contains(N))
 						{
 							++StatRejectSelfTouch;
@@ -460,8 +473,9 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 
 			if (bCollectForks && k > 0 && k < Len - 1 && CorridorBranchProbability > 0.0f && RandomStream.FRand() < CorridorBranchProbability)
 			{
+				// Seed clear of this band, so a fork starts beside the parent instead of inside it.
 				const FIntPoint ForkDir = TurnDir(Dir, RandomStream.FRand() < 0.5f);
-				ForkSeeds.Add(TPair<FIntPoint, FIntPoint>(Cur + ForkDir, ForkDir));
+				ForkSeeds.Add(TPair<FIntPoint, FIntPoint>(Cur + ForkDir * (Width / 2 + 1), ForkDir));
 				++StatForkSeeds;
 			}
 
@@ -531,6 +545,7 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 			PendingCorridorCells.Add(C);
 			PendingCellSet.Add(C);
 		}
+		LastTraceCorridorCells = TSet<FIntPoint>(MyCells);
 		for (int32 dy = 0; dy < MyH; ++dy)
 		{
 			for (int32 dx = 0; dx < MyW; ++dx)
@@ -629,12 +644,17 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 
 				// Trace the main corridor + room; collect any fork seeds.
 				TArray<TPair<FIntPoint, FIntPoint>> ForkSeeds;
-				if (!TraceOne(StartOutside, Dir, StartWidth, SourcePlacedIndex, true, ForkSeeds))
+				if (!TraceOne(StartOutside, Dir, StartWidth, SourcePlacedIndex, NoExemptCells, true, ForkSeeds))
 				{
 					continue; // main room didn't fit this attempt
 				}
 
+				// Every fork grows off this corridor, so its cells stay exempt for all of them; forks placed
+				// earlier in this attempt do not, so two forks can never plow through each other.
+				const TSet<FIntPoint> ParentCorridorCells = LastTraceCorridorCells;
+
 				// Trace fork branches (one level deep). Each fork connects back to the same source room.
+				int32 AttemptForksPlaced = 0;
 				for (const TPair<FIntPoint, FIntPoint>& ForkSeed : ForkSeeds)
 				{
 					if (LocalQueueCursor >= Queue.Num())
@@ -643,9 +663,9 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 					}
 					const int32							ForkWidth = RandomStream.RandRange(CorridorWidthMin, CorridorWidthMax);
 					TArray<TPair<FIntPoint, FIntPoint>> Unused;
-					if (TraceOne(ForkSeed.Key, ForkSeed.Value, ForkWidth, SourcePlacedIndex, false, Unused))
+					if (TraceOne(ForkSeed.Key, ForkSeed.Value, ForkWidth, SourcePlacedIndex, ParentCorridorCells, false, Unused))
 					{
-						++StatForksPlaced;
+						++AttemptForksPlaced;
 					}
 				}
 
@@ -654,6 +674,20 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 				bool bClear = true;
 				for (const FIntPoint& C : PendingCellSet)
 				{
+					// The overlap test stands outside the margin ring: the ring exempts every pending cell,
+					// so at RoomBorderMargin 0 (a legal "rooms may touch" authoring) it would exempt C itself
+					// and the solver would stamp candidate rooms straight over committed ones.
+					if (CellTypeMap.Contains(C) && !InRect(C, CurMin, CurW, CurH))
+					{
+						bClear = false;
+						break;
+					}
+
+					if (RoomBorderMargin <= 0)
+					{
+						continue;
+					}
+
 					for (int32 ny = -RoomBorderMargin; ny <= RoomBorderMargin && bClear; ++ny)
 					{
 						for (int32 nx = -RoomBorderMargin; nx <= RoomBorderMargin; ++nx)
@@ -710,6 +744,10 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 					CorridorSourceRoom.Add(PRail.SourcePlaced);
 					CorridorTargetRoom.Add(PendingRooms[PRail.TargetPending].PlacedIndex);
 				}
+
+				// Counted here rather than at the trace: an attempt discarded by the clearance test above
+				// contributes no geometry, so its forks must not show up in the layout's fork count.
+				StatForksPlaced += AttemptForksPlaced;
 
 				QueueIdx = LocalQueueCursor;
 				bPlaced = true;
@@ -979,6 +1017,7 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 	Result.RoomCenters = MoveTemp(RoomCenters);
 	Result.PlacedRooms = MoveTemp(PlacedRooms);
 	Result.RequestedRoomCount = RequestedRoomCount;
+	Result.ForksPlaced = StatForksPlaced;
 	Result.GridWidth = GWidth;
 	Result.GridHeight = GHeight;
 	Result.CellSize = CellSizeVal;

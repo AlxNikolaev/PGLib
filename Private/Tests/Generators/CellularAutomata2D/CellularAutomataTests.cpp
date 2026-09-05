@@ -450,4 +450,81 @@ bool FCellularAutomataCarveCorridorsAllConnectedTest::RunTest(const FString& Par
 	return true;
 }
 
+// Test 13: CorridorWidth changes how much a corridor carves
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FCellularAutomataCarveCorridorsWidthTest, "ProceduralGeometry.CellularAutomata.CarveCorridorsWidthChangesCarve", DefaultTestFlags)
+
+bool FCellularAutomataCarveCorridorsWidthTest::RunTest(const FString& Parameters)
+{
+	// Two hand-built floor blobs that share no boundary: the carve is forced regardless of CA randomness,
+	// so CorridorWidth is the only variable between the two runs below.
+	constexpr int32 GridW = 21;
+	constexpr int32 GridH = 21;
+
+	auto MakeTwoRegionGrid = []() {
+		FCellularAutomataGridData Data;
+		Data.GridWidth = GridW;
+		Data.GridHeight = GridH;
+		Data.CellSize = 100.0f;
+		Data.CenterRegionId = -1;
+		Data.Grid.Init(false, GridW * GridH);
+		Data.RegionIds.Init(-1, GridW * GridH);
+		Data.Regions.SetNum(2);
+
+		auto FillBlob = [&Data](int32 MinX, int32 MaxX, int32 RegionId) {
+			for (int32 Y = 8; Y <= 12; ++Y)
+			{
+				for (int32 X = MinX; X <= MaxX; ++X)
+				{
+					const int32 Index = Y * GridW + X;
+					Data.Grid[Index] = true;
+					Data.RegionIds[Index] = RegionId;
+					Data.Regions[RegionId].Add(FIntPoint(X, Y));
+				}
+			}
+		};
+		FillBlob(2, 5, 0);
+		FillBlob(15, 18, 1);
+
+		Data.SurvivingRegions.Init(true, 2);
+
+		// CarveCorridors reads region adjacency off the diagram; two cells with no neighbors is exactly the
+		// disconnected pair it exists to bridge.
+		Data.Diagram.Cells.SetNum(2);
+		Data.Diagram.Cells[0].CellIndex = 0;
+		Data.Diagram.Cells[1].CellIndex = 1;
+
+		return Data;
+	};
+
+	auto CountFloor = [](const FCellularAutomataGridData& Data) {
+		int32 Count = 0;
+		for (bool bIsFloor : Data.Grid)
+		{
+			if (bIsFloor)
+			{
+				++Count;
+			}
+		}
+		return Count;
+	};
+
+	FCellularAutomataGridData NarrowData = MakeTwoRegionGrid();
+	const int32				  FloorBefore = CountFloor(NarrowData);
+
+	FRandomStream NarrowStream(42);
+	UCellularAutomataGenerator2D::CarveCorridors(NarrowData, 1.0f, 1, NarrowStream);
+	const int32 NarrowFloor = CountFloor(NarrowData);
+
+	FCellularAutomataGridData WideData = MakeTwoRegionGrid();
+	FRandomStream			  WideStream(42);
+	UCellularAutomataGenerator2D::CarveCorridors(WideData, 1.0f, 3, WideStream);
+	const int32 WideFloor = CountFloor(WideData);
+
+	TestTrue("Width 1 carves a corridor between the two regions", NarrowFloor > FloorBefore);
+	TestTrue("Width 3 carves strictly more floor than width 1", WideFloor > NarrowFloor);
+
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

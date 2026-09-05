@@ -42,6 +42,7 @@ struct PROCEDURALGEOMETRY_API FDrunkardWalkGridData
 	TArray<FIntPoint>				RoomCenters;			// Grid positions of placed room centers
 	TArray<FDrunkardWalkPlacedRoom> PlacedRooms;			// Full placed-room records
 	int32							RequestedRoomCount = 0; // Total rooms requested (sum of type counts)
+	int32							ForksPlaced = 0;		// Side branches committed into the layout (always 0 when CorridorBranchProbability is 0)
 	int32							GridWidth;
 	int32							GridHeight;
 	float							CellSize;
