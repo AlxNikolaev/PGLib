@@ -2,6 +2,7 @@
 
 #include "Generators/DrunkardWalk2D/DrunkardWalkGenerator2D.h"
 #include "Generators/DrunkardWalk2D/DrunkardWalkConfig.h"
+#include "GridBudget.h"
 #include "../../ProceduralGeometryTestFlags.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
@@ -158,7 +159,7 @@ bool FDrunkardWalkRoomCountMatchesPlacementTest::RunTest(const FString& Paramete
 // ============================================================
 // Test 5: Cell budget — a large footprint degrades resolution instead of returning empty.
 // A single room with 2500×2500 cell footprint produces a raster grid of
-// roughly 2502×2502 = 6.26M cells, which exceeds the 4,194,304-cell limit and is
+// roughly 2502×2502 = 6.26M cells, which exceeds PGGrid::MaxGridCells and is
 // downsampled to fit rather than refused.
 // ============================================================
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDrunkardWalkOOMGuardTest, "ProceduralGeometry.DrunkardWalk.OOMGuard", DefaultTestFlags)
@@ -169,7 +170,7 @@ bool FDrunkardWalkOOMGuardTest::RunTest(const FString& Parameters)
 	const FDrunkardWalkGridData Data = Gen->GenerateWithGridData();
 
 	TestTrue("OOMGuard: degraded resolution flagged", Data.bDegradedResolution);
-	TestTrue("OOMGuard: grid fits the cell budget", (int64)Data.GridWidth * Data.GridHeight <= 4'194'304);
+	TestTrue("OOMGuard: grid fits the cell budget", (int64)Data.GridWidth * Data.GridHeight <= PGGrid::MaxGridCells);
 	TestTrue("OOMGuard: cell size enlarged beyond requested 100", Data.CellSize > 100.0f);
 	TestTrue("OOMGuard: still produces cells", Data.Diagram.Cells.Num() > 0);
 
@@ -534,6 +535,156 @@ bool FDWConfigResolveForTotalMaxRespectedTest::RunTest(const FString& Parameters
 	{
 		TestTrue("ResolveForTotal_MaxRespected: capped type <= Max(4)", Params.RoomTypes[0].Weight <= 4);
 	}
+	return true;
+}
+
+// ============================================================
+// Test 18: A corridor leaves its source room through a door as wide as the corridor,
+// on all four exit sides. The exit loop's band offset and TraceOne's band layout must
+// share one perpendicular convention; when their signs disagree the door on the two
+// affected sides is a cell narrower than the corridor and the missing cell hangs off
+// the room corner, attached only diagonally.
+// ============================================================
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FDrunkardWalkDoorWidthTest, "ProceduralGeometry.DrunkardWalk.DoorWidthMatchesCorridorWidthOnEverySide", DefaultTestFlags)
+
+bool FDrunkardWalkDoorWidthTest::RunTest(const FString& Parameters)
+{
+	// An even corridor width is what a perpendicular sign flip misplaces: the band is laid out
+	// asymmetrically around the rail, so the flipped side loses a cell off the end of the edge.
+	constexpr int32 CorridorWidth = 2;
+	constexpr int32 RoomSide = 4;
+	constexpr int32 SeedCount = 100;
+
+	bool  bFaceObserved[4] = { false, false, false, false };
+	int32 SampleCount = 0;
+
+	for (int32 SeedIndex = 0; SeedIndex < SeedCount; ++SeedIndex)
+	{
+		UDrunkardWalkGenerator2D* Gen = MakeDrunkardGenerator(FString::Printf(TEXT("DoorWidth%d"), SeedIndex), /*RoomCount=*/2, RoomSide);
+		Gen->SetCorridorWidth(CorridorWidth);
+		Gen->SetCorridorTurnProbability(0.0f);
+		Gen->SetCorridorBranchProbability(0.0f);
+		Gen->SetBranchProbability(0.0f);
+
+		const FDrunkardWalkGridData Data = Gen->GenerateWithGridData();
+		if (Data.WalkerPaths.Num() != 1 || Data.CorridorSourceRoom.Num() != 1 || Data.WalkerPaths[0].Num() == 0)
+		{
+			continue; // the walk backtracked into a different shape than this test inspects
+		}
+		const int32 SourceIndex = Data.CorridorSourceRoom[0];
+		if (!Data.PlacedRooms.IsValidIndex(SourceIndex) || Data.GridWidth <= 0 || Data.GridHeight <= 0)
+		{
+			continue;
+		}
+
+		const FDrunkardWalkPlacedRoom& Room = Data.PlacedRooms[SourceIndex];
+		const FIntPoint				   Start = Data.WalkerPaths[0][0];
+
+		// Which face the corridor leaves through: the rail's first cell sits one cell outside exactly one
+		// of the four faces, and the three coordinates that would name another face are inside the footprint.
+		int32 Face = INDEX_NONE;
+		if (Start.X == Room.Min.X + Room.Width)
+		{
+			Face = 0;
+		}
+		else if (Start.X == Room.Min.X - 1)
+		{
+			Face = 1;
+		}
+		else if (Start.Y == Room.Min.Y + Room.Height)
+		{
+			Face = 2;
+		}
+		else if (Start.Y == Room.Min.Y - 1)
+		{
+			Face = 3;
+		}
+		if (Face == INDEX_NONE)
+		{
+			AddError(FString::Printf(TEXT("DoorWidth: seed %d - corridor start (%d,%d) is not adjacent to source room [%d,%d]+%dx%d"),
+				SeedIndex,
+				Start.X,
+				Start.Y,
+				Room.Min.X,
+				Room.Min.Y,
+				Room.Width,
+				Room.Height));
+			continue;
+		}
+
+		const bool	bVerticalFace = (Face <= 1); // the door line runs along Y for the -X/+X faces
+		const int32 LineFixed = (Face == 0) ? Room.Min.X + Room.Width
+			: (Face == 1)					? Room.Min.X - 1
+			: (Face == 2)					? Room.Min.Y + Room.Height
+											: Room.Min.Y - 1;
+		const int32 InnerFixed = (Face == 0) ? Room.Min.X + Room.Width - 1
+			: (Face == 1)					 ? Room.Min.X
+			: (Face == 2)					 ? Room.Min.Y + Room.Height - 1
+											 : Room.Min.Y;
+		const int32 SpanMin = bVerticalFace ? Room.Min.Y : Room.Min.X;
+		const int32 SpanMax = bVerticalFace ? Room.Min.Y + Room.Height - 1 : Room.Min.X + Room.Width - 1;
+		const int32 SpanLimit = bVerticalFace ? Data.GridHeight : Data.GridWidth;
+
+		auto CellTypeAt = [&Data](int32 X, int32 Y) -> uint8 {
+			if (X < 0 || X >= Data.GridWidth || Y < 0 || Y >= Data.GridHeight)
+			{
+				return EDrunkardWalkCellType::Empty;
+			}
+			return Data.CellType[Y * Data.GridWidth + X];
+		};
+
+		int32 DoorCount = 0;
+		int32 DoorMin = MAX_int32;
+		int32 DoorMax = MIN_int32;
+		int32 StrayCount = 0;
+
+		for (int32 Along = 0; Along < SpanLimit; ++Along)
+		{
+			const int32 X = bVerticalFace ? LineFixed : Along;
+			const int32 Y = bVerticalFace ? Along : LineFixed;
+			if (CellTypeAt(X, Y) != EDrunkardWalkCellType::Corridor)
+			{
+				continue;
+			}
+
+			// A door cell is 4-adjacent to a floor cell of the source room's own footprint; a corridor cell
+			// on this line that only touches the room diagonally is a nub hanging off the corner.
+			const int32 InnerX = bVerticalFace ? InnerFixed : Along;
+			const int32 InnerY = bVerticalFace ? Along : InnerFixed;
+			const bool	bInsideSpan = Along >= SpanMin && Along <= SpanMax;
+			if (bInsideSpan && CellTypeAt(InnerX, InnerY) == EDrunkardWalkCellType::Room)
+			{
+				++DoorCount;
+				DoorMin = FMath::Min(DoorMin, Along);
+				DoorMax = FMath::Max(DoorMax, Along);
+			}
+			else
+			{
+				++StrayCount;
+			}
+		}
+
+		const FString Context = FString::Printf(TEXT("DoorWidth: seed %d face %d"), SeedIndex, Face);
+		TestEqual(*(Context + TEXT(" - door is as wide as the corridor")), DoorCount, CorridorWidth);
+		TestEqual(*(Context + TEXT(" - no corridor cell hangs off the face")), StrayCount, 0);
+		if (DoorCount > 0)
+		{
+			TestEqual(*(Context + TEXT(" - door cells are contiguous")), DoorMax - DoorMin + 1, DoorCount);
+		}
+
+		bFaceObserved[Face] = true;
+		++SampleCount;
+	}
+
+	TestTrue(TEXT("DoorWidth: the seed sweep produced usable samples"), SampleCount > 0);
+	for (int32 Face = 0; Face < 4; ++Face)
+	{
+		// Only two of the four sides are affected by a perpendicular sign flip, so a sweep that never
+		// exercises one of them would pass without testing the thing this test exists for.
+		TestTrue(*FString::Printf(TEXT("DoorWidth: exit face %d was exercised by the seed sweep"), Face), bFaceObserved[Face]);
+	}
+
 	return true;
 }
 

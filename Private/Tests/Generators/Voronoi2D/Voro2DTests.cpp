@@ -649,4 +649,87 @@ bool FVoronoiRelaxSitesDuplicateGuardTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+// Test: a regular lattice makes four cells meet at one point. Cells that touch only at that corner must
+// NOT be neighbours, and every recorded neighbour pair must be retrievable as a shared edge — adjacency
+// and edge retrieval answer the same question and may never disagree.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVoronoiCornerContactTest, "ProceduralGeometry.Voronoi.CornerContactIsNotAdjacent", DefaultTestFlags)
+
+bool FVoronoiCornerContactTest::RunTest(const FString& Parameters)
+{
+	// 3x3 lattice with zero jitter: cells are exact 100x100 squares, so diagonal pairs meet at a single
+	// point and orthogonal pairs share a full 100-unit border.
+	constexpr int32 GridSide = 3;
+	constexpr float CellSize = 100.f;
+
+	UVoronoiGenerator2D* Generator = NewObject<UVoronoiGenerator2D>();
+	Generator->SetBounds(FBox2D(FVector2D(0, 0), FVector2D(GridSide * CellSize, GridSide * CellSize)));
+
+	TArray<FVector2D> Sites;
+	Sites.Reserve(GridSide * GridSide);
+	for (int32 Row = 0; Row < GridSide; ++Row)
+	{
+		for (int32 Col = 0; Col < GridSide; ++Col)
+		{
+			Sites.Emplace((Col + 0.5f) * CellSize, (Row + 0.5f) * CellSize);
+		}
+	}
+
+	const FVoronoiDiagram2D Diagram = Generator->GenerateFromSites(Sites);
+	TestEqual("Diagram should have one cell per site", Diagram.Cells.Num(), Sites.Num());
+
+	for (int32 IndexA = 0; IndexA < Diagram.Cells.Num(); ++IndexA)
+	{
+		const int32 ColA = IndexA % GridSide;
+		const int32 RowA = IndexA / GridSide;
+
+		for (int32 IndexB = IndexA + 1; IndexB < Diagram.Cells.Num(); ++IndexB)
+		{
+			const int32 ColB = IndexB % GridSide;
+			const int32 RowB = IndexB / GridSide;
+
+			const int32 ColStep = FMath::Abs(ColA - ColB);
+			const int32 RowStep = FMath::Abs(RowA - RowB);
+			const bool	bOrthogonal = (ColStep + RowStep) == 1;
+			const bool	bDiagonal = ColStep == 1 && RowStep == 1;
+
+			const bool bRecordedAB = Diagram.Cells[IndexA].Neighbors.Contains(IndexB);
+			const bool bRecordedBA = Diagram.Cells[IndexB].Neighbors.Contains(IndexA);
+			TestTrue(FString::Printf(TEXT("Adjacency %d<->%d is symmetric"), IndexA, IndexB), bRecordedAB == bRecordedBA);
+
+			if (bOrthogonal)
+			{
+				TestTrue(FString::Printf(TEXT("Cells %d and %d share a border and must be neighbours"), IndexA, IndexB), bRecordedAB);
+			}
+			else
+			{
+				TestFalse(FString::Printf(TEXT("Cells %d and %d touch at most at a corner and must not be neighbours"), IndexA, IndexB), bRecordedAB);
+			}
+
+			if (bDiagonal)
+			{
+				FVector2D CornerStart, CornerEnd;
+				TestFalse(FString::Printf(TEXT("Corner contact %d/%d yields no shared edge"), IndexA, IndexB),
+					Diagram.GetSharedEdge(IndexA, IndexB, CornerStart, CornerEnd));
+			}
+		}
+	}
+
+	// Every neighbour the diagram claims must be retrievable as an edge, in both directions.
+	for (int32 IndexA = 0; IndexA < Diagram.Cells.Num(); ++IndexA)
+	{
+		for (const int32 IndexB : Diagram.Cells[IndexA].Neighbors)
+		{
+			FVector2D EdgeStart, EdgeEnd;
+			TestTrue(FString::Printf(TEXT("Neighbour pair %d->%d has a retrievable shared edge"), IndexA, IndexB),
+				Diagram.GetSharedEdge(IndexA, IndexB, EdgeStart, EdgeEnd));
+			TestEqual(FString::Printf(TEXT("Shared edge %d->%d spans the full cell border"), IndexA, IndexB),
+				static_cast<float>(FVector2D::Distance(EdgeStart, EdgeEnd)),
+				CellSize,
+				0.01f);
+		}
+	}
+
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

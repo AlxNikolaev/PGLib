@@ -1,5 +1,6 @@
 #include "Generators/DrunkardWalk2D/DrunkardWalkGenerator2D.h"
 
+#include "GridBudget.h"
 #include "ProceduralGeometry.h"
 
 namespace
@@ -7,7 +8,6 @@ namespace
 	// Side indices: 0=+X (right), 1=-X (left), 2=+Y (up), 3=-Y (down).
 	// Opposite(side) = side ^ 1 (0<->1, 2<->3).
 	const FIntPoint GDirVec[4] = { FIntPoint(1, 0), FIntPoint(-1, 0), FIntPoint(0, 1), FIntPoint(0, -1) };
-	const FIntPoint GPerpVec[4] = { FIntPoint(0, 1), FIntPoint(0, 1), FIntPoint(1, 0), FIntPoint(1, 0) };
 
 	/** A room under construction during the walk, in signed grid coordinates. */
 	struct FWalkRoom
@@ -588,7 +588,7 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 		{
 			const int32		Side = OpenRooms[SourceIdx].AvailableSides.Pop();
 			const FIntPoint Dir = GDirVec[Side];
-			const FIntPoint Perp = GPerpVec[Side];
+			const FIntPoint Perp = PerpOf(Dir); // TraceOne lays its bands out along PerpOf(Dir); the band offset must use the same sign
 			const int32		EdgeLen = (Side <= 1) ? CurH : CurW; // length of the source edge along Perp
 
 			// The starting band must fit on the source edge.
@@ -597,7 +597,9 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 				continue;
 			}
 
-			// Outside-adjacent edge origin (Perp index 0).
+			// Outside-adjacent edge cell at perpendicular index 0. Which end of the edge span that is
+			// flips with the sign of PerpOf(Dir), so sides 1 and 2 start from the far corner — otherwise
+			// the band walks off the edge and the door is a cell narrower than the corridor.
 			FIntPoint O;
 			switch (Side)
 			{
@@ -605,10 +607,10 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 					O = FIntPoint(CurMin.X + CurW, CurMin.Y);
 					break;
 				case 1:
-					O = FIntPoint(CurMin.X - 1, CurMin.Y);
+					O = FIntPoint(CurMin.X - 1, CurMin.Y + CurH - 1);
 					break;
 				case 2:
-					O = FIntPoint(CurMin.X, CurMin.Y + CurH);
+					O = FIntPoint(CurMin.X + CurW - 1, CurMin.Y + CurH);
 					break;
 				default:
 					O = FIntPoint(CurMin.X, CurMin.Y - 1);
@@ -755,8 +757,6 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 
 	// --- Rasterize signed cells into a final grid sized to actual extents ---
 
-	constexpr int64 MaxCells = 4'194'304;
-
 	auto ComputeExtents = [&](FIntPoint& OutMin, FIntPoint& OutMax) {
 		OutMin = FIntPoint(MAX_int32, MAX_int32);
 		OutMax = FIntPoint(MIN_int32, MIN_int32);
@@ -788,10 +788,10 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 		const int32 Pad = FMath::Max(1, WallThickness);
 		const int64 RawWidth = (MaxExtent.X - MinExtent.X + 1) + 2 * Pad;
 		const int64 RawHeight = (MaxExtent.Y - MinExtent.Y + 1) + 2 * Pad;
-		if (RawWidth * RawHeight > MaxCells)
+		if (RawWidth * RawHeight > PGGrid::MaxGridCells)
 		{
-			const int32 DownsampleFactor =
-				FMath::CeilToInt(FMath::Sqrt(static_cast<double>(RawWidth) * static_cast<double>(RawHeight) / static_cast<double>(MaxCells)));
+			const int32 DownsampleFactor = FMath::CeilToInt(
+				FMath::Sqrt(static_cast<double>(RawWidth) * static_cast<double>(RawHeight) / static_cast<double>(PGGrid::MaxGridCells)));
 
 			auto CoarsenCoord = [DownsampleFactor](int32 V) { return FMath::FloorToInt(static_cast<float>(V) / DownsampleFactor); };
 
@@ -834,7 +834,7 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 				TEXT("[DW] Cell budget exceeded: %lldx%lld would exceed %lld cells; degrading by %dx (CellSize=%.1f)."),
 				RawWidth,
 				RawHeight,
-				MaxCells,
+				PGGrid::MaxGridCells,
 				DownsampleFactor,
 				CellSizeVal);
 		}

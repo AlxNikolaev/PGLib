@@ -76,6 +76,17 @@ int32 FVoronoiDiagram2D::FindCellContainingPoint(const FVector2D& Point) const
 	return INDEX_NONE;
 }
 
+float VoronoiUtils::ComputeAdjacencyTolerance(const FBox2D& Bounds)
+{
+	const float MaxExtent = FMath::Max(Bounds.GetExtent().X, Bounds.GetExtent().Y);
+	return FMath::Max(MaxExtent * 1e-4f, UE_KINDA_SMALL_NUMBER);
+}
+
+bool VoronoiUtils::VerticesCoincide(const FVector2D& A, const FVector2D& B, const float Tolerance)
+{
+	return FVector2D::Distance(A, B) < Tolerance;
+}
+
 bool VoronoiUtils::GetSharedEdge(
 	const TArray<FVector2D>& VertsA, const TArray<FVector2D>& VertsB, float Tolerance, FVector2D& OutStart, FVector2D& OutEnd)
 {
@@ -84,7 +95,7 @@ bool VoronoiUtils::GetSharedEdge(
 	{
 		for (const FVector2D& VB : VertsB)
 		{
-			if (FVector2D::Distance(VA, VB) < Tolerance)
+			if (VerticesCoincide(VA, VB, Tolerance))
 			{
 				Shared.AddUnique(VA);
 				break;
@@ -113,7 +124,8 @@ bool VoronoiUtils::GetSharedEdge(
 		}
 	}
 
-	if (BestDistSq <= Tolerance * Tolerance)
+	// The farthest-apart pair still coinciding means the cells meet at a single point, not along a border.
+	if (VerticesCoincide(Shared[BestI], Shared[BestJ], Tolerance))
 	{
 		return false;
 	}
@@ -130,8 +142,7 @@ bool FVoronoiDiagram2D::GetSharedEdge(const int32 CellA, const int32 CellB, FVec
 		return false;
 	}
 
-	const float MaxExtent = FMath::Max(Bounds.GetExtent().X, Bounds.GetExtent().Y);
-	const float Tolerance = FMath::Max(MaxExtent * 1e-4f, UE_KINDA_SMALL_NUMBER);
+	const float Tolerance = VoronoiUtils::ComputeAdjacencyTolerance(Bounds);
 
 	return VoronoiUtils::GetSharedEdge(Cells[CellA].Vertices, Cells[CellB].Vertices, Tolerance, OutStart, OutEnd);
 }
@@ -307,8 +318,7 @@ void UVoronoiGenerator2D::ComputeVoronoiCells(const TArray<FVector2D>& Sites, FV
 	}
 
 	{
-		const float MaxExtent = FMath::Max(Bounds.GetExtent().X, Bounds.GetExtent().Y);
-		const float Tolerance = FMath::Max(MaxExtent * 1e-4f, UE_KINDA_SMALL_NUMBER);
+		const float Tolerance = VoronoiUtils::ComputeAdjacencyTolerance(Bounds);
 		// Bucket granularity = Tolerance/2 so true clip coincidences (< Tolerance apart) hash
 		// within ±2 buckets of each other; the 3x3 neighborhood probe below catches them all.
 		const double QuantStep = static_cast<double>(Tolerance) * 0.5;
@@ -358,34 +368,52 @@ void UVoronoiGenerator2D::ComputeVoronoiCells(const TArray<FVector2D>& Sites, FV
 			}
 		}
 
-		// Verify each candidate pair by counting vertex pairs that are within Tolerance of each
-		// other. Pairs with 2+ coincident vertices share a Voronoi edge; corner-only contacts
-		// share 1 and are excluded.
-		const float ToleranceSq = Tolerance * Tolerance;
+		// Verify each candidate pair by finding two DISTINCT A-vertices that each coincide with some
+		// B-vertex. Counting coincident PAIRS instead would let a single corner contact qualify as soon
+		// as one polygon carries that corner twice, so two cells meeting at a zero-width point would be
+		// recorded as neighbours. Both the coincidence and the far-apart test go through
+		// VoronoiUtils::VerticesCoincide at the same tolerance VoronoiUtils::GetSharedEdge will use, so
+		// adjacency cannot claim an edge that edge retrieval then refuses to return.
+		TArray<FVector2D> SharedVerts;
 		for (const TPair<int32, int32>& Pair : CandidatePairs)
 		{
 			const FVoronoiCell2D& A = OutDiagram.Cells[Pair.Key];
 			const FVoronoiCell2D& B = OutDiagram.Cells[Pair.Value];
-			int32				  SharedCount = 0;
+
+			SharedVerts.Reset();
+			bool bSharesEdge = false;
 			for (const FVector2D& VA : A.Vertices)
 			{
+				bool bCoincidesWithB = false;
 				for (const FVector2D& VB : B.Vertices)
 				{
-					if (FVector2D::DistSquared(VA, VB) < ToleranceSq)
+					if (VoronoiUtils::VerticesCoincide(VA, VB, Tolerance))
 					{
-						++SharedCount;
-						if (SharedCount >= 2)
-						{
-							break;
-						}
+						bCoincidesWithB = true;
+						break;
 					}
 				}
-				if (SharedCount >= 2)
+				if (!bCoincidesWithB)
+				{
+					continue;
+				}
+
+				for (const FVector2D& Existing : SharedVerts)
+				{
+					if (!VoronoiUtils::VerticesCoincide(Existing, VA, Tolerance))
+					{
+						bSharesEdge = true;
+						break;
+					}
+				}
+				if (bSharesEdge)
 				{
 					break;
 				}
+				SharedVerts.Add(VA);
 			}
-			if (SharedCount >= 2)
+
+			if (bSharesEdge)
 			{
 				OutDiagram.Cells[Pair.Key].Neighbors.AddUnique(Pair.Value);
 				OutDiagram.Cells[Pair.Value].Neighbors.AddUnique(Pair.Key);

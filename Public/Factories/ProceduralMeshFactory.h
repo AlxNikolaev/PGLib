@@ -19,6 +19,12 @@ struct PROCEDURALGEOMETRY_API FMeshGenerationParams
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	float Height = 100.0f;
 
+	/** Z of the prism's bottom plane; the top plane lands at BaseZ + Height. Callers that seat a prism on a
+	 *  non-zero base plane pass it here rather than translating the emitted vertices afterwards, so the mesh
+	 *  and everything measured against its top surface share one origin. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	double BaseZ = 0.0;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	float UVScale = 0.01f;
 
@@ -96,7 +102,7 @@ class PROCEDURALGEOMETRY_API UProceduralMeshFactory : public UObject
 	static void CalcTangentsAndColors(int32 VertexCount, const FLinearColor& Color, FMeshData& MeshData);
 
 public:
-	/** Creates a prism mesh from a convex, CCW polygon footprint extruded by Height.
+	/** Creates a prism mesh from a convex, CCW polygon footprint spanning Z in [BaseZ, BaseZ + Height].
 	 *  Precondition: FoundationVertices must be convex and wound counter-clockwise.
 	 *  Concave polygons produce broken cap geometry (fan triangulation from vertex 0 is only
 	 *  correct for convex input). A warning is logged when a reflex vertex is detected. */

@@ -130,6 +130,78 @@ bool FClipNearTangentialTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+// Test 5b: A clip plane running exactly through two polygon vertices emits each of them once.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FClipPlaneCoincidentVertexTest, "ProceduralGeometry.GeometryUtils.Clip.PlaneCoincidentVertexEmittedOnce", DefaultTestFlags)
+
+bool FClipPlaneCoincidentVertexTest::RunTest(const FString& Parameters)
+{
+	// Counts cyclically consecutive vertex pairs that sit on top of each other.
+	const auto CountCoincidentNeighbours = [](const TArray<FVector2D>& Vertices) -> int32 {
+		int32 Count = 0;
+		for (int32 i = 0; i < Vertices.Num(); ++i)
+		{
+			if (FVector2D::Distance(Vertices[i], Vertices[(i + 1) % Vertices.Num()]) < UE_KINDA_SMALL_NUMBER)
+			{
+				++Count;
+			}
+		}
+		return Count;
+	};
+
+	// The diagonal through (0,0) and (100,100) touches two square corners exactly. Walking the square
+	// CCW hits both degenerate cases in one pass: the crossing at (0,0) lands on the edge's Prev end and
+	// the crossing at (100,100) lands on its Curr end, and both endpoints are appended in their own right.
+	{
+		TArray<FVector2D> Polygon = MakeSquare100();
+
+		// PlanePoint=(0,0), PlaneNormal=(1,-1) → kept side: X - Y <= 0 (the upper-left triangle).
+		const bool bResult = FGeometryUtils::ClipPolygonByHalfPlane(Polygon, FVector2D(0, 0), FVector2D(1, -1));
+
+		TestTrue("Upper-left half: should return true", bResult);
+		TestEqual("Upper-left half: triangle has exactly 3 vertices", Polygon.Num(), 3);
+		TestEqual("Upper-left half: no consecutive coincident vertices", CountCoincidentNeighbours(Polygon), 0);
+		for (int32 i = 0; i < Polygon.Num(); ++i)
+		{
+			TestTrue(
+				FString::Printf(TEXT("Upper-left half: vertex %d satisfies X - Y <= 0"), i), Polygon[i].X - Polygon[i].Y <= UE_KINDA_SMALL_NUMBER);
+		}
+	}
+
+	// The mirrored half-plane keeps the same two degenerate branches but hits them at the opposite corners
+	// and in the opposite order, so this half confirms independently that neither endpoint is emitted twice.
+	{
+		TArray<FVector2D> Polygon = MakeSquare100();
+
+		// PlanePoint=(0,0), PlaneNormal=(-1,1) → kept side: Y - X <= 0 (the lower-right triangle).
+		const bool bResult = FGeometryUtils::ClipPolygonByHalfPlane(Polygon, FVector2D(0, 0), FVector2D(-1, 1));
+
+		TestTrue("Lower-right half: should return true", bResult);
+		TestEqual("Lower-right half: triangle has exactly 3 vertices", Polygon.Num(), 3);
+		TestEqual("Lower-right half: no consecutive coincident vertices", CountCoincidentNeighbours(Polygon), 0);
+		for (int32 i = 0; i < Polygon.Num(); ++i)
+		{
+			TestTrue(
+				FString::Printf(TEXT("Lower-right half: vertex %d satisfies Y - X <= 0"), i), Polygon[i].Y - Polygon[i].X <= UE_KINDA_SMALL_NUMBER);
+		}
+	}
+
+	// A triangle whose clip plane runs through two of its corners survives as those two corners alone.
+	// Emitting each of them once means the result is a two-vertex sliver and the clip reports failure, so
+	// the caller drops a zero-area cell instead of accepting a "triangle" made of a duplicated point.
+	{
+		TArray<FVector2D> Polygon = { FVector2D(0, 0), FVector2D(100, 100), FVector2D(100, 0) };
+
+		// PlanePoint=(0,0), PlaneNormal=(1,-1) → kept side: X - Y <= 0, which only (0,0) and (100,100) meet.
+		const bool bResult = FGeometryUtils::ClipPolygonByHalfPlane(Polygon, FVector2D(0, 0), FVector2D(1, -1));
+
+		TestFalse("Degenerate sliver: clip reports failure", bResult);
+		TestEqual("Degenerate sliver: exactly the two plane-coincident corners remain", Polygon.Num(), 2);
+	}
+
+	return true;
+}
+
 // ============================================================
 // SortPlaneVerticesByAngle
 // ============================================================

@@ -1,5 +1,6 @@
 #include "Generators/CellularAutomata2D/CellularAutomataGenerator2D.h"
 
+#include "GridBudget.h"
 #include "ProceduralGeometry.h"
 
 UCellularAutomataGenerator2D::UCellularAutomataGenerator2D()
@@ -143,8 +144,6 @@ FCellularAutomataGridData UCellularAutomataGenerator2D::GenerateInternal()
 		MinRegionSize,
 		bKeepCenterRegion ? TEXT("true") : TEXT("false"));
 
-	constexpr int64 MaxCells = 4'194'304;
-
 	const float BoundsWidth = Bounds.Max.X - Bounds.Min.X;
 	const float BoundsHeight = Bounds.Max.Y - Bounds.Min.Y;
 
@@ -162,13 +161,14 @@ FCellularAutomataGridData UCellularAutomataGenerator2D::GenerateInternal()
 	bool bDegradedResolution = false;
 
 	// Enlarge the cell size so the grid fits the cell budget rather than refusing to generate. Solving
-	// (W/c)(H/c) <= MaxCells for c gives c >= sqrt(W*H / MaxCells).
+	// (W/c)(H/c) <= MaxGridCells for c gives c >= sqrt(W*H / MaxGridCells).
 	if (static_cast<int64>(FMath::CeilToInt(BoundsWidth / static_cast<float>(GridSize)))
 			* static_cast<int64>(FMath::CeilToInt(BoundsHeight / static_cast<float>(GridSize)))
-		> MaxCells)
+		> PGGrid::MaxGridCells)
 	{
 		const int32	 OriginalGridSize = GridSize;
-		const double MinCellSize = FMath::Sqrt(static_cast<double>(BoundsWidth) * static_cast<double>(BoundsHeight) / static_cast<double>(MaxCells));
+		const double MinCellSize =
+			FMath::Sqrt(static_cast<double>(BoundsWidth) * static_cast<double>(BoundsHeight) / static_cast<double>(PGGrid::MaxGridCells));
 		GridSize = FMath::Max(GridSize, FMath::CeilToInt(MinCellSize));
 		bDegradedResolution = true;
 
@@ -178,7 +178,7 @@ FCellularAutomataGridData UCellularAutomataGenerator2D::GenerateInternal()
 			Warning,
 			TEXT("[CA] Cell budget exceeded: GridSize %d would produce >%lld cells; degrading to GridSize %d (%dx%d)."),
 			OriginalGridSize,
-			MaxCells,
+			PGGrid::MaxGridCells,
 			GridSize,
 			DegradedWidth,
 			DegradedHeight);

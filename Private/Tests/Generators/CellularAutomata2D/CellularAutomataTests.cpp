@@ -1,5 +1,6 @@
 #include "Generators/CellularAutomata2D/CellularAutomataGenerator2D.h"
 #include "Generators/CellularAutomata2D/CellularAutomataConfig.h"
+#include "GridBudget.h"
 #include "../../ProceduralGeometryTestFlags.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
@@ -215,7 +216,7 @@ bool FCellularAutomataOOMGuardTest::RunTest(const FString& Parameters)
 	const FCellularAutomataGridData Data = Generator->GenerateWithGridData();
 
 	TestTrue("Cell budget should flag degraded resolution", Data.bDegradedResolution);
-	TestTrue("Degraded grid should fit the cell budget", (int64)Data.GridWidth * Data.GridHeight <= 4'194'304);
+	TestTrue("Degraded grid should fit the cell budget", (int64)Data.GridWidth * Data.GridHeight <= PGGrid::MaxGridCells);
 	TestTrue("Degraded cell size should exceed the requested 10", Data.CellSize > 10.0f);
 	TestTrue("Degraded generation should still produce cells", Data.Diagram.Cells.Num() > 0);
 

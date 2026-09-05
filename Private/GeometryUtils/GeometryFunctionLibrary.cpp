@@ -54,6 +54,14 @@ bool FGeometryUtils::ClipPolygonByHalfPlane(
 		return InPrevSide / Denominator;
 	};
 
+	// A crossing point that lands on one of the edge's own endpoints must be emitted once, not twice:
+	// that endpoint is already appended in its own right (Prev by the previous iteration, Curr by the
+	// branch below), so the interpolated copy is a zero-length edge that every downstream degeneracy
+	// filter then has to compensate for. The guard is expressed on Alpha rather than on a world-space
+	// distance because Alpha is scale-free: the same threshold holds for a 10-unit cell and for a
+	// 100000-unit bounds box.
+	constexpr double CoincidentAlpha = UE_DOUBLE_KINDA_SMALL_NUMBER;
+
 	for (const FVector2D& Curr : OutPolygon)
 	{
 		double CurrSide = FVector2D::DotProduct(Curr - PlanePoint, PlaneNormal);
@@ -64,13 +72,21 @@ bool FGeometryUtils::ClipPolygonByHalfPlane(
 		}
 		else if (PrevSide <= 0.0 && CurrSide > 0.0)
 		{
+			// Alpha lies in [0,1) here, so only the Prev end can coincide.
 			double Alpha = SafeAlpha(PrevSide, CurrSide);
-			Scratch.Add(FMath::Lerp(Prev, Curr, Alpha));
+			if (Alpha > CoincidentAlpha)
+			{
+				Scratch.Add(FMath::Lerp(Prev, Curr, Alpha));
+			}
 		}
 		else if (PrevSide > 0.0 && CurrSide <= 0.0)
 		{
+			// Alpha lies in (0,1] here, so only the Curr end can coincide.
 			double Alpha = SafeAlpha(PrevSide, CurrSide);
-			Scratch.Add(FMath::Lerp(Prev, Curr, Alpha));
+			if (Alpha < 1.0 - CoincidentAlpha)
+			{
+				Scratch.Add(FMath::Lerp(Prev, Curr, Alpha));
+			}
 			Scratch.Add(Curr);
 		}
 

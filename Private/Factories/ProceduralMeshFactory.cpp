@@ -152,8 +152,8 @@ void UProceduralMeshFactory::BuildVertices(const FMeshGenerationParams& Params, 
 
 	for (const FVector2D& Vertex : Params.FoundationVertices)
 	{
-		BottomVerts.Emplace(Vertex, 0.0f);
-		TopVerts.Emplace(Vertex, Params.Height);
+		BottomVerts.Emplace(Vertex, Params.BaseZ);
+		TopVerts.Emplace(Vertex, Params.BaseZ + static_cast<double>(Params.Height));
 	}
 }
 

@@ -76,16 +76,30 @@ struct PROCEDURALGEOMETRY_API FVoronoiDiagram2D
 
 /**
  * Shared-edge utilities used by both FVoronoiDiagram2D and the runtime FVoronoiGridDiagram.
- * The tolerance must be pre-computed by the caller from its own bounds or grid cell size.
  */
 namespace VoronoiUtils
 {
 	/**
+	 * The vertex-coincidence tolerance for a diagram spanning Bounds, and the single owner of that value.
+	 * Cell polygons are clipped independently per site, so vertices that are geometrically the same point
+	 * differ by accumulated rounding. Every consumer that asks "do these two cells share an edge" must weld
+	 * with the value the pass that filled Cell.Neighbors used, or it silently refuses edges the diagram
+	 * itself claims exist (a missing wall segment, a dropped MST candidate), so both sides call this.
+	 */
+	PROCEDURALGEOMETRY_API float ComputeAdjacencyTolerance(const FBox2D& Bounds);
+
+	/**
+	 * Whether two independently clipped vertices denote the same point at the given tolerance.
+	 * The adjacency pass and GetSharedEdge must answer that question with identical arithmetic, or a pair
+	 * sitting exactly on the threshold can be recorded as neighbours and then refused an edge.
+	 */
+	PROCEDURALGEOMETRY_API bool VerticesCoincide(const FVector2D& A, const FVector2D& B, float Tolerance);
+
+	/**
 	 * Finds the shared edge between two Voronoi cells given their vertex lists.
 	 * Returns true (and fills OutStart/OutEnd) when the cells share at least two coincident
 	 * vertices within Tolerance that are farther apart than a corner-only contact.
-	 * Tolerance: caller-supplied, derived from Max(MaxExtent*1e-4, UE_KINDA_SMALL_NUMBER) for
-	 * diagram-relative scales, or from GridCellSize*1e-3 for grid-relative scales.
+	 * Tolerance: caller-supplied, normally ComputeAdjacencyTolerance over the diagram's bounds.
 	 */
 	PROCEDURALGEOMETRY_API bool GetSharedEdge(
 		const TArray<FVector2D>& VertsA, const TArray<FVector2D>& VertsB, float Tolerance, FVector2D& OutStart, FVector2D& OutEnd);
