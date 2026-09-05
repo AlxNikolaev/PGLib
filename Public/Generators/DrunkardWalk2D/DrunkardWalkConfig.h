@@ -5,7 +5,8 @@
 
 /**
  * A single room type for room-and-corridor generation.
- * Each type contributes Count room instances to the placement queue.
+ * Weight sizes the type's contribution to the placement queue: an absolute instance count under Resolve(),
+ * a relative share of a caller-supplied budget under ResolveForTotal().
  * Footprint is expressed in grid cells. Callers may extend this struct with an opaque
  * per-type payload (e.g. a soft reference to type-specific data) without changing the generator.
  */
@@ -70,7 +71,7 @@ struct PROCEDURALGEOMETRY_API FDrunkardWalkResolvedParams
  * Room-and-corridor dungeon generation parameters.
  *
  * The generator starts in a room, walks a self-avoiding corridor of randomized length, then places
- * the next room from the queue (built from RoomTypes x Count), picks a fresh exit side, and repeats.
+ * the next room from the queue (built from RoomTypes x Weight), picks a fresh exit side, and repeats.
  * It ignores any input bounds — the walk's own geometry defines the extents. Two primary knobs are
  * the grid cell size (set on the generator) and the room queue described here.
  *
@@ -84,7 +85,8 @@ struct PROCEDURALGEOMETRY_API FDrunkardWalkConfig
 	UPROPERTY(EditAnywhere,
 		BlueprintReadWrite,
 		Category = "Dungeon Generation",
-		meta = (ToolTip = "Room types to place. Each type contributes Count rooms to the generation queue."))
+		meta = (ToolTip =
+					"Room types to place. Each type's Weight sizes its share of the generation queue. Under the runtime path (ResolveForTotal) Weight is a relative share of the rolled total, not an absolute room count."))
 	TArray<FRoomTypeConfig> RoomTypes;
 
 	UPROPERTY(EditAnywhere,
@@ -164,9 +166,9 @@ struct PROCEDURALGEOMETRY_API FDrunkardWalkConfig
 	FDrunkardWalkResolvedParams Resolve() const;
 
 	/**
-	 * Like Resolve(), but distributes exactly TotalRooms rooms across types proportionally to their Count
-	 * (used as a relative weight). This is the preferred entry point when total room count is driven by
-	 * Location Size on the level graph node, removing the need to manually set per-type counts.
+	 * Like Resolve(), but distributes exactly TotalRooms rooms across types proportionally to their Weight,
+	 * which here is a relative share rather than an absolute count. This is the preferred entry point when the
+	 * total room count is driven by Location Size on the level graph node.
 	 */
 	FDrunkardWalkResolvedParams ResolveForTotal(int32 TotalRooms) const;
 };
