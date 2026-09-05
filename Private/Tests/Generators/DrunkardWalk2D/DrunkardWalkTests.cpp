@@ -113,11 +113,11 @@ bool FDrunkardWalkParallelArraySizesTest::RunTest(const FString& Parameters)
 	UDrunkardWalkGenerator2D*	Gen = MakeDrunkardGenerator(TEXT("ParallelArrayTest"), 3);
 	const FDrunkardWalkGridData Data = Gen->GenerateWithGridData();
 
-	if (Data.GridWidth == 0 || Data.GridHeight == 0)
+	// The seed and room count are fixed, so an empty grid is a generator regression, not a case to skip: skipping it
+	// would leave every assertion below unrun and the test still green.
+	if (!TestTrue(TEXT("ParallelArraySizes: seeded generation produced a grid"), Data.GridWidth > 0 && Data.GridHeight > 0))
 	{
-		// Generation returned empty — nothing to check.
-		AddWarning(TEXT("ParallelArraySizes: grid is empty, skipping checks"));
-		return true;
+		return false;
 	}
 
 	// Grid flat-array size must equal GridWidth * GridHeight.
@@ -144,10 +144,11 @@ bool FDrunkardWalkRoomCountMatchesPlacementTest::RunTest(const FString& Paramete
 	UDrunkardWalkGenerator2D*	Gen = MakeDrunkardGenerator(TEXT("RoomCountTest"), 5);
 	const FDrunkardWalkGridData Data = Gen->GenerateWithGridData();
 
-	if (Data.RequestedRoomCount == 0)
+	// A configuration asking for rooms that comes back requesting none is the regression this test is here to catch,
+	// so it fails rather than skipping the placement assertions below.
+	if (!TestTrue(TEXT("RoomCountMatchesPlacement: the configured room types produced a room request"), Data.RequestedRoomCount > 0))
 	{
-		AddWarning(TEXT("RoomCountMatchesPlacement: RequestedRoomCount is 0, skipping"));
-		return true;
+		return false;
 	}
 
 	TestTrue("RoomCountMatchesPlacement: PlacedRooms.Num() >= 1", Data.PlacedRooms.Num() >= 1);
@@ -208,10 +209,10 @@ bool FDrunkardWalkAllFloorCellsHaveValidRegionTest::RunTest(const FString& Param
 	UDrunkardWalkGenerator2D*	Gen = MakeDrunkardGenerator(TEXT("RegionValidTest"), 4);
 	const FDrunkardWalkGridData Data = Gen->GenerateWithGridData();
 
-	if (Data.Grid.Num() == 0)
+	// Fixed seed, fixed room count: an empty grid is a failure, not a reason to skip the per-cell checks.
+	if (!TestTrue(TEXT("AllFloorCellsHaveValidRegion: seeded generation produced a grid"), Data.Grid.Num() > 0))
 	{
-		AddWarning(TEXT("AllFloorCellsHaveValidRegion: empty grid, skipping"));
-		return true;
+		return false;
 	}
 
 	const int32 Total = Data.Grid.Num();
@@ -242,10 +243,10 @@ bool FDrunkardWalkCellTypeConsistencyTest::RunTest(const FString& Parameters)
 	UDrunkardWalkGenerator2D*	Gen = MakeDrunkardGenerator(TEXT("CellTypeTest"), 4);
 	const FDrunkardWalkGridData Data = Gen->GenerateWithGridData();
 
-	if (Data.Grid.Num() == 0)
+	// Fixed seed, fixed room count: an empty grid is a failure, not a reason to skip the per-cell checks.
+	if (!TestTrue(TEXT("CellTypeConsistency: seeded generation produced a grid"), Data.Grid.Num() > 0))
 	{
-		AddWarning(TEXT("CellTypeConsistency: empty grid, skipping"));
-		return true;
+		return false;
 	}
 
 	const int32 Total = Data.Grid.Num();

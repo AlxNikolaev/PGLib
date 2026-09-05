@@ -2,6 +2,7 @@
 #include "Generators/Voronoi2D/VoronoiGenerator2D.h"
 
 #include "ProceduralGeometry.h"
+#include "../../PGStructuralHash.h"
 #include "../../ProceduralGeometryTestFlags.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
@@ -218,7 +219,15 @@ bool FVoronoiRandomGenerationTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// Test 5: Performance Test
+// Test 5: Generation cost, measured in half-plane clips.
+//
+// The clip count is the work the cell build does and it is the same integer on every machine, so it is what the
+// assertions read; the durations sit beside it in the log because that is what a human wants to see, but a wall
+// clock on a shared build machine measures the machine as much as the algorithm and can never decide a red.
+//
+// Two site counts carry an assertion, for the two regimes the build has. Below MinSitesForSpatialPruning the scan
+// is the full pairwise sweep, so its cost is an exact number: N*(N-1). Above it the spatial index must actually
+// skip clips, and a build that stopped skipping them would land back on that same exact number.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVoronoiPerformanceTest, "ProceduralGeometry.Voronoi.Generator.Performance", PerfTestFlags)
 
 bool FVoronoiPerformanceTest::RunTest(const FString& Parameters)
@@ -227,28 +236,34 @@ bool FVoronoiPerformanceTest::RunTest(const FString& Parameters)
 	Generator->SetBounds(FBox2D(FVector2D(-1000, -1000), FVector2D(1000, 1000)));
 	Generator->SetSeed("PerfTest");
 
-	// Test different sizes
-	TArray<int32> TestSizes = { 10, 50, 100, 500 };
+	// 50 sits below the pruning threshold, 500 well above it.
+	const TArray<int32> TestSizes = { 10, 50, 100, 500 };
 
-	for (int32 NumSites : TestSizes)
+	TMap<int32, int64> ClipsBySize;
+
+	for (const int32 NumSites : TestSizes)
 	{
-		double StartTime = FPlatformTime::Seconds();
+		VoronoiUtils::ResetHalfPlaneClipCount();
+		const double StartTime = FPlatformTime::Seconds();
 
-		FVoronoiDiagram2D Diagram = Generator->GenerateRandomSites(NumSites, false);
+		const FVoronoiDiagram2D Diagram = Generator->GenerateRandomSites(NumSites, false);
 
-		double ElapsedTime = FPlatformTime::Seconds() - StartTime;
+		const double ElapsedTime = FPlatformTime::Seconds() - StartTime;
+		const int64	 Clips = VoronoiUtils::GetHalfPlaneClipCount();
+		ClipsBySize.Add(NumSites, Clips);
 
-		UE_LOG(LogRoguelikeGeometry, Log, TEXT("Generated %d sites in %f seconds"), NumSites, ElapsedTime);
+		AddInfo(FString::Printf(TEXT("%d sites: %.2f ms, %lld half-plane clips"), NumSites, ElapsedTime * 1000.0, Clips));
 
-		// Basic validation
 		TestEqual(FString::Printf(TEXT("Should have %d cells"), NumSites), Diagram.Cells.Num(), NumSites);
-
-		// Performance thresholds (adjust based on target hardware)
-		if (NumSites <= 100)
-		{
-			TestTrue(FString::Printf(TEXT("%d sites should generate in < 0.1s"), NumSites), ElapsedTime < 0.1);
-		}
 	}
+
+	// Distinct random sites, so no bisector is skipped as degenerate: every site clips against every other exactly
+	// once. A cell that bailed out early, or a threshold change that switched the index on here, moves this number.
+	TestEqual(TEXT("50 sites cost the full pairwise sweep (no pruning below the threshold)"), ClipsBySize[50], static_cast<int64>(50 * 49));
+
+	// The whole point of the index. Equality with the exhaustive count means pruning silently stopped engaging.
+	TestTrue(FString::Printf(TEXT("500 sites skip clips (%lld performed vs %d exhaustive)"), ClipsBySize[500], 500 * 499),
+		ClipsBySize[500] < static_cast<int64>(500 * 499));
 
 	return true;
 }
@@ -387,11 +402,17 @@ bool FVoronoiDeterministicSeedTest::RunTest(const FString& Parameters)
 			FString::Printf(TEXT("Site %d Y match"), i), static_cast<float>(Diagram1.Sites[i].Y), static_cast<float>(Diagram2.Sites[i].Y), 0.01f);
 	}
 
-	for (int32 i = 0; i < FMath::Min(Diagram1.Cells.Num(), Diagram2.Cells.Num()); ++i)
+	// A count comparison is blind to the drift that matters: a clip or adjacency pass that started reading a TSet in
+	// hash order leaves every cell with the same number of vertices and neighbours while moving the vertices and
+	// reshuffling the neighbour lists. The structural hash covers the coordinates and the neighbour sets themselves.
+	if (!TestTrue(TEXT("Deterministic seed produced a non-empty diagram to compare"), Diagram1.Cells.Num() == NumSites))
 	{
-		TestEqual(FString::Printf(TEXT("Cell %d vertex count match"), i), Diagram1.Cells[i].Vertices.Num(), Diagram2.Cells[i].Vertices.Num());
-		TestEqual(FString::Printf(TEXT("Cell %d neighbor count match"), i), Diagram1.Cells[i].Neighbors.Num(), Diagram2.Cells[i].Neighbors.Num());
+		return false;
 	}
+
+	TestEqual(TEXT("Same-seed diagrams are structurally identical"),
+		PGTestHash::HashVoronoiDiagram2D(Diagram1),
+		PGTestHash::HashVoronoiDiagram2D(Diagram2));
 
 	return true;
 }
@@ -520,13 +541,23 @@ bool FVoronoiRelaxationIterationsTest::RunTest(const FString& Parameters)
 	float Disp3 = ComputeAvgDisplacement(Diagrams[0].Sites, Diagrams[2].Sites);
 	float Disp10 = ComputeAvgDisplacement(Diagrams[0].Sites, Diagrams[3].Sites);
 
+	// The tolerance sits on the strict side of every comparison below. Slackening it the other way admits equality,
+	// which is exactly the regression these assertions exist to catch: a relaxation that applies only its first pass
+	// leaves Disp3 and Disp10 equal to Disp1 while every iteration count still "moves sites from baseline".
+	const float Tolerance = 0.01f;
+
 	TestTrue("1 iteration should move sites from baseline", Disp1 > 0.1f);
-	TestTrue("3 iterations should move more than 1", Disp3 > Disp1 - 0.01f);
+	TestTrue("3 iterations should move strictly more than 1", Disp3 > Disp1 + Tolerance);
+	TestTrue("10 iterations should move strictly more than 1", Disp10 > Disp1 + Tolerance);
+
+	// Lloyd converges, so the 10-iteration displacement settles at (not below) the 3-iteration one; the tolerance is
+	// permissive here because a converged pair may sit either side of equality by a rounding step.
+	TestTrue("10 iterations should not move sites back toward the baseline", Disp10 > Disp3 - Tolerance);
 
 	// Convergence: difference between 3 and 10 iterations should be smaller than between 0 and 3
 	float DispDelta_0_3 = Disp3;
 	float DispDelta_3_10 = ComputeAvgDisplacement(Diagrams[2].Sites, Diagrams[3].Sites);
-	TestTrue("Convergence: delta 3->10 should be less than delta 0->3", DispDelta_3_10 < DispDelta_0_3 + 0.01f);
+	TestTrue("Convergence: delta 3->10 should be strictly less than delta 0->3", DispDelta_3_10 < DispDelta_0_3 - Tolerance);
 
 	// Negative iteration count should be clamped to 0
 	UVoronoiGenerator2D* GenNeg = NewObject<UVoronoiGenerator2D>();
@@ -595,9 +626,12 @@ bool FVoronoiMinSiteDistanceTest::RunTest(const FString& Parameters)
 		return (Count > 0) ? Total / Count : 0.0f;
 	};
 
-	float AvgDistSmall = ComputeAvgPairwiseDist(DiagramSmall.Sites);
-	float AvgDistLarge = ComputeAvgPairwiseDist(DiagramLarge.Sites);
-	TestTrue("Larger MinSiteDistance produces larger average pairwise distance", AvgDistLarge > AvgDistSmall - 0.01f);
+	// Strict, because equality is the regression: both configurations share a seed, so a MinSiteDistance that stopped
+	// reaching the sampler would hand back the identical site set and satisfy any comparison that admits equality.
+	const float AvgDistSmall = ComputeAvgPairwiseDist(DiagramSmall.Sites);
+	const float AvgDistLarge = ComputeAvgPairwiseDist(DiagramLarge.Sites);
+	TestTrue(FString::Printf(TEXT("Larger MinSiteDistance produces larger average pairwise distance (%.2f vs %.2f)"), AvgDistLarge, AvgDistSmall),
+		AvgDistLarge > AvgDistSmall + 0.01f);
 
 	return true;
 }

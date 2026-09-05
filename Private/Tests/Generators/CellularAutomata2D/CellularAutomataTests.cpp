@@ -1,9 +1,74 @@
 #include "Generators/CellularAutomata2D/CellularAutomataGenerator2D.h"
 #include "Generators/CellularAutomata2D/CellularAutomataConfig.h"
 #include "GridBudget.h"
+#include "../../PGStructuralHash.h"
 #include "../../ProceduralGeometryTestFlags.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
+
+namespace
+{
+	/**
+	 * Hand-built grid of solid blobs separated by walls. The corridor tests need a substrate whose disconnected pairs
+	 * are a property of the input rather than of CA chance: an emergent substrate can come out already connected, or
+	 * with a single surviving region, and then the assertions the test exists for have nothing to run on.
+	 *
+	 * Names carry the CACorridorRef_ prefix because adaptive unity builds can merge these translation units.
+	 */
+	FCellularAutomataGridData CACorridorRef_MakeBlobGrid(int32 GridW, int32 GridH, const TArray<FIntRect>& Blobs)
+	{
+		FCellularAutomataGridData Data;
+		Data.GridWidth = GridW;
+		Data.GridHeight = GridH;
+		Data.CellSize = 100.0f;
+		Data.CenterRegionId = -1;
+		Data.Grid.Init(false, GridW * GridH);
+		Data.RegionIds.Init(-1, GridW * GridH);
+		Data.Regions.SetNum(Blobs.Num());
+
+		for (int32 RegionId = 0; RegionId < Blobs.Num(); ++RegionId)
+		{
+			const FIntRect& Blob = Blobs[RegionId];
+			for (int32 Y = Blob.Min.Y; Y <= Blob.Max.Y; ++Y)
+			{
+				for (int32 X = Blob.Min.X; X <= Blob.Max.X; ++X)
+				{
+					const int32 Index = Y * GridW + X;
+					Data.Grid[Index] = true;
+					Data.RegionIds[Index] = RegionId;
+					Data.Regions[RegionId].Add(FIntPoint(X, Y));
+				}
+			}
+		}
+
+		Data.SurvivingRegions.Init(true, Blobs.Num());
+
+		// CarveCorridors reads adjacency off the diagram; neighbourless cells are exactly the disconnected pairs.
+		Data.Diagram.Cells.SetNum(Blobs.Num());
+		for (int32 CellIdx = 0; CellIdx < Blobs.Num(); ++CellIdx)
+		{
+			Data.Diagram.Cells[CellIdx].CellIndex = CellIdx;
+		}
+
+		return Data;
+	}
+
+	/** The two-blob substrate the corridor tests share: one carve, across the middle of a 21x21 grid. */
+	FCellularAutomataGridData CACorridorRef_MakeTwoBlobGrid()
+	{
+		return CACorridorRef_MakeBlobGrid(21, 21, { FIntRect(FIntPoint(2, 8), FIntPoint(5, 12)), FIntRect(FIntPoint(15, 8), FIntPoint(18, 12)) });
+	}
+
+	int32 CACorridorRef_CountFloor(const FCellularAutomataGridData& Data)
+	{
+		int32 Count = 0;
+		for (const bool bIsFloor : Data.Grid)
+		{
+			Count += bIsFloor ? 1 : 0;
+		}
+		return Count;
+	}
+} // namespace
 
 // Test 1: Default Generate() produces non-empty diagram
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCellularAutomataDefaultGenerateTest, "ProceduralGeometry.CellularAutomata.DefaultGenerate", DefaultTestFlags)
@@ -44,20 +109,16 @@ bool FCellularAutomataDeterminismTest::RunTest(const FString& Parameters)
 
 	TestEqual("Same cell count", Diagram1.Cells.Num(), Diagram2.Cells.Num());
 
-	for (int32 i = 0; i < FMath::Min(Diagram1.Cells.Num(), Diagram2.Cells.Num()); ++i)
+	// Counts and centres are blind to the drift that matters: an adjacency or contour pass that started reading a
+	// TSet in hash order leaves every cell with the same number of vertices, the same number of neighbours and the
+	// same centre while moving the vertices and reshuffling the neighbour lists. The hash covers all of it.
+	if (!TestTrue(TEXT("Deterministic seed produced a non-empty diagram to compare"), Diagram1.Cells.Num() > 0))
 	{
-		TestEqual(FString::Printf(TEXT("Cell %d vertex count"), i), Diagram1.Cells[i].Vertices.Num(), Diagram2.Cells[i].Vertices.Num());
-		TestEqual(FString::Printf(TEXT("Cell %d neighbor count"), i), Diagram1.Cells[i].Neighbors.Num(), Diagram2.Cells[i].Neighbors.Num());
-
-		TestEqual(FString::Printf(TEXT("Cell %d center X"), i),
-			static_cast<float>(Diagram1.Cells[i].Center.X),
-			static_cast<float>(Diagram2.Cells[i].Center.X),
-			0.01f);
-		TestEqual(FString::Printf(TEXT("Cell %d center Y"), i),
-			static_cast<float>(Diagram1.Cells[i].Center.Y),
-			static_cast<float>(Diagram2.Cells[i].Center.Y),
-			0.01f);
+		return false;
 	}
+
+	TestEqual(
+		TEXT("Same-seed diagrams are structurally identical"), PGTestHash::HashLayoutDiagram2D(Diagram1), PGTestHash::HashLayoutDiagram2D(Diagram2));
 
 	return true;
 }
@@ -271,99 +332,42 @@ bool FCellularAutomataRegionMergingTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// Test 10: CarveCorridors connects disconnected regions
+// Test 10: CarveCorridors bridges a pair of regions that share no boundary
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FCellularAutomataCarveCorridorsTest, "ProceduralGeometry.CellularAutomata.CarveCorridorsConnectsDisconnected", DefaultTestFlags)
 
 bool FCellularAutomataCarveCorridorsTest::RunTest(const FString& Parameters)
 {
-	// SwissCheese config produces many small isolated pockets — good for testing corridor carving
-	UCellularAutomataGenerator2D* Generator = NewObject<UCellularAutomataGenerator2D>();
-	Generator->SetBounds(FBox2D(FVector2D(-500, -500), FVector2D(500, 500)))->SetGridSize(20)->SetSeed(TEXT("corridor_test_disconnect"));
-	Generator->SetFillProbability(0.45f);
-	Generator->SetIterations(5);
-	Generator->SetBirthRule({ 6, 7, 8 });
-	Generator->SetSurvivalRule({ 3, 4, 5 });
-	Generator->SetMinRegionSize(5);
-	Generator->SetKeepCenterRegion(true);
+	// Two hand-built blobs with no shared boundary and no diagram adjacency: the disconnected pair CarveCorridors
+	// exists to bridge, present by construction. An emergent CA substrate can come out already connected or collapsed
+	// to one region, and then this test has nothing to assert on.
+	FCellularAutomataGridData GridData = CACorridorRef_MakeTwoBlobGrid();
 
-	FCellularAutomataGridData GridData = Generator->GenerateWithGridData();
+	const int32 FloorBefore = CACorridorRef_CountFloor(GridData);
 
-	// Count surviving regions
-	int32 SurvivingCount = 0;
-	for (bool bSurvived : GridData.SurvivingRegions)
-	{
-		if (bSurvived)
-		{
-			++SurvivingCount;
-		}
-	}
-
-	if (SurvivingCount < 2)
-	{
-		AddWarning(TEXT("Grid randomness produced fewer than 2 surviving regions — corridor carving assertions skipped"));
-		return true;
-	}
-
-	// Check for disconnected pairs
-	TSet<TPair<int32, int32>> ConnectedPairs;
-	for (int32 CellIdx = 0; CellIdx < GridData.Diagram.Cells.Num(); ++CellIdx)
-	{
-		for (int32 NeighborIdx : GridData.Diagram.Cells[CellIdx].Neighbors)
-		{
-			int32 MinIdx = FMath::Min(CellIdx, NeighborIdx);
-			int32 MaxIdx = FMath::Max(CellIdx, NeighborIdx);
-			ConnectedPairs.Add(TPair<int32, int32>(MinIdx, MaxIdx));
-		}
-	}
-
-	// Count total possible pairs vs connected pairs
-	const int32 TotalPossiblePairs = GridData.Diagram.Cells.Num() * (GridData.Diagram.Cells.Num() - 1) / 2;
-	const bool	bHasDisconnectedPairs = ConnectedPairs.Num() < TotalPossiblePairs;
-
-	if (!bHasDisconnectedPairs)
-	{
-		AddWarning(TEXT("All surviving regions are already connected — corridor carving connectivity assertions skipped"));
-		return true;
-	}
-
-	// Snapshot floor count before carving
-	int32 FloorBefore = 0;
-	for (bool bIsFloor : GridData.Grid)
-	{
-		if (bIsFloor)
-		{
-			++FloorBefore;
-		}
-	}
-
-	// Carve with probability 1.0 and width 2
 	FRandomStream CorridorStream(42);
 	UCellularAutomataGenerator2D::CarveCorridors(GridData, 1.0f, 2, CorridorStream);
 
-	int32 FloorAfter = 0;
-	for (bool bIsFloor : GridData.Grid)
+	TestTrue(TEXT("Carving added floor cells"), CACorridorRef_CountFloor(GridData) > FloorBefore);
+
+	for (int32 Index = 0; Index < GridData.Grid.Num(); ++Index)
 	{
-		if (bIsFloor)
+		if (GridData.Grid[Index] && GridData.RegionIds[Index] < 0)
 		{
-			++FloorAfter;
+			AddError(FString::Printf(TEXT("Floor cell %d has no region after carving"), Index));
+			break;
 		}
 	}
 
-	TestTrue("Carving added floor cells", FloorAfter > FloorBefore);
-
-	// Verify carved cells have valid region assignments
-	for (int32 i = 0; i < GridData.Grid.Num(); ++i)
-	{
-		if (GridData.Grid[i])
-		{
-			TestTrue(FString::Printf(TEXT("Floor cell %d has valid RegionId"), i), GridData.RegionIds[i] >= 0);
-		}
-	}
-
-	// Rebuild diagram and verify
+	// The carve has to leave the two blobs reachable from one another, not merely add floor somewhere. Re-flooding
+	// the modified grid through the production path answers exactly that: one region means one connected component.
+	UCellularAutomataGenerator2D* Generator = NewObject<UCellularAutomataGenerator2D>();
+	// Bounds and cell size only place the traced polygons in world space; they are set so the rebuild reads a
+	// well-defined origin rather than a default-constructed box.
+	Generator->SetBounds(FBox2D(FVector2D::ZeroVector, FVector2D(GridData.GridWidth * GridData.CellSize, GridData.GridHeight * GridData.CellSize)));
+	Generator->SetGridSize(static_cast<int32>(GridData.CellSize));
 	Generator->RebuildDiagram(GridData);
-	TestTrue("Rebuilt diagram has cells", GridData.Diagram.Cells.Num() > 0);
+	TestEqual(TEXT("The two regions are one connected region after carving"), GridData.Diagram.Cells.Num(), 1);
 
 	return true;
 }
@@ -374,78 +378,51 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FCellularAutomataCarveCorridorsNoOpTest::RunTest(const FString& Parameters)
 {
-	UCellularAutomataGenerator2D* Generator = NewObject<UCellularAutomataGenerator2D>();
-	Generator->SetBounds(FBox2D(FVector2D(-500, -500), FVector2D(500, 500)))->SetGridSize(20)->SetSeed(TEXT("corridor_test_disconnect"));
-	Generator->SetFillProbability(0.45f);
-	Generator->SetIterations(5);
-	Generator->SetBirthRule({ 6, 7, 8 });
-	Generator->SetSurvivalRule({ 3, 4, 5 });
-	Generator->SetMinRegionSize(5);
-	Generator->SetKeepCenterRegion(true);
+	const FCellularAutomataGridData Source = CACorridorRef_MakeTwoBlobGrid();
 
-	FCellularAutomataGridData GridData = Generator->GenerateWithGridData();
+	FCellularAutomataGridData ZeroProbability = Source;
+	FRandomStream			  ZeroStream(42);
+	UCellularAutomataGenerator2D::CarveCorridors(ZeroProbability, 0.0f, 2, ZeroStream);
 
-	// Deep copy grid
-	TArray<bool> GridCopy = GridData.Grid;
+	TestTrue(TEXT("Grid unchanged with probability 0"), ZeroProbability.Grid == Source.Grid);
 
-	// Carve with probability 0 — should be a no-op
-	FRandomStream CorridorStream(42);
-	UCellularAutomataGenerator2D::CarveCorridors(GridData, 0.0f, 2, CorridorStream);
+	// Control: the same substrate at probability 1 must change, or "unchanged" above would be a statement about the
+	// input having nothing to carve rather than about the probability gate.
+	FCellularAutomataGridData FullProbability = Source;
+	FRandomStream			  FullStream(42);
+	UCellularAutomataGenerator2D::CarveCorridors(FullProbability, 1.0f, 2, FullStream);
 
-	TestTrue("Grid unchanged with probability 0", GridData.Grid == GridCopy);
+	TestTrue(TEXT("The same substrate does carve at probability 1"), FullProbability.Grid != Source.Grid);
 
 	return true;
 }
 
-// Test 12: CarveCorridors with no disconnected regions is a no-op
+// Test 12: CarveCorridors leaves an already-connected pair alone
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FCellularAutomataCarveCorridorsAllConnectedTest, "ProceduralGeometry.CellularAutomata.CarveCorridorsAllConnectedNoOp", DefaultTestFlags)
 
 bool FCellularAutomataCarveCorridorsAllConnectedTest::RunTest(const FString& Parameters)
 {
-	// OpenChambers style with large cells — tends to produce one large connected region
-	UCellularAutomataGenerator2D* Generator = NewObject<UCellularAutomataGenerator2D>();
-	Generator->SetBounds(FBox2D(FVector2D(-500, -500), FVector2D(500, 500)))->SetGridSize(50)->SetSeed(TEXT("corridor_test_connected"));
-	Generator->SetFillProbability(0.40f);
-	Generator->SetIterations(10);
-	Generator->SetBirthRule({ 5, 6, 7, 8 });
-	Generator->SetSurvivalRule({ 4, 5, 6, 7, 8 });
-	Generator->SetMinRegionSize(1);
-	Generator->SetKeepCenterRegion(true);
+	// Same two blobs, but recorded as diagram neighbours: CarveCorridors reads connectivity off the diagram, so this
+	// is the "already connected" case stated as an input instead of hoped for from a CA configuration.
+	FCellularAutomataGridData Connected = CACorridorRef_MakeTwoBlobGrid();
+	Connected.Diagram.Cells[0].Neighbors = { 1 };
+	Connected.Diagram.Cells[1].Neighbors = { 0 };
 
-	FCellularAutomataGridData GridData = Generator->GenerateWithGridData();
+	const TArray<bool> GridBeforeCarve = Connected.Grid;
 
-	// Deep copy grid
-	TArray<bool> GridCopy = GridData.Grid;
+	FRandomStream ConnectedStream(42);
+	UCellularAutomataGenerator2D::CarveCorridors(Connected, 1.0f, 2, ConnectedStream);
 
-	// Check if all surviving regions are connected
-	TSet<TPair<int32, int32>> ConnectedPairs;
-	for (int32 CellIdx = 0; CellIdx < GridData.Diagram.Cells.Num(); ++CellIdx)
-	{
-		for (int32 NeighborIdx : GridData.Diagram.Cells[CellIdx].Neighbors)
-		{
-			int32 MinIdx = FMath::Min(CellIdx, NeighborIdx);
-			int32 MaxIdx = FMath::Max(CellIdx, NeighborIdx);
-			ConnectedPairs.Add(TPair<int32, int32>(MinIdx, MaxIdx));
-		}
-	}
+	TestTrue(TEXT("Grid unchanged when the pair is already connected"), Connected.Grid == GridBeforeCarve);
 
-	const int32 TotalPossiblePairs = GridData.Diagram.Cells.Num() * (GridData.Diagram.Cells.Num() - 1) / 2;
-	const bool	bAllConnected = (ConnectedPairs.Num() >= TotalPossiblePairs) || (GridData.Diagram.Cells.Num() <= 1);
+	// Control: drop the adjacency and the identical grid does carve, so the no-op above is the adjacency skip and not
+	// a substrate that could never be carved.
+	FCellularAutomataGridData Disconnected = CACorridorRef_MakeTwoBlobGrid();
+	FRandomStream			  DisconnectedStream(42);
+	UCellularAutomataGenerator2D::CarveCorridors(Disconnected, 1.0f, 2, DisconnectedStream);
 
-	// Carve with probability 1.0 — if all connected, should be a no-op
-	FRandomStream CorridorStream(42);
-	UCellularAutomataGenerator2D::CarveCorridors(GridData, 1.0f, 2, CorridorStream);
-
-	if (bAllConnected)
-	{
-		TestTrue("Grid unchanged when all regions already connected", GridData.Grid == GridCopy);
-	}
-	else
-	{
-		// Edge case: this config still produced disconnected regions — carving is valid
-		AddWarning(TEXT("Config produced disconnected regions — grid may have changed, which is acceptable"));
-	}
+	TestTrue(TEXT("The same grid without the adjacency does carve"), Disconnected.Grid != GridBeforeCarve);
 
 	return true;
 }
@@ -458,68 +435,17 @@ bool FCellularAutomataCarveCorridorsWidthTest::RunTest(const FString& Parameters
 {
 	// Two hand-built floor blobs that share no boundary: the carve is forced regardless of CA randomness,
 	// so CorridorWidth is the only variable between the two runs below.
-	constexpr int32 GridW = 21;
-	constexpr int32 GridH = 21;
-
-	auto MakeTwoRegionGrid = []() {
-		FCellularAutomataGridData Data;
-		Data.GridWidth = GridW;
-		Data.GridHeight = GridH;
-		Data.CellSize = 100.0f;
-		Data.CenterRegionId = -1;
-		Data.Grid.Init(false, GridW * GridH);
-		Data.RegionIds.Init(-1, GridW * GridH);
-		Data.Regions.SetNum(2);
-
-		auto FillBlob = [&Data](int32 MinX, int32 MaxX, int32 RegionId) {
-			for (int32 Y = 8; Y <= 12; ++Y)
-			{
-				for (int32 X = MinX; X <= MaxX; ++X)
-				{
-					const int32 Index = Y * GridW + X;
-					Data.Grid[Index] = true;
-					Data.RegionIds[Index] = RegionId;
-					Data.Regions[RegionId].Add(FIntPoint(X, Y));
-				}
-			}
-		};
-		FillBlob(2, 5, 0);
-		FillBlob(15, 18, 1);
-
-		Data.SurvivingRegions.Init(true, 2);
-
-		// CarveCorridors reads region adjacency off the diagram; two cells with no neighbors is exactly the
-		// disconnected pair it exists to bridge.
-		Data.Diagram.Cells.SetNum(2);
-		Data.Diagram.Cells[0].CellIndex = 0;
-		Data.Diagram.Cells[1].CellIndex = 1;
-
-		return Data;
-	};
-
-	auto CountFloor = [](const FCellularAutomataGridData& Data) {
-		int32 Count = 0;
-		for (bool bIsFloor : Data.Grid)
-		{
-			if (bIsFloor)
-			{
-				++Count;
-			}
-		}
-		return Count;
-	};
-
-	FCellularAutomataGridData NarrowData = MakeTwoRegionGrid();
-	const int32				  FloorBefore = CountFloor(NarrowData);
+	FCellularAutomataGridData NarrowData = CACorridorRef_MakeTwoBlobGrid();
+	const int32				  FloorBefore = CACorridorRef_CountFloor(NarrowData);
 
 	FRandomStream NarrowStream(42);
 	UCellularAutomataGenerator2D::CarveCorridors(NarrowData, 1.0f, 1, NarrowStream);
-	const int32 NarrowFloor = CountFloor(NarrowData);
+	const int32 NarrowFloor = CACorridorRef_CountFloor(NarrowData);
 
-	FCellularAutomataGridData WideData = MakeTwoRegionGrid();
+	FCellularAutomataGridData WideData = CACorridorRef_MakeTwoBlobGrid();
 	FRandomStream			  WideStream(42);
 	UCellularAutomataGenerator2D::CarveCorridors(WideData, 1.0f, 3, WideStream);
-	const int32 WideFloor = CountFloor(WideData);
+	const int32 WideFloor = CACorridorRef_CountFloor(WideData);
 
 	TestTrue("Width 1 carves a corridor between the two regions", NarrowFloor > FloorBefore);
 	TestTrue("Width 3 carves strictly more floor than width 1", WideFloor > NarrowFloor);
@@ -675,45 +601,6 @@ namespace
 				}
 			}
 		}
-	}
-
-	/** Hand-built grid of solid blobs separated by walls, so a carve is guaranteed regardless of CA randomness. */
-	FCellularAutomataGridData CACorridorRef_MakeBlobGrid(int32 GridW, int32 GridH, const TArray<FIntRect>& Blobs)
-	{
-		FCellularAutomataGridData Data;
-		Data.GridWidth = GridW;
-		Data.GridHeight = GridH;
-		Data.CellSize = 100.0f;
-		Data.CenterRegionId = -1;
-		Data.Grid.Init(false, GridW * GridH);
-		Data.RegionIds.Init(-1, GridW * GridH);
-		Data.Regions.SetNum(Blobs.Num());
-
-		for (int32 RegionId = 0; RegionId < Blobs.Num(); ++RegionId)
-		{
-			const FIntRect& Blob = Blobs[RegionId];
-			for (int32 Y = Blob.Min.Y; Y <= Blob.Max.Y; ++Y)
-			{
-				for (int32 X = Blob.Min.X; X <= Blob.Max.X; ++X)
-				{
-					const int32 Index = Y * GridW + X;
-					Data.Grid[Index] = true;
-					Data.RegionIds[Index] = RegionId;
-					Data.Regions[RegionId].Add(FIntPoint(X, Y));
-				}
-			}
-		}
-
-		Data.SurvivingRegions.Init(true, Blobs.Num());
-
-		// CarveCorridors reads adjacency off the diagram; neighbourless cells are exactly the disconnected pairs.
-		Data.Diagram.Cells.SetNum(Blobs.Num());
-		for (int32 CellIdx = 0; CellIdx < Blobs.Num(); ++CellIdx)
-		{
-			Data.Diagram.Cells[CellIdx].CellIndex = CellIdx;
-		}
-
-		return Data;
 	}
 
 	/**
