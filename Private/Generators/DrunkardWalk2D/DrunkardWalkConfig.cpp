@@ -19,12 +19,15 @@ FDrunkardWalkResolvedParams FDrunkardWalkConfig::Resolve() const
 	Params.bShuffleRoomOrder = bShuffleRoomOrder;
 	Params.BranchProbability = FMath::Clamp(BranchProbability, 0.0f, 1.0f);
 
-	// Copy and clamp room types; drop zero-weight or degenerate entries.
+	// Copy and clamp room types; drop entries that ask for nothing at all. A type with Weight <= 0 but Min > 0 is a
+	// mandatory-count entry, not a degenerate one: dropping it here would keep it out of the Mins array
+	// ResolveForTotal builds and silently void the Min guarantee. Min is honoured only on that path — the counts this
+	// function reports are the authored weights, so a Min-only type comes back at zero here.
 	Params.RoomTypes.Reserve(RoomTypes.Num());
 	int32 TotalRooms = 0;
 	for (const FRoomTypeConfig& Type : RoomTypes)
 	{
-		if (Type.Weight <= 0)
+		if (Type.Weight <= 0 && Type.Min <= 0)
 		{
 			continue;
 		}
@@ -94,9 +97,31 @@ FDrunkardWalkResolvedParams FDrunkardWalkConfig::ResolveForTotal(const int32 Tot
 	}
 
 	// Distribute TotalRooms: mandatory minimums first, then proportionally by weight up to Max.
-	// Falls back to equal distribution if all weights are zero.
 	TArray<int32> Counts;
-	ProceduralGeometry_DistributePoolByWeight(Counts, Weights, Mins, Maxes, TotalRooms);
+	if (TotalWeight == 0)
+	{
+		// Every surviving type is a Min-only entry, so there is nothing to distribute the leftover budget by. The
+		// pool distributor would hand the whole budget out equally in that case; a mandatory count is a floor the
+		// author asked for, not a share of the pool, so place exactly the minimums instead.
+		Counts.SetNumZeroed(Params.RoomTypes.Num());
+		int32 TotalMin = 0;
+		for (int32 i = 0; i < Params.RoomTypes.Num(); ++i)
+		{
+			Counts[i] = (Maxes[i] > 0) ? FMath::Min(Mins[i], Maxes[i]) : Mins[i];
+			TotalMin += Counts[i];
+		}
+
+		// Minimums that overrun the budget still have to fit inside it; the distributor scales them down for us.
+		if (TotalMin > TotalRooms)
+		{
+			ProceduralGeometry_DistributePoolByWeight(Counts, Weights, Mins, Maxes, TotalRooms);
+		}
+	}
+	else
+	{
+		ProceduralGeometry_DistributePoolByWeight(Counts, Weights, Mins, Maxes, TotalRooms);
+	}
+
 	for (int32 i = 0; i < Params.RoomTypes.Num(); ++i)
 	{
 		Params.RoomTypes[i].Weight = Counts[i];

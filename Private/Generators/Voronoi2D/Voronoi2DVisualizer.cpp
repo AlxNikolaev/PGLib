@@ -25,7 +25,7 @@ void AVoronoi2DVisualizer::OnConstruction(const FTransform& Transform)
 	}
 
 #if ENABLE_DRAW_DEBUG
-	const auto Layout = Generator->SetBounds(Bounds)->GenerateRandomSites(NumSites, bUsePoissonDisc);
+	const auto Layout = Generator->SetBounds(Bounds)->SetSeed(Seed)->GenerateRandomSites(NumSites, bUsePoissonDisc);
 
 	FlushPersistentDebugLines(GetWorld());
 	Layout.DrawDebug(GetWorld());

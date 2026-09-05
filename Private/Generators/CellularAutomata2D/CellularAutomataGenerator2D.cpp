@@ -237,7 +237,6 @@ UCellularAutomataGenerator2D::UCellularAutomataGenerator2D()
 	SurvivalRule = { 3, 4, 5 };
 	MinRegionSize = 20;
 	bKeepCenterRegion = true;
-	InitializeRandomStream();
 }
 
 UCellularAutomataGenerator2D* UCellularAutomataGenerator2D::SetBounds(const FBox2D& InBounds)
@@ -355,6 +354,10 @@ FCellularAutomataGridData UCellularAutomataGenerator2D::GenerateInternal()
 {
 	const double StartTime = FPlatformTime::Seconds();
 
+	// Re-seed from the configured seed so a fixed seed yields identical output regardless of any prior
+	// Generate() call on this instance (idempotent reuse).
+	InitializeRandomStream();
+
 	UE_LOG(LogRoguelikeGeometry,
 		Log,
 		TEXT("[CA] Generate() — Bounds=(%.1f,%.1f)-(%.1f,%.1f) GridSize=%d Seed='%s' FillProb=%.2f Iterations=%d MinRegion=%d KeepCenter=%s"),
@@ -385,31 +388,35 @@ FCellularAutomataGridData UCellularAutomataGenerator2D::GenerateInternal()
 
 	bool bDegradedResolution = false;
 
+	// The pitch this run generates at. It is deliberately a local: coarsening is a property of this call's
+	// bounds, and writing it back to the GridSize UPROPERTY would silently coarsen every later run on the
+	// same instance, including ones whose bounds fit the authored pitch.
+	int32 EffectiveGridSize = GridSize;
+
 	// Enlarge the cell size so the grid fits the cell budget rather than refusing to generate. Solving
 	// (W/c)(H/c) <= MaxGridCells for c gives c >= sqrt(W*H / MaxGridCells).
-	if (static_cast<int64>(FMath::CeilToInt(BoundsWidth / static_cast<float>(GridSize)))
-			* static_cast<int64>(FMath::CeilToInt(BoundsHeight / static_cast<float>(GridSize)))
+	if (static_cast<int64>(FMath::CeilToInt(BoundsWidth / static_cast<float>(EffectiveGridSize)))
+			* static_cast<int64>(FMath::CeilToInt(BoundsHeight / static_cast<float>(EffectiveGridSize)))
 		> PGGrid::MaxGridCells)
 	{
-		const int32	 OriginalGridSize = GridSize;
 		const double MinCellSize =
 			FMath::Sqrt(static_cast<double>(BoundsWidth) * static_cast<double>(BoundsHeight) / static_cast<double>(PGGrid::MaxGridCells));
-		GridSize = FMath::Max(GridSize, FMath::CeilToInt(MinCellSize));
+		EffectiveGridSize = FMath::Max(EffectiveGridSize, FMath::CeilToInt(MinCellSize));
 		bDegradedResolution = true;
 
-		const int32 DegradedWidth = FMath::CeilToInt(BoundsWidth / static_cast<float>(GridSize));
-		const int32 DegradedHeight = FMath::CeilToInt(BoundsHeight / static_cast<float>(GridSize));
+		const int32 DegradedWidth = FMath::CeilToInt(BoundsWidth / static_cast<float>(EffectiveGridSize));
+		const int32 DegradedHeight = FMath::CeilToInt(BoundsHeight / static_cast<float>(EffectiveGridSize));
 		UE_LOG(LogRoguelikeGeometry,
 			Warning,
 			TEXT("[CA] Cell budget exceeded: GridSize %d would produce >%lld cells; degrading to GridSize %d (%dx%d)."),
-			OriginalGridSize,
-			PGGrid::MaxGridCells,
 			GridSize,
+			PGGrid::MaxGridCells,
+			EffectiveGridSize,
 			DegradedWidth,
 			DegradedHeight);
 	}
 
-	const float CellSizeVal = static_cast<float>(GridSize);
+	const float CellSizeVal = static_cast<float>(EffectiveGridSize);
 
 	const int32 GWidth = FMath::CeilToInt(BoundsWidth / CellSizeVal);
 	const int32 GHeight = FMath::CeilToInt(BoundsHeight / CellSizeVal);
@@ -501,17 +508,15 @@ FCellularAutomataGridData UCellularAutomataGenerator2D::GenerateInternal()
 	// nearest the center so culling always has a target to preserve.
 	if (bKeepCenterRegion && CenterRegionId < 0 && Regions.Num() > 0)
 	{
-		const FVector2D CenterWorld(
-			Bounds.Min.X + (CenterX + 0.5f) * static_cast<float>(GridSize), Bounds.Min.Y + (CenterY + 0.5f) * static_cast<float>(GridSize));
-		float BestDistSq = FLT_MAX;
-		int32 BestRegion = 0;
+		const FVector2D CenterWorld(Bounds.Min.X + (CenterX + 0.5f) * CellSizeVal, Bounds.Min.Y + (CenterY + 0.5f) * CellSizeVal);
+		float			BestDistSq = FLT_MAX;
+		int32			BestRegion = 0;
 		for (int32 RegionId = 0; RegionId < Regions.Num(); ++RegionId)
 		{
 			for (const FIntPoint& Cell : Regions[RegionId])
 			{
-				const FVector2D CellWorld(
-					Bounds.Min.X + (Cell.X + 0.5f) * static_cast<float>(GridSize), Bounds.Min.Y + (Cell.Y + 0.5f) * static_cast<float>(GridSize));
-				const float DistSq = FVector2D::DistSquared(CellWorld, CenterWorld);
+				const FVector2D CellWorld(Bounds.Min.X + (Cell.X + 0.5f) * CellSizeVal, Bounds.Min.Y + (Cell.Y + 0.5f) * CellSizeVal);
+				const float		DistSq = FVector2D::DistSquared(CellWorld, CenterWorld);
 				if (DistSq < BestDistSq)
 				{
 					BestDistSq = DistSq;
@@ -552,7 +557,7 @@ FCellularAutomataGridData UCellularAutomataGenerator2D::GenerateInternal()
 		MinRegionSize,
 		Regions.Num() - CulledCount);
 
-	FLayoutDiagram2D Diagram = BuildDiagramFromRegions(Grid, RegionIds, Regions, CenterRegionId, GWidth, GHeight);
+	FLayoutDiagram2D Diagram = BuildDiagramFromRegions(Grid, RegionIds, Regions, CenterRegionId, GWidth, GHeight, CellSizeVal);
 
 	const double ElapsedMs = (FPlatformTime::Seconds() - StartTime) * 1000.0;
 	UE_LOG(LogRoguelikeGeometry, Log, TEXT("[CA] Generate() complete: %d cells in %.2fms"), Diagram.Cells.Num(), ElapsedMs);
@@ -771,8 +776,10 @@ void UCellularAutomataGenerator2D::RebuildDiagram(FCellularAutomataGridData& Gri
 
 	GridData.CenterRegionId = NewCenterRegionId;
 
+	// GridData.CellSize, not GridSize: a grid that came back coarsened would otherwise be rebuilt at the authored
+	// pitch and its polygons would no longer line up with the cells they were traced from.
 	GridData.Diagram = BuildDiagramFromRegions(
-		GridData.Grid, GridData.RegionIds, GridData.Regions, GridData.CenterRegionId, GridData.GridWidth, GridData.GridHeight);
+		GridData.Grid, GridData.RegionIds, GridData.Regions, GridData.CenterRegionId, GridData.GridWidth, GridData.GridHeight, GridData.CellSize);
 
 	UE_LOG(LogRoguelikeGeometry, Log, TEXT("[CA] RebuildDiagram: produced %d cells"), GridData.Diagram.Cells.Num());
 }
@@ -782,9 +789,12 @@ FLayoutDiagram2D UCellularAutomataGenerator2D::BuildDiagramFromRegions(const TAr
 	const TArray<TArray<FIntPoint>>&													   Regions,
 	int32																				   CenterRegionId,
 	int32																				   InGridWidth,
-	int32																				   InGridHeight)
+	int32																				   InGridHeight,
+	float																				   InCellSize)
 {
-	const float CellSize = static_cast<float>(GridSize);
+	WarnIfSeedSubstituted();
+
+	const float CellSize = InCellSize;
 
 	// Stage 1: Identify surviving regions
 	TMap<int32, int32> RegionToCellIndex;
@@ -823,30 +833,23 @@ FLayoutDiagram2D UCellularAutomataGenerator2D::BuildDiagramFromRegions(const TAr
 		Cell.CellIndex = i;
 		Cell.Vertices = TraceBoundaryPolygon(Region, RegionIds, RegionId, InGridWidth, InGridHeight, CellSize);
 
-		UE_LOG(LogRoguelikeGeometry,
-			Verbose,
-			TEXT("[CA] Region %d: %d grid cells, %d boundary vertices, exterior=%s"),
-			RegionId,
-			Region.Num(),
-			Cell.Vertices.Num(),
-			(Cell.Vertices.Num() > 0) ? TEXT("pending") : TEXT("n/a"));
+		UE_LOG(
+			LogRoguelikeGeometry, Verbose, TEXT("[CA] Region %d: %d grid cells, %d boundary vertices"), RegionId, Region.Num(), Cell.Vertices.Num());
 
 		// Compute center as arithmetic mean of constituent cell centers
 		FVector2D CenterSum = FVector2D::ZeroVector;
-		bool	  bTouchesBoundary = false;
 
 		for (const FIntPoint& GridCell : Region)
 		{
 			CenterSum += FVector2D(Bounds.Min.X + (GridCell.X + 0.5f) * CellSize, Bounds.Min.Y + (GridCell.Y + 0.5f) * CellSize);
-
-			if (GridCell.X == 0 || GridCell.X == InGridWidth - 1 || GridCell.Y == 0 || GridCell.Y == InGridHeight - 1)
-			{
-				bTouchesBoundary = true;
-			}
 		}
 
 		Cell.Center = CenterSum / static_cast<float>(Region.Num());
-		Cell.bIsExterior = bTouchesBoundary;
+
+		// One layout cell is a whole cave lobe here, and the CA forces its outermost ring to wall at seed, at every
+		// iteration and while carving corridors, so no lobe can reach the raster edge. Exterior is a per-grid-cell
+		// concept on the raster path and a bounds-contact concept on the Voronoi path; on this one it is always false.
+		Cell.bIsExterior = false;
 
 		Diagram.Cells.Add(Cell);
 
@@ -965,84 +968,162 @@ TArray<FVector2D> UCellularAutomataGenerator2D::TraceBoundaryPolygon(
 		}
 	}
 
-	if (EdgeMap.Num() == 0)
+	// Chaining reads a lexicographically sorted edge list rather than the multimap: which loop a corner ends up in
+	// must not depend on hash-bucket order.
+	TArray<TPair<FIntPoint, FIntPoint>> Edges;
+	Edges.Reserve(EdgeMap.Num());
+	for (const TPair<FIntPoint, FIntPoint>& Edge : EdgeMap)
 	{
-		return TArray<FVector2D>();
+		Edges.Add(Edge);
+	}
+	Edges.Sort([](const TPair<FIntPoint, FIntPoint>& A, const TPair<FIntPoint, FIntPoint>& B) {
+		if (A.Key.X != B.Key.X)
+		{
+			return A.Key.X < B.Key.X;
+		}
+		if (A.Key.Y != B.Key.Y)
+		{
+			return A.Key.Y < B.Key.Y;
+		}
+		if (A.Value.X != B.Value.X)
+		{
+			return A.Value.X < B.Value.X;
+		}
+		return A.Value.Y < B.Value.Y;
+	});
+
+	TMap<FIntPoint, TArray<int32, TInlineAllocator<2>>> OutgoingByCorner;
+	for (int32 EdgeIdx = 0; EdgeIdx < Edges.Num(); ++EdgeIdx)
+	{
+		OutgoingByCorner.FindOrAdd(Edges[EdgeIdx].Key).Add(EdgeIdx);
 	}
 
-	// Chain edges into closed loops. Track consumed *edges* (not just corners) so a corner shared by two
-	// loops (a pinch) is traversed correctly instead of dropping the second loop.
-	TArray<TArray<FIntPoint>>		  Loops;
-	TSet<TPair<FIntPoint, FIntPoint>> UsedEdges;
+	// Every boundary edge is one unit axis step, so a direction is one of four; numbering them counter-clockwise
+	// turns "which way does this edge leave the corner" into arithmetic.
+	auto DirectionIndex = [](const FIntPoint& Step) -> int32 {
+		if (Step.X > 0)
+		{
+			return 0; // +X
+		}
+		if (Step.Y > 0)
+		{
+			return 1; // +Y
+		}
+		if (Step.X < 0)
+		{
+			return 2; // -X
+		}
+		return 3; // -Y
+	};
 
-	for (const auto& Edge : EdgeMap)
+	TArray<TArray<FIntPoint>> Loops;
+	TArray<bool>			  bEdgeUsed;
+	bEdgeUsed.Init(false, Edges.Num());
+
+	for (int32 SeedEdge = 0; SeedEdge < Edges.Num(); ++SeedEdge)
 	{
-		if (UsedEdges.Contains(TPair<FIntPoint, FIntPoint>(Edge.Key, Edge.Value)))
+		if (bEdgeUsed[SeedEdge])
 		{
 			continue;
 		}
 
-		const FIntPoint	  Start = Edge.Key;
+		const FIntPoint	  Start = Edges[SeedEdge].Key;
 		TArray<FIntPoint> Loop;
-		FIntPoint		  Current = Start;
+		int32			  CurrentEdge = SeedEdge;
+		bool			  bClosed = false;
 
 		while (true)
 		{
-			Loop.Add(Current);
+			bEdgeUsed[CurrentEdge] = true;
+			Loop.Add(Edges[CurrentEdge].Key);
 
-			// Pick the first not-yet-consumed outgoing edge from Current.
-			TArray<FIntPoint> Outgoing;
-			EdgeMap.MultiFind(Current, Outgoing);
-			FIntPoint Next;
-			bool	  bFound = false;
-			for (const FIntPoint& Candidate : Outgoing)
+			const FIntPoint Corner = Edges[CurrentEdge].Value;
+			if (Corner == Start)
 			{
-				if (!UsedEdges.Contains(TPair<FIntPoint, FIntPoint>(Current, Candidate)))
-				{
-					Next = Candidate;
-					bFound = true;
-					break;
-				}
+				bClosed = true;
+				break;
 			}
-			if (!bFound)
+
+			const TArray<int32, TInlineAllocator<2>>* Candidates = OutgoingByCorner.Find(Corner);
+			if (!Candidates)
 			{
 				break;
 			}
 
-			UsedEdges.Add(TPair<FIntPoint, FIntPoint>(Current, Next));
-			Current = Next;
-			if (Current == Start)
+			// Two cells of one region can meet at a single corner while the void outside and a void enclosed by the
+			// region meet at the same point; the corner then carries two outgoing edges and pairing them the wrong
+			// way chains the outer boundary and the hole into one keyhole loop. Standard planar face traversal picks
+			// the pairing: from the reversed incoming direction, the first outgoing edge counter-clockwise is the
+			// sharpest turn that keeps the region's interior on the left, which is the winding these edges are
+			// emitted with. A U-turn back along the incoming edge sorts last so a chain is never stranded.
+			const FIntPoint Incoming = Corner - Edges[CurrentEdge].Key;
+			const int32		ReverseDir = DirectionIndex(FIntPoint(-Incoming.X, -Incoming.Y));
+
+			int32 NextEdge = INDEX_NONE;
+			int32 BestRank = MAX_int32;
+			for (const int32 CandidateIdx : *Candidates)
 			{
-				break; // closed the loop
+				if (bEdgeUsed[CandidateIdx])
+				{
+					continue;
+				}
+
+				const FIntPoint Step = Edges[CandidateIdx].Value - Edges[CandidateIdx].Key;
+				const int32		Offset = (DirectionIndex(Step) - ReverseDir + 4) % 4;
+				const int32		Rank = (Offset == 0) ? 4 : Offset;
+				if (Rank < BestRank)
+				{
+					BestRank = Rank;
+					NextEdge = CandidateIdx;
+				}
 			}
+
+			if (NextEdge == INDEX_NONE)
+			{
+				break;
+			}
+
+			CurrentEdge = NextEdge;
 		}
 
-		if (Loop.Num() >= 3 && Current == Start)
+		if (bClosed && Loop.Num() >= 3)
 		{
 			Loops.Add(MoveTemp(Loop));
 		}
 	}
 
-	if (Loops.Num() == 0)
+	TArray<FVector2D> Result;
+
+	if (Loops.Num() > 0)
 	{
+		// Select outer boundary (largest absolute area by shoelace)
+		int32 BestLoopIndex = 0;
+		float BestArea = 0.0f;
+
+		for (int32 i = 0; i < Loops.Num(); ++i)
+		{
+			const float Area = ComputePolygonArea(Loops[i]);
+			if (Area > BestArea)
+			{
+				BestArea = Area;
+				BestLoopIndex = i;
+			}
+		}
+
+		Result = SimplifyAndConvert(Loops[BestLoopIndex], InCellSize);
+	}
+
+	if (Result.Num() < 3)
+	{
+		UE_LOG(LogRoguelikeGeometry,
+			Warning,
+			TEXT("[CA] Region %d traced a degenerate boundary (%d vertices); it keeps its diagram cell but contributes no footprint polygon."),
+			RegionId,
+			Result.Num());
 		return TArray<FVector2D>();
 	}
 
-	// Select outer boundary (largest absolute area by shoelace)
-	int32 BestLoopIndex = 0;
-	float BestArea = 0.0f;
-
-	for (int32 i = 0; i < Loops.Num(); ++i)
-	{
-		const float Area = ComputePolygonArea(Loops[i]);
-		if (Area > BestArea)
-		{
-			BestArea = Area;
-			BestLoopIndex = i;
-		}
-	}
-
-	return SimplifyAndConvert(Loops[BestLoopIndex], InCellSize);
+	return Result;
 }
 
 float UCellularAutomataGenerator2D::ComputePolygonArea(const TArray<FIntPoint>& Loop)

@@ -28,6 +28,11 @@ class PROCEDURALGEOMETRY_API AVoronoi2DVisualizer : public AActor
 	UPROPERTY(EditInstanceOnly)
 	FBox2D Bounds;
 
+	/** Non-empty by default: an unseeded generator logs an Error and invents a seed, so the preview would draw a
+	 *  different diagram on every construction. */
+	UPROPERTY(EditInstanceOnly)
+	FString Seed = TEXT("Preview");
+
 public:
 	AVoronoi2DVisualizer();
 

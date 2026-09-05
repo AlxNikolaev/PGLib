@@ -851,6 +851,8 @@ bool FDrunkardWalkGridToDiagramTest::RunTest(const FString& Parameters)
 	static constexpr int32 DX[] = { 1, -1, 0, 0 };
 	static constexpr int32 DY[] = { 0, 0, 1, -1 };
 
+	// bIsExterior is deliberately left out of the comparison below: restating its rule here would only compare two
+	// copies of the same code. ExteriorRingIsMarked owns that field, against hardcoded positions.
 	float ExpectedBestDistSq = FLT_MAX;
 	int32 ExpectedCenterCell = INDEX_NONE;
 	int32 Mismatches = 0;
@@ -895,7 +897,7 @@ bool FDrunkardWalkGridToDiagramTest::RunTest(const FString& Parameters)
 			}
 
 			if (Cell.CellIndex != CellIndex || Cell.Vertices != ExpectedVertices || Cell.Center != ExpectedCenter
-				|| Cell.Neighbors != ExpectedNeighbors || Cell.bIsExterior != (X == 0 || X == GridWidth - 1 || Y == 0 || Y == GridHeight - 1))
+				|| Cell.Neighbors != ExpectedNeighbors)
 			{
 				++Mismatches;
 				AddError(FString::Printf(TEXT("Diagram cell %d (grid %d,%d) does not match the expected conversion"), CellIndex, X, Y));
@@ -905,6 +907,214 @@ bool FDrunkardWalkGridToDiagramTest::RunTest(const FString& Parameters)
 
 	TestEqual(TEXT("Every diagram cell matches the expected conversion"), Mismatches, 0);
 	TestEqual(TEXT("CenterCellIndex is the first cell closest to CenterPoint"), Diagram.CenterCellIndex, ExpectedCenterCell);
+
+	return true;
+}
+
+// ============================================================
+// The raster is padded, so the outermost ring of floor never lands on the array edge. Exterior therefore means
+// "on the raster edge, or orthogonally against a wall that is" — the raster equivalent of a Voronoi cell touching
+// the diagram bounds. Without it FVoronoiGridDiagram::ExteriorCells stays empty for every raster cluster and the
+// exterior guards downstream are inert.
+// ============================================================
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDrunkardWalkExteriorRingTest, "ProceduralGeometry.DrunkardWalk.ExteriorRingIsMarked", DefaultTestFlags)
+
+bool FDrunkardWalkExteriorRingTest::RunTest(const FString& Parameters)
+{
+	// 7x7 raster: a 5x5 block of floor inset by one wall cell, with an interior wall punched at (3,3). The inset ring
+	// is exterior; the cells beside the interior wall are not.
+	static constexpr int32 GridWidth = 7;
+	static constexpr int32 GridHeight = 7;
+
+	TArray<bool> Grid;
+	Grid.Init(false, GridWidth * GridHeight);
+	for (int32 Y = 1; Y <= 5; ++Y)
+	{
+		for (int32 X = 1; X <= 5; ++X)
+		{
+			Grid[Y * GridWidth + X] = !(X == 3 && Y == 3);
+		}
+	}
+
+	UDrunkardWalkGenerator2D* Gen = NewObject<UDrunkardWalkGenerator2D>();
+	Gen->SetSeed(TEXT("ExteriorRing"));
+	Gen->SetGridSize(100);
+	Gen->SetBounds(FBox2D(FVector2D(0.0f, 0.0f), FVector2D(static_cast<float>(GridWidth * 100), static_cast<float>(GridHeight * 100))));
+
+	const FLayoutDiagram2D Diagram = Gen->ConvertGridToDiagramForTests(Grid, GridWidth, GridHeight);
+
+	// Cells are emitted one per carved position in row-major order, so the same scan recovers the mapping.
+	TArray<int32> CellIndexOf;
+	CellIndexOf.Init(INDEX_NONE, GridWidth * GridHeight);
+	int32 Emitted = 0;
+	for (int32 GridIndex = 0; GridIndex < Grid.Num(); ++GridIndex)
+	{
+		if (Grid[GridIndex])
+		{
+			CellIndexOf[GridIndex] = Emitted++;
+		}
+	}
+
+	if (!TestEqual(TEXT("One diagram cell per carved position"), Diagram.Cells.Num(), Emitted))
+	{
+		return false;
+	}
+
+	auto ExteriorAt = [&](int32 X, int32 Y) -> bool {
+		const int32 CellIndex = CellIndexOf[Y * GridWidth + X];
+		if (!Diagram.Cells.IsValidIndex(CellIndex))
+		{
+			AddError(FString::Printf(TEXT("Grid position (%d,%d) was expected to be a carved cell"), X, Y));
+			return false;
+		}
+		return Diagram.Cells[CellIndex].bIsExterior;
+	};
+
+	TestTrue(TEXT("A floor cell against a raster-edge wall is exterior (1,1)"), ExteriorAt(1, 1));
+	TestTrue(TEXT("A floor cell against a raster-edge wall is exterior (5,5)"), ExteriorAt(5, 5));
+	TestTrue(TEXT("A floor cell against a raster-edge wall is exterior (3,1)"), ExteriorAt(3, 1));
+	TestFalse(TEXT("A floor cell surrounded by floor is not exterior (2,2)"), ExteriorAt(2, 2));
+	TestFalse(TEXT("A floor cell beside an interior wall is not exterior (2,3)"), ExteriorAt(2, 3));
+	TestFalse(TEXT("A floor cell beside an interior wall is not exterior (3,2)"), ExteriorAt(3, 2));
+
+	return true;
+}
+
+// ============================================================
+// A generator reached with no seed still produces a layout, but the seed it invented is recorded on the diagram so
+// the layout can be reproduced; without that the seed field names a layout nobody can get back.
+// ============================================================
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDrunkardWalkSubstitutedSeedTest, "ProceduralGeometry.DrunkardWalk.SubstitutedSeedIsRecorded", DefaultTestFlags)
+
+bool FDrunkardWalkSubstitutedSeedTest::RunTest(const FString& Parameters)
+{
+	AddExpectedMessagePlain(
+		TEXT("was substituted and is carried on the diagram"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, 0);
+
+	FRoomTypeConfig RoomType;
+	RoomType.Tag = FName(TEXT("Test"));
+	RoomType.FootprintWidthCells = 4;
+	RoomType.FootprintHeightCells = 4;
+	RoomType.Weight = 3;
+
+	UDrunkardWalkGenerator2D* Unseeded = NewObject<UDrunkardWalkGenerator2D>();
+	Unseeded->SetGridSize(100);
+	Unseeded->SetRoomTypes({ RoomType });
+
+	const FDrunkardWalkGridData Data = Unseeded->GenerateWithGridData();
+	const FString				Substituted = Data.Diagram.Seed;
+
+	if (!TestFalse(TEXT("An unseeded run records the seed it invented"), Substituted.IsEmpty()))
+	{
+		return false;
+	}
+
+	UDrunkardWalkGenerator2D* Replay = NewObject<UDrunkardWalkGenerator2D>();
+	Replay->SetSeed(Substituted);
+	Replay->SetGridSize(100);
+	Replay->SetRoomTypes({ RoomType });
+
+	const FDrunkardWalkGridData Replayed = Replay->GenerateWithGridData();
+
+	TestEqual(TEXT("Replaying the substituted seed reproduces the cell count"), Replayed.Diagram.Cells.Num(), Data.Diagram.Cells.Num());
+
+	const int32 NumCells = FMath::Min(Replayed.Diagram.Cells.Num(), Data.Diagram.Cells.Num());
+	int32		CentreMismatches = 0;
+	for (int32 Index = 0; Index < NumCells; ++Index)
+	{
+		if (!Replayed.Diagram.Cells[Index].Center.Equals(Data.Diagram.Cells[Index].Center, 0.01))
+		{
+			++CentreMismatches;
+		}
+	}
+	TestEqual(TEXT("Replaying the substituted seed reproduces every cell centre"), CentreMismatches, 0);
+
+	return true;
+}
+
+// ============================================================
+// A room type with no weight but a positive Min is a mandatory-count entry, not a degenerate one: it must survive
+// into the pool distribution and receive exactly its Min, with the weighted types absorbing the rest.
+// ============================================================
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FDWConfigMinOnlyRoomTypeTest, "ProceduralGeometry.DrunkardWalk.Config.MinOnlyRoomTypeSurvivesResolve", DefaultTestFlags)
+
+bool FDWConfigMinOnlyRoomTypeTest::RunTest(const FString& Parameters)
+{
+	FDrunkardWalkConfig Config;
+	{
+		FRoomTypeConfig Mandatory;
+		Mandatory.Tag = FName(TEXT("Boss"));
+		Mandatory.FootprintWidthCells = 4;
+		Mandatory.FootprintHeightCells = 4;
+		Mandatory.Weight = 0;
+		Mandatory.Min = 2;
+		Config.RoomTypes.Add(Mandatory);
+
+		FRoomTypeConfig Filler;
+		Filler.Tag = FName(TEXT("Normal"));
+		Filler.FootprintWidthCells = 4;
+		Filler.FootprintHeightCells = 4;
+		Filler.Weight = 5;
+		Config.RoomTypes.Add(Filler);
+	}
+
+	const FDrunkardWalkResolvedParams Params = Config.ResolveForTotal(10);
+
+	if (!TestEqual(TEXT("MinOnlyRoomType: the weightless type survives Resolve"), Params.RoomTypes.Num(), 2))
+	{
+		return false;
+	}
+
+	TestEqual(TEXT("MinOnlyRoomType: the mandatory type receives exactly its Min"), Params.RoomTypes[0].Weight, 2);
+	TestEqual(TEXT("MinOnlyRoomType: the weighted type absorbs the rest"), Params.RoomTypes[1].Weight, 8);
+	TestEqual(TEXT("MinOnlyRoomType: sum == 10"), SumDWCounts(Params), 10);
+
+	return true;
+}
+
+// ============================================================
+// A config made entirely of Min-only types has nothing to share the leftover budget by. A mandatory count is a floor
+// the author asked for, not a claim on the pool, so the budget stays unspent rather than being handed out equally.
+// ============================================================
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FDWConfigAllMinOnlyRoomTypesTest, "ProceduralGeometry.DrunkardWalk.Config.AllMinOnlyTypesPlaceOnlyTheirMinimums", DefaultTestFlags)
+
+bool FDWConfigAllMinOnlyRoomTypesTest::RunTest(const FString& Parameters)
+{
+	FDrunkardWalkConfig Config;
+	{
+		FRoomTypeConfig Boss;
+		Boss.Tag = FName(TEXT("Boss"));
+		Boss.FootprintWidthCells = 4;
+		Boss.FootprintHeightCells = 4;
+		Boss.Weight = 0;
+		Boss.Min = 1;
+		Config.RoomTypes.Add(Boss);
+
+		FRoomTypeConfig Vault;
+		Vault.Tag = FName(TEXT("Vault"));
+		Vault.FootprintWidthCells = 4;
+		Vault.FootprintHeightCells = 4;
+		Vault.Weight = 0;
+		Vault.Min = 2;
+		Config.RoomTypes.Add(Vault);
+	}
+
+	const FDrunkardWalkResolvedParams Params = Config.ResolveForTotal(10);
+
+	if (!TestEqual(TEXT("AllMinOnly: both weightless types survive Resolve"), Params.RoomTypes.Num(), 2))
+	{
+		return false;
+	}
+
+	TestEqual(TEXT("AllMinOnly: Boss receives exactly its Min"), Params.RoomTypes[0].Weight, 1);
+	TestEqual(TEXT("AllMinOnly: Vault receives exactly its Min"), Params.RoomTypes[1].Weight, 2);
+	TestEqual(TEXT("AllMinOnly: the unclaimed budget is not distributed"), SumDWCounts(Params), 3);
+
+	// Minimums that overrun the budget still have to fit inside it.
+	const FDrunkardWalkResolvedParams Squeezed = Config.ResolveForTotal(2);
+	TestEqual(TEXT("AllMinOnly: minimums over budget are scaled into it"), SumDWCounts(Squeezed), 2);
 
 	return true;
 }

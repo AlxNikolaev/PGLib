@@ -265,16 +265,30 @@ UVoronoiGenerator2D::UVoronoiGenerator2D()
 	MinSiteDistance = 10.0f;
 	RelaxationIterations = 0;
 	Bounds = FBox2D(FVector2D(-500, -500), FVector2D(500, 500));
-	InitializeRandomStream();
 }
 
 void UVoronoiGenerator2D::InitializeRandomStream()
 {
+	RandomStream = FRandomStream(static_cast<int32>(PGSeed::HashSeedString(Seed)));
+}
+
+void UVoronoiGenerator2D::EnsureSeeded()
+{
 	if (Seed.IsEmpty())
 	{
 		Seed = FGuid::NewGuid().ToString(EGuidFormats::Digits);
+
+		UE_LOG(LogRoguelikeGeometry,
+			Error,
+			TEXT("[Voronoi] Generated without SetSeed; substituting '%s'. Every machine invents its own, so this diagram is reproducible only "
+				 "by setting that string as the seed."),
+			*Seed);
 	}
-	RandomStream = FRandomStream(static_cast<int32>(PGSeed::HashSeedString(Seed)));
+
+	// Unconditional: Seed is reflected and RandomStream is not, so an instance that received its Seed by property copy
+	// or deserialization would otherwise draw from FRandomStream(0) while reporting that Seed. Re-deriving here also
+	// makes a second generate call on one instance reproduce the first.
+	InitializeRandomStream();
 }
 
 UVoronoiGenerator2D* UVoronoiGenerator2D::SetBounds(const FBox2D& InBounds)
@@ -316,6 +330,8 @@ FVoronoiDiagram2D UVoronoiGenerator2D::GenerateFromSites(const TArray<FVector2D>
 
 FVoronoiDiagram2D UVoronoiGenerator2D::GenerateRandomSites(const int32 NumSites, const bool bUsePoissonDisc)
 {
+	EnsureSeeded();
+
 	TArray<FVector2D> Sites;
 
 	if (bUsePoissonDisc)
@@ -343,6 +359,8 @@ FVoronoiDiagram2D UVoronoiGenerator2D::GenerateRandomSites(const int32 NumSites,
 
 FVoronoiDiagram2D UVoronoiGenerator2D::GenerateRelaxed(const int32 NumSites)
 {
+	EnsureSeeded();
+
 	const TArray<FVector2D> BoundsPolygon = { Bounds.Min, FVector2D(Bounds.Max.X, Bounds.Min.Y), Bounds.Max, FVector2D(Bounds.Min.X, Bounds.Max.Y) };
 	TArray<FVector2D>		Sites;
 	FGeometryUtils::PoissonDiskSampling(BoundsPolygon, MinSiteDistance, NumSites, RandomStream, Sites);

@@ -1,5 +1,6 @@
 ﻿#include "Generators/LayoutGenerator.h"
 
+#include "ProceduralGeometry.h"
 #include "SeedHashing.h"
 
 ULayoutGenerator::ULayoutGenerator()
@@ -29,23 +30,54 @@ ULayoutGenerator* ULayoutGenerator::SetCenter(const FVector2D& InCenter)
 ULayoutGenerator* ULayoutGenerator::SetSeed(const FString& InSeed)
 {
 	Seed = InSeed;
+	bSeedSubstituted = false;
 	InitializeRandomStream();
 	return this;
 }
 
 ULayoutGenerator* ULayoutGenerator::SetGridSize(int32 InSize)
 {
-	GridSize = FMath::Max(10, InSize);
+	GridSize = FMath::Max(MinGridCellSize, InSize);
+	if (GridSize != InSize)
+	{
+		UE_LOG(LogRoguelikeGeometry,
+			Warning,
+			TEXT("[Layout] Requested cell size %d is below the %d floor; generating at %d. Callers logging the requested value report a "
+				 "resolution that was never used."),
+			InSize,
+			MinGridCellSize,
+			GridSize);
+	}
 	return this;
 }
 
 void ULayoutGenerator::InitializeRandomStream()
 {
-	if (Seed.IsEmpty())
+	// The class default object must not invent a seed: NewObject copies Seed off it, so every instance would start
+	// out already seeded, its own substitution would never run, and every unseeded generator in the process would
+	// silently share one layout with no way to tell that from a seed the caller chose.
+	if (Seed.IsEmpty() && !HasAnyFlags(RF_ClassDefaultObject))
 	{
+		// Stored back on the member so both diagram conversions carry it out on FLayoutDiagram2D::Seed: pasting that
+		// string into Seed is the only way to see this layout again.
 		Seed = FGuid::NewGuid().ToString(EGuidFormats::Digits);
+		bSeedSubstituted = true;
 	}
 	RandomStream = FRandomStream(static_cast<int32>(PGSeed::HashSeedString(Seed)));
+}
+
+void ULayoutGenerator::WarnIfSeedSubstituted() const
+{
+	if (!bSeedSubstituted)
+	{
+		return;
+	}
+
+	UE_LOG(LogRoguelikeGeometry,
+		Warning,
+		TEXT("[Layout] Generated with no seed; '%s' was substituted and is carried on the diagram. The layout is reproducible only by setting "
+			 "that string as the seed."),
+		*Seed);
 }
 
 FVector2D ULayoutGenerator::ClampToBounds(const FVector2D& Point) const
@@ -55,6 +87,8 @@ FVector2D ULayoutGenerator::ClampToBounds(const FVector2D& Point) const
 
 FLayoutDiagram2D ULayoutGenerator::ConvertGridToDiagram(const TArray<bool>& Grid, int32 GridWidth, int32 GridHeight) const
 {
+	WarnIfSeedSubstituted();
+
 	FLayoutDiagram2D Diagram;
 	Diagram.Bounds = Bounds;
 	Diagram.Seed = Seed;
@@ -64,6 +98,15 @@ FLayoutDiagram2D ULayoutGenerator::ConvertGridToDiagram(const TArray<bool>& Grid
 	const float CellSize = static_cast<float>(GridSize);
 	const float MinX = Bounds.Min.X;
 	const float MinY = Bounds.Min.Y;
+
+	// Exterior means "this floor cell is on the outside of the layout", the raster equivalent of a Voronoi cell
+	// touching the diagram bounds, which is what the location-growth guards downstream read it as. The raster is
+	// padded, so the outermost ring of floor sits one cell in from the array edge and a plain "is on the array
+	// edge" test can never be true. A floor cell therefore counts as exterior when it is on the raster edge, or
+	// when one of its four orthogonal neighbours is a non-floor cell that itself lies on the raster edge.
+	// Widening this to "adjacent to any void" would make a one-cell-wide corridor exterior along its whole length
+	// and the guards would then refuse to grow a location along it.
+	auto LiesOnRasterEdge = [GridWidth, GridHeight](int32 X, int32 Y) { return X == 0 || X == GridWidth - 1 || Y == 0 || Y == GridHeight - 1; };
 
 	// Map from grid linear index to cell index
 	TArray<int32> GridToCellIndex;
@@ -113,8 +156,22 @@ FLayoutDiagram2D ULayoutGenerator::ConvertGridToDiagram(const TArray<bool>& Grid
 
 			Cell.Center = FVector2D(MinX + (X + 0.5f) * CellSize, MinY + (Y + 0.5f) * CellSize);
 
-			// bIsExterior: on grid boundary or adjacent to an uncarved cell at grid edge
-			Cell.bIsExterior = (X == 0 || X == GridWidth - 1 || Y == 0 || Y == GridHeight - 1);
+			Cell.bIsExterior = LiesOnRasterEdge(X, Y);
+			if (!Cell.bIsExterior)
+			{
+				static constexpr int32 NeighborDX[] = { 1, -1, 0, 0 };
+				static constexpr int32 NeighborDY[] = { 0, 0, 1, -1 };
+
+				for (int32 Dir = 0; Dir < 4 && !Cell.bIsExterior; ++Dir)
+				{
+					const int32 NX = X + NeighborDX[Dir];
+					const int32 NY = Y + NeighborDY[Dir];
+					if (NX >= 0 && NX < GridWidth && NY >= 0 && NY < GridHeight && !Grid[NY * GridWidth + NX] && LiesOnRasterEdge(NX, NY))
+					{
+						Cell.bIsExterior = true;
+					}
+				}
+			}
 		}
 	}
 

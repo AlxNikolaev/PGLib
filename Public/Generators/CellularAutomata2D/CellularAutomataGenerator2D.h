@@ -85,13 +85,15 @@ private:
 	static uint16 RuleToBitmask(const TArray<int32>& Rule);
 	int32		  CountWallNeighbors(const TArray<bool>& Grid, int32 X, int32 Y, int32 GridWidth, int32 GridHeight) const;
 
-	// Region merging pipeline
+	// Region merging pipeline. InCellSize is passed rather than read off GridSize because a run that trips the
+	// cell budget generates at a coarsened pitch that must not outlive the call.
 	FLayoutDiagram2D  BuildDiagramFromRegions(const TArray<bool>& Grid,
 		 const TArray<int32>&									  RegionIds,
 		 const TArray<TArray<FIntPoint>>&						  Regions,
 		 int32													  CenterRegionId,
 		 int32													  GridWidth,
-		 int32													  GridHeight);
+		 int32													  GridHeight,
+		 float													  InCellSize);
 	TArray<FVector2D> TraceBoundaryPolygon(
 		const TArray<FIntPoint>& Region, const TArray<int32>& RegionIds, int32 RegionId, int32 GridWidth, int32 GridHeight, float CellSize) const;
 	static float	  ComputePolygonArea(const TArray<FIntPoint>& Loop);

@@ -167,6 +167,16 @@ public:
 private:
 	void InitializeRandomStream();
 
+	/**
+	 * Re-derives RandomStream from Seed at every RNG entry point, substituting a seed first when there is none.
+	 * Seeding is the caller's contract: the substituted value is recorded on Seed (and therefore on
+	 * FVoronoiDiagram2D::Seed) so the diagram can still be reproduced, but a generator that reaches the substitution
+	 * has produced a layout no other machine will agree on. Re-deriving unconditionally is what makes two generate
+	 * calls on one instance agree, and it covers the instance whose Seed arrived by property copy or deserialization
+	 * (Seed is reflected, RandomStream is not) rather than through SetSeed.
+	 */
+	void EnsureSeeded();
+
 	void ComputeVoronoiCells(const TArray<FVector2D>& Sites, FVoronoiDiagram2D& OutDiagram, bool bComputeNeighbors = true) const;
 
 	/**

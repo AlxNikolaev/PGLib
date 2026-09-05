@@ -752,4 +752,201 @@ bool FCellularAutomataCarveCorridorsNearestPairTest::RunTest(const FString& Para
 	return true;
 }
 
+// ============================================================
+// Reuse of one generator instance must reproduce the layout: the CA re-seeds its stream at the top of every run,
+// so a cached or re-streamed generator cannot drift away from the seed it was configured with.
+// ============================================================
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FCellularAutomataRepeatGenerateTest, "ProceduralGeometry.CellularAutomata.GenerateTwiceOnOneInstanceIsIdentical", DefaultTestFlags)
+
+bool FCellularAutomataRepeatGenerateTest::RunTest(const FString& Parameters)
+{
+	UCellularAutomataGenerator2D* Generator = NewObject<UCellularAutomataGenerator2D>();
+	Generator->SetBounds(FBox2D(FVector2D(-500, -500), FVector2D(500, 500)))->SetSeed(TEXT("RepeatGenerate"));
+
+	const FLayoutDiagram2D First = Generator->Generate();
+	const FLayoutDiagram2D Second = Generator->Generate();
+
+	if (!TestTrue(TEXT("The first run produced a non-empty diagram to compare against"), First.Cells.Num() > 0))
+	{
+		return false;
+	}
+
+	TestEqual(TEXT("Reusing one instance gives the same cell count"), Second.Cells.Num(), First.Cells.Num());
+
+	// Counts alone would miss a stream left mid-sequence by the first run: the second cave would have a similar cell
+	// count and completely different geometry. The structural hash covers vertices, centres and neighbour lists.
+	TestEqual(
+		TEXT("Reusing one instance is structurally identical"), PGTestHash::HashLayoutDiagram2D(Second), PGTestHash::HashLayoutDiagram2D(First));
+
+	return true;
+}
+
+// ============================================================
+// A run that coarsens to fit the cell budget must not coarsen the generator: the degraded pitch belongs to that
+// call's bounds, and a later run whose bounds fit must generate at the authored pitch.
+// ============================================================
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FCellularAutomataDegradedCellSizeLeakTest, "ProceduralGeometry.CellularAutomata.DegradedCellSizeDoesNotLeakIntoGridSize", DefaultTestFlags)
+
+bool FCellularAutomataDegradedCellSizeLeakTest::RunTest(const FString& Parameters)
+{
+	// An all-wall fill with no smoothing keeps the near-budget raster cheap; this test asserts on cell size, not on
+	// cave shape, so both runs legitimately come back with an empty diagram.
+	AddExpectedMessagePlain(TEXT("No surviving regions"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, 0);
+	AddExpectedMessagePlain(TEXT("Cell budget exceeded"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, 0);
+
+	UCellularAutomataGenerator2D* Generator = NewObject<UCellularAutomataGenerator2D>();
+	Generator->SetSeed(TEXT("DegradedLeak"));
+	Generator->SetGridSize(10);
+	Generator->SetFillProbability(1.0f);
+	Generator->SetIterations(0);
+	Generator->SetBounds(FBox2D(FVector2D(-100000, -100000), FVector2D(100000, 100000)));
+
+	const FCellularAutomataGridData Degraded = Generator->GenerateWithGridData();
+
+	if (!TestTrue(TEXT("The oversized bounds actually tripped the cell budget"), Degraded.bDegradedResolution))
+	{
+		return false;
+	}
+	TestTrue(TEXT("The degraded run used a coarser pitch than the authored one"), Degraded.CellSize > 10.0f);
+
+	Generator->SetBounds(FBox2D(FVector2D(-500, -500), FVector2D(500, 500)));
+	const FCellularAutomataGridData Fitting = Generator->GenerateWithGridData();
+
+	TestFalse(TEXT("Bounds that fit the budget do not degrade"), Fitting.bDegradedResolution);
+	TestEqual(TEXT("The fitting run generates at the authored cell size"), Fitting.CellSize, 10.0f);
+
+	return true;
+}
+
+// ============================================================
+// Boundary tracing at a pinch corner. The ring below leaves the outside void and the enclosed hole meeting
+// diagonally at one grid corner; pairing the two edges there by anything but geometry splices the hole into the
+// outer boundary as a single keyhole loop whose area is outer-minus-hole and which visits the corner twice.
+// ============================================================
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FCellularAutomataBoundaryPinchTest, "ProceduralGeometry.CellularAutomata.BoundaryTracePinchKeepsHoleSeparate", DefaultTestFlags)
+
+bool FCellularAutomataBoundaryPinchTest::RunTest(const FString& Parameters)
+{
+	static constexpr int32 GridW = 5;
+	static constexpr int32 GridH = 5;
+
+	FCellularAutomataGridData Data;
+	Data.GridWidth = GridW;
+	Data.GridHeight = GridH;
+	Data.CellSize = 1.0f;
+	Data.CenterRegionId = -1;
+	Data.Grid.Init(false, GridW * GridH);
+
+	for (int32 Y = 0; Y < GridH; ++Y)
+	{
+		for (int32 X = 0; X < GridW; ++X)
+		{
+			const bool bOnRing = (X == 0 || X == GridW - 1 || Y == 0 || Y == GridH - 1);
+			const bool bRemovedCorner = (X == 0 && Y == GridH - 1);
+			Data.Grid[Y * GridW + X] = bOnRing && !bRemovedCorner;
+		}
+	}
+
+	// Cell size 1 with the bounds origin at zero puts traced vertices straight into grid-corner coordinates.
+	UCellularAutomataGenerator2D* Generator = NewObject<UCellularAutomataGenerator2D>();
+	Generator->SetBounds(FBox2D(FVector2D(0.0f, 0.0f), FVector2D(static_cast<float>(GridW), static_cast<float>(GridH))));
+	Generator->SetSeed(TEXT("BoundaryPinch"));
+	Generator->RebuildDiagram(Data);
+
+	if (!TestEqual(TEXT("The ring is one connected region, so one diagram cell"), Data.Diagram.Cells.Num(), 1))
+	{
+		return false;
+	}
+
+	const TArray<FVector2D>& Vertices = Data.Diagram.Cells[0].Vertices;
+	if (!TestTrue(TEXT("The traced boundary is a polygon"), Vertices.Num() >= 3))
+	{
+		return false;
+	}
+
+	double Shoelace = 0.0;
+	for (int32 Index = 0; Index < Vertices.Num(); ++Index)
+	{
+		const FVector2D& A = Vertices[Index];
+		const FVector2D& B = Vertices[(Index + 1) % Vertices.Num()];
+		Shoelace += A.X * B.Y - B.X * A.Y;
+	}
+
+	// 24 = the 5x5 footprint minus the removed corner cell. 15 would be that outer area minus the 3x3 hole, which is
+	// what a merged keyhole loop measures.
+	TestEqual(TEXT("The traced polygon is the outer boundary, not the outer boundary minus the hole"),
+		static_cast<float>(FMath::Abs(Shoelace) * 0.5),
+		24.0f,
+		0.01f);
+
+	for (int32 I = 0; I < Vertices.Num(); ++I)
+	{
+		for (int32 J = I + 1; J < Vertices.Num(); ++J)
+		{
+			TestFalse(FString::Printf(TEXT("Vertices %d and %d are distinct (a merged loop revisits the pinch corner)"), I, J),
+				Vertices[I].Equals(Vertices[J], 0.001f));
+		}
+	}
+
+	return true;
+}
+
+// ============================================================
+// One CA layout cell is a whole cave lobe and the CA walls its raster boundary ring, so no lobe can reach the raster
+// edge. This pins the literal false the conversion writes, not a computed rule — it cannot tell a correct exterior
+// rule from a wrong one, it only stops the always-false computation this replaced from creeping back as apparent
+// protection. The rule that does get exercised lives on the raster path, in DrunkardWalk.ExteriorRingIsMarked.
+// ============================================================
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FCellularAutomataRegionExteriorTest, "ProceduralGeometry.CellularAutomata.RegionCellsAreNeverExterior", DefaultTestFlags)
+
+bool FCellularAutomataRegionExteriorTest::RunTest(const FString& Parameters)
+{
+	UCellularAutomataGenerator2D* Generator = NewObject<UCellularAutomataGenerator2D>();
+	Generator->SetBounds(FBox2D(FVector2D(-500, -500), FVector2D(500, 500)))->SetSeed(TEXT("RegionExterior"));
+
+	const FLayoutDiagram2D Diagram = Generator->Generate();
+
+	if (!TestTrue(TEXT("Generation produced cells to inspect"), Diagram.Cells.Num() > 0))
+	{
+		return false;
+	}
+
+	for (int32 Index = 0; Index < Diagram.Cells.Num(); ++Index)
+	{
+		TestFalse(FString::Printf(TEXT("Region cell %d is not exterior"), Index), Diagram.Cells[Index].bIsExterior);
+	}
+
+	return true;
+}
+
+// ============================================================
+// SetGridSize raises a request below the floor. The value it raised to is what generates, and the clamp says so
+// instead of leaving the caller's own log line describing a resolution that was never used.
+// ============================================================
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FLayoutGeneratorGridSizeClampTest, "ProceduralGeometry.LayoutGenerator.GridSizeClampReportsEffectiveValue", DefaultTestFlags)
+
+bool FLayoutGeneratorGridSizeClampTest::RunTest(const FString& Parameters)
+{
+	AddExpectedMessagePlain(TEXT("is below the"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, 0);
+
+	UCellularAutomataGenerator2D* Generator = NewObject<UCellularAutomataGenerator2D>();
+	Generator->SetBounds(FBox2D(FVector2D(0, 0), FVector2D(100, 100)));
+	Generator->SetSeed(TEXT("GridSizeClamp"));
+	Generator->SetGridSize(ULayoutGenerator::MinGridCellSize / 2);
+	Generator->SetFillProbability(0.0f);
+	Generator->SetIterations(0);
+
+	const FCellularAutomataGridData Data = Generator->GenerateWithGridData();
+
+	TestEqual(TEXT("A request below the floor generates at the floor"), Data.CellSize, static_cast<float>(ULayoutGenerator::MinGridCellSize));
+	TestEqual(TEXT("Grid width follows the effective cell size"), Data.GridWidth, 100 / ULayoutGenerator::MinGridCellSize);
+
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

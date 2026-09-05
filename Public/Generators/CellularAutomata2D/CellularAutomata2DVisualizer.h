@@ -23,8 +23,10 @@ class PROCEDURALGEOMETRY_API ACellularAutomata2DVisualizer : public AActor
 	UPROPERTY(EditInstanceOnly)
 	FBox2D Bounds;
 
+	/** Non-empty by default: an empty seed makes the generator invent a fresh one on every construction, so the
+	 *  preview would redraw a different cave on every property tweak and the overlay would name no seed at all. */
 	UPROPERTY(EditInstanceOnly)
-	FString Seed;
+	FString Seed = TEXT("Preview");
 
 	UPROPERTY(EditInstanceOnly, meta = (ClampMin = 10))
 	int32 GridSize = 100;

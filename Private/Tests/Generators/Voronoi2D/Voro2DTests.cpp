@@ -2,6 +2,7 @@
 #include "Generators/Voronoi2D/VoronoiGenerator2D.h"
 
 #include "ProceduralGeometry.h"
+#include "UObject/UnrealType.h"
 #include "../../PGStructuralHash.h"
 #include "../../ProceduralGeometryTestFlags.h"
 
@@ -307,7 +308,9 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVoronoiDegenerateInputTest, "ProceduralGeometr
 bool FVoronoiDegenerateInputTest::RunTest(const FString& Parameters)
 {
 	UVoronoiGenerator2D* Generator = NewObject<UVoronoiGenerator2D>();
-	Generator->SetBounds(FBox2D(FVector2D(0, 0), FVector2D(100, 100)));
+	// Seeded because the zero-site case below goes through GenerateRandomSites, which reports an unseeded generator
+	// as a contract violation; this test is about degenerate site counts, not about seeding.
+	Generator->SetBounds(FBox2D(FVector2D(0, 0), FVector2D(100, 100)))->SetSeed(TEXT("DegenerateInput"));
 
 	// A) Zero sites
 	{
@@ -762,6 +765,132 @@ bool FVoronoiCornerContactTest::RunTest(const FString& Parameters)
 				0.01f);
 		}
 	}
+
+	return true;
+}
+
+// Test 20: An unseeded generator is a contract violation, but the diagram must still say which seed produced it —
+// otherwise the provenance field names a layout that cannot be reproduced.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVoronoiUnseededSeedRecordedTest, "ProceduralGeometry.Voronoi.UnseededGeneratorRecordsTheSeedItUsed", DefaultTestFlags)
+
+bool FVoronoiUnseededSeedRecordedTest::RunTest(const FString& Parameters)
+{
+	AddExpectedErrorPlain(TEXT("Generated without SetSeed"), EAutomationExpectedErrorFlags::Contains, 1);
+
+	const FBox2D TestBounds(FVector2D(-500, -500), FVector2D(500, 500));
+	const int32	 NumSites = 12;
+
+	UVoronoiGenerator2D* Unseeded = NewObject<UVoronoiGenerator2D>();
+	Unseeded->SetBounds(TestBounds);
+	const FVoronoiDiagram2D Diagram = Unseeded->GenerateRandomSites(NumSites, false);
+
+	if (!TestFalse(TEXT("An unseeded diagram records the seed it was generated from"), Diagram.Seed.IsEmpty()))
+	{
+		return false;
+	}
+
+	UVoronoiGenerator2D* Replay = NewObject<UVoronoiGenerator2D>();
+	Replay->SetBounds(TestBounds)->SetSeed(Diagram.Seed);
+	const FVoronoiDiagram2D Replayed = Replay->GenerateRandomSites(NumSites, false);
+
+	if (!TestEqual(TEXT("Replaying the recorded seed reproduces the site count"), Replayed.Sites.Num(), Diagram.Sites.Num()))
+	{
+		return false;
+	}
+
+	int32 SiteMismatches = 0;
+	for (int32 Index = 0; Index < Diagram.Sites.Num(); ++Index)
+	{
+		if (!Replayed.Sites[Index].Equals(Diagram.Sites[Index], 0.001))
+		{
+			++SiteMismatches;
+		}
+	}
+	TestEqual(TEXT("Replaying the recorded seed reproduces every site"), SiteMismatches, 0);
+
+	return true;
+}
+
+// Test 21: Same seed, same generator instance, same diagram. The stream is re-derived at every RNG entry point, so a
+// second generate call cannot continue where the first stopped — reuse (a cached generator, a re-streamed cluster)
+// must not be able to make two peers disagree about a seed they both hold.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVoronoiReuseIsIdenticalTest, "ProceduralGeometry.Voronoi.GenerateTwiceOnOneInstanceIsIdentical", DefaultTestFlags)
+
+bool FVoronoiReuseIsIdenticalTest::RunTest(const FString& Parameters)
+{
+	const FBox2D TestBounds(FVector2D(-500, -500), FVector2D(500, 500));
+	const int32	 NumSites = 16;
+
+	UVoronoiGenerator2D* Generator = NewObject<UVoronoiGenerator2D>();
+	Generator->SetBounds(TestBounds)->SetSeed(TEXT("ReuseIsIdentical"));
+
+	const FVoronoiDiagram2D First = Generator->GenerateRandomSites(NumSites, false);
+	const FVoronoiDiagram2D Second = Generator->GenerateRandomSites(NumSites, false);
+
+	if (!TestEqual(TEXT("Both runs produce the same site count"), Second.Sites.Num(), First.Sites.Num()))
+	{
+		return false;
+	}
+
+	int32 SiteMismatches = 0;
+	for (int32 Index = 0; Index < First.Sites.Num(); ++Index)
+	{
+		if (!Second.Sites[Index].Equals(First.Sites[Index], 0.001))
+		{
+			++SiteMismatches;
+		}
+	}
+	TestEqual(TEXT("Reusing one generator reproduces every site"), SiteMismatches, 0);
+	TestEqual(TEXT("Reusing one generator reproduces the cell count"), Second.Cells.Num(), First.Cells.Num());
+
+	return true;
+}
+
+// Test 22: Seed is reflected and RandomStream is not, so an instance whose seed arrived by property copy or
+// deserialization has no stream derived from it. Generation must still come from the seed the diagram reports,
+// otherwise the provenance field names a layout the generator never produced.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVoronoiDeserializedSeedTest, "ProceduralGeometry.Voronoi.SeedSetWithoutSetSeedStillDrivesGeneration", DefaultTestFlags)
+
+bool FVoronoiDeserializedSeedTest::RunTest(const FString& Parameters)
+{
+	const FBox2D  TestBounds(FVector2D(-500, -500), FVector2D(500, 500));
+	const int32	  NumSites = 16;
+	const FString TestSeed = TEXT("ArrivedByPropertyCopy");
+
+	// Write the reflected Seed directly, the way a load or an archetype copy would, bypassing SetSeed.
+	UVoronoiGenerator2D* Deserialized = NewObject<UVoronoiGenerator2D>();
+	const FStrProperty*	 SeedProperty = CastField<FStrProperty>(UVoronoiGenerator2D::StaticClass()->FindPropertyByName(TEXT("Seed")));
+	if (!SeedProperty)
+	{
+		AddError(TEXT("UVoronoiGenerator2D::Seed is no longer a reflected FString; this test cannot simulate a load"));
+		return false;
+	}
+	SeedProperty->SetPropertyValue_InContainer(Deserialized, TestSeed);
+
+	Deserialized->SetBounds(TestBounds);
+	const FVoronoiDiagram2D Loaded = Deserialized->GenerateRandomSites(NumSites, false);
+
+	UVoronoiGenerator2D* Explicit = NewObject<UVoronoiGenerator2D>();
+	Explicit->SetBounds(TestBounds)->SetSeed(TestSeed);
+	const FVoronoiDiagram2D Reference = Explicit->GenerateRandomSites(NumSites, false);
+
+	TestEqual(TEXT("A deserialized seed reports itself on the diagram"), Loaded.Seed, TestSeed);
+	if (!TestEqual(TEXT("A deserialized seed produces the same site count as SetSeed"), Loaded.Sites.Num(), Reference.Sites.Num()))
+	{
+		return false;
+	}
+
+	int32 SiteMismatches = 0;
+	for (int32 Index = 0; Index < Reference.Sites.Num(); ++Index)
+	{
+		if (!Loaded.Sites[Index].Equals(Reference.Sites[Index], 0.001))
+		{
+			++SiteMismatches;
+		}
+	}
+	TestEqual(TEXT("A deserialized seed produces the same sites as SetSeed"), SiteMismatches, 0);
 
 	return true;
 }
