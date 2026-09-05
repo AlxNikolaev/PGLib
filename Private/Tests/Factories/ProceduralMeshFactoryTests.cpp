@@ -1,13 +1,7 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 //
-// CreatePrismMesh writes into a caller-owned FMeshData so a merge loop can hand it the same scratch buffer
-// for every cell instead of constructing one per cell. That is only safe if a reused buffer produces exactly
-// the mesh a fresh one would: a stale vertex or an inherited triangle offset would show up as a hole in the
-// foundation rather than as a failure anywhere near this code.
-//
-// Every helper below carries a file-specific prefix rather than living in an anonymous namespace: adaptive
-// unity builds can merge these test translation units, and a plain name would collide with another test
-// file's helper.
+// Helpers carry a file-specific prefix rather than an anonymous namespace: unity builds can merge these test
+// translation units and a plain name would collide.
 
 #include "Factories/ProceduralMeshFactory.h"
 #include "../ProceduralGeometryTestFlags.h"
@@ -27,8 +21,7 @@ static TArray<FVector2D> MeshFactoryTests_MakePolygon(const int32 SideCount, con
 	return Vertices;
 }
 
-/** Exact, element-for-element comparison of two meshes — no tolerance: the same inputs through the same code
- *  must produce the same floats. */
+/** Exact element-for-element comparison, no tolerance: identical inputs must produce identical floats. */
 static bool MeshFactoryTests_MeshesIdentical(const FMeshData& A, const FMeshData& B, FString& OutMismatch)
 {
 	if (A.Vertices.Num() != B.Vertices.Num() || A.Triangles.Num() != B.Triangles.Num() || A.Normals.Num() != B.Normals.Num()
@@ -96,8 +89,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FProceduralMeshFactoryScratchReuseTest::RunTest(const FString& /*Parameters*/)
 {
-	// Two footprints that differ in vertex count, position, height, colour and skirt mask, so a buffer that
-	// kept anything at all from the first call shows up in the second.
+	// Footprints differ in vertex count, position, height, colour and skirt mask, so anything the buffer keeps shows up.
 	const TArray<FVector2D> Triangle = MeshFactoryTests_MakePolygon(/*SideCount=*/3, /*Radius=*/250.0, FVector2D(0.0, 0.0));
 	const TArray<FVector2D> Heptagon = MeshFactoryTests_MakePolygon(/*SideCount=*/7, /*Radius=*/900.0, FVector2D(1500.0, -400.0));
 
@@ -147,8 +139,7 @@ bool FProceduralMeshFactoryScratchReuseTest::RunTest(const FString& /*Parameters
 		return false;
 	}
 
-	// Third call, back to the first footprint: a scratch that has held a larger mesh must still shrink to the
-	// smaller one rather than trailing the previous cell's geometry.
+	// A scratch that has held a larger mesh must shrink back rather than trail the previous cell's geometry.
 	TestTrue(TEXT("ScratchReuse: scratch prism 3 builds"), UProceduralMeshFactory::CreatePrismMesh(FirstParams, Scratch));
 	if (!MeshFactoryTests_MeshesIdentical(Scratch, FreshFirst, Mismatch))
 	{
@@ -159,4 +150,4 @@ bool FProceduralMeshFactoryScratchReuseTest::RunTest(const FString& /*Parameters
 	return true;
 }
 
-#endif // WITH_DEV_AUTOMATION_TESTS
+#endif

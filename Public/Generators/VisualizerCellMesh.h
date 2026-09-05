@@ -5,20 +5,10 @@
 #include "ProceduralMeshComponent.h"
 
 /**
- * Shared mesh-section builder used by the three 2D procedural-geometry editor visualizers
- * (CellularAutomata, DrunkardWalk).
- *
- * Emits one flat quad per cell (4 verts, 2 CCW tris) coloured uniformly by Color, sitting at
- * ZOffset. All three visualizers used an identical algorithm — this is the single implementation.
- *
- * @param MeshComponent    Target component; creates/overwrites the section at SectionIndex.
- * @param Material         Optional debug material applied after section creation.
- * @param SectionIndex     Section slot on the mesh component.
- * @param CellPositions    Grid-coordinate cells to rasterize (X = column, Y = row).
- * @param CellSize         World-space side length of one grid cell.
- * @param GridOriginLocal  World-space origin of cell (0,0) relative to the owning actor (local space).
- * @param Color            Uniform vertex colour for every quad in this section.
- * @param ZOffset          Z coordinate assigned to all generated vertices (used for layer separation).
+ * Shared mesh-section builder for the 2D procedural-geometry editor visualizers: one flat quad per cell,
+ * coloured uniformly by Color, overwriting the section at SectionIndex. CellPositions are grid coordinates
+ * (X = column, Y = row), GridOriginLocal places cell (0,0) in the owning actor's local space, and ZOffset
+ * separates visualizer layers.
  */
 inline void ProcGen_BuildCellMeshSection(UProceduralMeshComponent* MeshComponent,
 	UMaterialInterface*											   Material,

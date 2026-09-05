@@ -49,7 +49,7 @@ bool FVoronoiTestBase::IsConvexPolygon(const TArray<FVector2D>& Vertices)
 		}
 		else if ((CrossProduct > 0) != bPositive)
 		{
-			return false; // Sign changed, not convex
+			return false;
 		}
 	}
 
@@ -68,12 +68,10 @@ float FVoronoiTestBase::CalculatePolygonArea(const TArray<FVector2D>& Vertices)
 	return FMath::Abs(Area) * 0.5f;
 }
 
-// Test 1: Basic Cell Properties
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVoronoiCellPropertiesTest, "ProceduralGeometry.Voronoi.Cell.Properties", DefaultTestFlags)
 
 bool FVoronoiCellPropertiesTest::RunTest(const FString& Parameters)
 {
-	// Create a simple square cell
 	FVoronoiCell2D Cell;
 	Cell.Vertices.Add(FVector2D(0, 0));
 	Cell.Vertices.Add(FVector2D(10, 0));
@@ -82,18 +80,15 @@ bool FVoronoiCellPropertiesTest::RunTest(const FString& Parameters)
 	Cell.SiteLocation = FVector2D(5, 5);
 	Cell.bIsValid = true;
 
-	// Test area calculation
 	float ExpectedArea = 100.0f;
 	float ActualArea = Cell.GetArea();
 	TestEqual("Cell area should be 100", ActualArea, ExpectedArea, 0.01f);
 
-	// Test centroid calculation
 	const FVector2D ExpectedCentroid(5, 5);
 	const FVector2D ActualCentroid = Cell.GetCentroid();
 	TestEqual("Centroid X", static_cast<float>(ActualCentroid.X), static_cast<float>(ExpectedCentroid.X), 0.01f);
 	TestEqual("Centroid Y", static_cast<float>(ActualCentroid.Y), static_cast<float>(ExpectedCentroid.Y), 0.01f);
 
-	// Test point containment
 	TestTrue("Center point should be inside", Cell.ContainsPoint(FVector2D(5, 5)));
 	TestTrue("Corner point should be inside", Cell.ContainsPoint(FVector2D(1, 1)));
 	TestFalse("Outside point should not be inside", Cell.ContainsPoint(FVector2D(15, 15)));
@@ -102,7 +97,6 @@ bool FVoronoiCellPropertiesTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// Test 2: Generator with Fixed Sites (Smoke Test)
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVoronoiFixedSitesTest, "ProceduralGeometry.Voronoi.Generator.FixedSites", SmokeTestFlags)
 
 bool FVoronoiFixedSitesTest::RunTest(const FString& Parameters)
@@ -110,7 +104,6 @@ bool FVoronoiFixedSitesTest::RunTest(const FString& Parameters)
 	UVoronoiGenerator2D* Generator = NewObject<UVoronoiGenerator2D>();
 	Generator->SetBounds(FBox2D(FVector2D(0, 0), FVector2D(100, 100)));
 
-	// Create a simple 2x2 grid of sites
 	TArray<FVector2D> Sites;
 	Sites.Add(FVector2D(25, 25));
 	Sites.Add(FVector2D(75, 25));
@@ -119,24 +112,20 @@ bool FVoronoiFixedSitesTest::RunTest(const FString& Parameters)
 
 	FVoronoiDiagram2D Diagram = Generator->GenerateFromSites(Sites);
 
-	// Verify basic properties
 	TestEqual("Should have 4 cells", Diagram.Cells.Num(), 4);
 	TestEqual("Should have 4 sites", Diagram.Sites.Num(), 4);
 
-	// Each cell should be valid
 	for (const FVoronoiCell2D& Cell : Diagram.Cells)
 	{
 		TestTrue("Cell should be valid", Cell.bIsValid);
 		TestTrue("Cell should have at least 3 vertices", Cell.Vertices.Num() >= 3);
 	}
 
-	// Test that each site is contained in its cell
 	for (int32 i = 0; i < Diagram.Cells.Num(); ++i)
 	{
 		TestTrue("Site should be in its own cell", Diagram.Cells[i].ContainsPoint(Diagram.Sites[i]));
 	}
 
-	// Corner cells should be boundary cells
 	TestTrue("Corner cells should be boundary cells", Diagram.Cells[0].bIsBoundaryCell);
 	TestTrue("Corner cells should be boundary cells", Diagram.Cells[1].bIsBoundaryCell);
 	TestTrue("Corner cells should be boundary cells", Diagram.Cells[2].bIsBoundaryCell);
@@ -145,7 +134,6 @@ bool FVoronoiFixedSitesTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// Test 3: Neighbor Detection
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVoronoiNeighborsTest, "ProceduralGeometry.Voronoi.Generator.Neighbors", DefaultTestFlags)
 
 bool FVoronoiNeighborsTest::RunTest(const FString& Parameters)
@@ -160,19 +148,16 @@ bool FVoronoiNeighborsTest::RunTest(const FString& Parameters)
 
 	FVoronoiDiagram2D Diagram = Generator->GenerateFromSites(Sites);
 
-	// Middle cell should have 2 neighbors
 	TestEqual("Middle cell should have 2 neighbors", Diagram.Cells[1].Neighbors.Num(), 2);
 	TestTrue("Should be neighbor with cell 0", Diagram.Cells[1].Neighbors.Contains(0));
 	TestTrue("Should be neighbor with cell 2", Diagram.Cells[1].Neighbors.Contains(2));
 
-	// End cells should have 1 neighbor each
 	TestEqual("First cell should have 1 neighbor", Diagram.Cells[0].Neighbors.Num(), 1);
 	TestTrue("Should be neighbor with cell 1", Diagram.Cells[0].Neighbors.Contains(1));
 
 	TestEqual("Last cell should have 1 neighbor", Diagram.Cells[2].Neighbors.Num(), 1);
 	TestTrue("Should be neighbor with cell 1", Diagram.Cells[2].Neighbors.Contains(1));
 
-	// Test shared edge detection
 	FVector2D EdgeStart, EdgeEnd;
 	TestTrue("Cells 0 and 1 should share an edge", Diagram.GetSharedEdge(0, 1, EdgeStart, EdgeEnd));
 	TestTrue("Cells 1 and 2 should share an edge", Diagram.GetSharedEdge(1, 2, EdgeStart, EdgeEnd));
@@ -181,7 +166,6 @@ bool FVoronoiNeighborsTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// Test 4: Random Generation
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVoronoiRandomGenerationTest, "ProceduralGeometry.Voronoi.Generator.Random", DefaultTestFlags)
 
 bool FVoronoiRandomGenerationTest::RunTest(const FString& Parameters)
@@ -195,7 +179,6 @@ bool FVoronoiRandomGenerationTest::RunTest(const FString& Parameters)
 
 	TestEqual("Should have correct number of cells", Diagram.Cells.Num(), NumSites);
 
-	// Verify all cells are valid and convex
 	int32 ValidCells = 0;
 	float TotalArea = 0.0f;
 
@@ -206,29 +189,22 @@ bool FVoronoiRandomGenerationTest::RunTest(const FString& Parameters)
 			ValidCells++;
 			TotalArea += Cell.GetArea();
 
-			// Test convexity
 			TestTrue("Cell should be convex", FVoronoiTestBase::IsConvexPolygon(Cell.Vertices));
 		}
 	}
 
 	TestEqual("All cells should be valid", ValidCells, NumSites);
 
-	// Total area should approximately equal bounds area
 	float BoundsArea = 1000.0f * 1000.0f;
 	TestEqual("Total cell area should match bounds", TotalArea, BoundsArea, BoundsArea * 0.01f);
 
 	return true;
 }
 
-// Test 5: Generation cost, measured in half-plane clips.
-//
-// The clip count is the work the cell build does and it is the same integer on every machine, so it is what the
-// assertions read; the durations sit beside it in the log because that is what a human wants to see, but a wall
-// clock on a shared build machine measures the machine as much as the algorithm and can never decide a red.
-//
-// Two site counts carry an assertion, for the two regimes the build has. Below MinSitesForSpatialPruning the scan
-// is the full pairwise sweep, so its cost is an exact number: N*(N-1). Above it the spatial index must actually
-// skip clips, and a build that stopped skipping them would land back on that same exact number.
+// Generation cost is measured in half-plane clips, the same integer on every machine; the durations are logged
+// but a wall clock on a shared machine can never decide a red.
+// Two site counts, one per regime: below MinSitesForSpatialPruning the scan is the full pairwise sweep, N*(N-1);
+// above it the index must skip clips, and a build that stopped skipping would land back on that exact number.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVoronoiPerformanceTest, "ProceduralGeometry.Voronoi.Generator.Performance", PerfTestFlags)
 
 bool FVoronoiPerformanceTest::RunTest(const FString& Parameters)
@@ -258,8 +234,7 @@ bool FVoronoiPerformanceTest::RunTest(const FString& Parameters)
 		TestEqual(FString::Printf(TEXT("Should have %d cells"), NumSites), Diagram.Cells.Num(), NumSites);
 	}
 
-	// Distinct random sites, so no bisector is skipped as degenerate: every site clips against every other exactly
-	// once. A cell that bailed out early, or a threshold change that switched the index on here, moves this number.
+	// Distinct random sites, so no bisector is skipped as degenerate: every site clips against every other exactly once.
 	TestEqual(TEXT("50 sites cost the full pairwise sweep (no pruning below the threshold)"), ClipsBySize[50], static_cast<int64>(50 * 49));
 
 	// The whole point of the index. Equality with the exhaustive count means pruning silently stopped engaging.
@@ -269,7 +244,6 @@ bool FVoronoiPerformanceTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// Test 9: Point Location
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVoronoiPointLocationTest, "ProceduralGeometry.Voronoi.Diagram.PointLocation", DefaultTestFlags)
 
 bool FVoronoiPointLocationTest::RunTest(const FString& Parameters)
@@ -277,7 +251,6 @@ bool FVoronoiPointLocationTest::RunTest(const FString& Parameters)
 	UVoronoiGenerator2D* Generator = NewObject<UVoronoiGenerator2D>();
 	Generator->SetBounds(FBox2D(FVector2D(0, 0), FVector2D(100, 100)));
 
-	// Create known configuration
 	TArray<FVector2D> Sites;
 	Sites.Add(FVector2D(25, 25));
 	Sites.Add(FVector2D(75, 25));
@@ -286,40 +259,33 @@ bool FVoronoiPointLocationTest::RunTest(const FString& Parameters)
 
 	FVoronoiDiagram2D Diagram = Generator->GenerateFromSites(Sites);
 
-	// Test points that should be in specific cells
 	TestEqual("Point near first site", Diagram.FindCellContainingPoint(FVector2D(20, 20)), 0);
 	TestEqual("Point near second site", Diagram.FindCellContainingPoint(FVector2D(80, 20)), 1);
 	TestEqual("Point near third site", Diagram.FindCellContainingPoint(FVector2D(20, 80)), 2);
 	TestEqual("Point near fourth site", Diagram.FindCellContainingPoint(FVector2D(80, 80)), 3);
 
-	// Test center point
 	int32 CenterCell = Diagram.FindCellContainingPoint(FVector2D(50, 50));
 	TestTrue("Center point should be in a valid cell", CenterCell >= 0 && CenterCell < 4);
 
-	// Test outside bounds
 	TestEqual("Point outside bounds", Diagram.FindCellContainingPoint(FVector2D(-10, -10)), INDEX_NONE);
 
 	return true;
 }
 
-// Test 10: Degenerate Input Handling
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVoronoiDegenerateInputTest, "ProceduralGeometry.Voronoi.DegenerateInput", DefaultTestFlags)
 
 bool FVoronoiDegenerateInputTest::RunTest(const FString& Parameters)
 {
 	UVoronoiGenerator2D* Generator = NewObject<UVoronoiGenerator2D>();
-	// Seeded because the zero-site case below goes through GenerateRandomSites, which reports an unseeded generator
-	// as a contract violation; this test is about degenerate site counts, not about seeding.
+	// Seeded because the zero-site case goes through GenerateRandomSites, which treats an unseeded generator as a violation.
 	Generator->SetBounds(FBox2D(FVector2D(0, 0), FVector2D(100, 100)))->SetSeed(TEXT("DegenerateInput"));
 
-	// A) Zero sites
 	{
 		FVoronoiDiagram2D Diagram = Generator->GenerateRandomSites(0, false);
 		TestEqual("Zero sites: should have 0 cells", Diagram.Cells.Num(), 0);
 		TestEqual("Zero sites: should have 0 sites", Diagram.Sites.Num(), 0);
 	}
 
-	// B) One site
 	{
 		TArray<FVector2D> Sites;
 		Sites.Add(FVector2D(50, 50));
@@ -332,7 +298,6 @@ bool FVoronoiDegenerateInputTest::RunTest(const FString& Parameters)
 		}
 	}
 
-	// C) Two sites
 	{
 		TArray<FVector2D> Sites;
 		Sites.Add(FVector2D(25, 50));
@@ -348,7 +313,6 @@ bool FVoronoiDegenerateInputTest::RunTest(const FString& Parameters)
 		TestTrue("Two sites: should share an edge", Diagram.GetSharedEdge(0, 1, EdgeStart, EdgeEnd));
 	}
 
-	// D) Collinear sites
 	{
 		TArray<FVector2D> Sites;
 		Sites.Add(FVector2D(10, 50));
@@ -363,7 +327,6 @@ bool FVoronoiDegenerateInputTest::RunTest(const FString& Parameters)
 		}
 	}
 
-	// E) Duplicate sites (verify no crash)
 	{
 		TArray<FVector2D> Sites;
 		Sites.Add(FVector2D(50, 50));
@@ -377,7 +340,6 @@ bool FVoronoiDegenerateInputTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// Test 11: Deterministic Seeding
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVoronoiDeterministicSeedTest, "ProceduralGeometry.Voronoi.DeterministicSeed", DefaultTestFlags)
 
 bool FVoronoiDeterministicSeedTest::RunTest(const FString& Parameters)
@@ -405,9 +367,7 @@ bool FVoronoiDeterministicSeedTest::RunTest(const FString& Parameters)
 			FString::Printf(TEXT("Site %d Y match"), i), static_cast<float>(Diagram1.Sites[i].Y), static_cast<float>(Diagram2.Sites[i].Y), 0.01f);
 	}
 
-	// A count comparison is blind to the drift that matters: a clip or adjacency pass that started reading a TSet in
-	// hash order leaves every cell with the same number of vertices and neighbours while moving the vertices and
-	// reshuffling the neighbour lists. The structural hash covers the coordinates and the neighbour sets themselves.
+	// Counts are blind to iteration-order drift that moves vertices and reshuffles neighbours; the hash is not.
 	if (!TestTrue(TEXT("Deterministic seed produced a non-empty diagram to compare"), Diagram1.Cells.Num() == NumSites))
 	{
 		return false;
@@ -420,7 +380,6 @@ bool FVoronoiDeterministicSeedTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// Test 12: Lloyd Relaxation
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVoronoiLloydRelaxationTest, "ProceduralGeometry.Voronoi.LloydRelaxation", DefaultTestFlags)
 
 bool FVoronoiLloydRelaxationTest::RunTest(const FString& Parameters)
@@ -428,13 +387,11 @@ bool FVoronoiLloydRelaxationTest::RunTest(const FString& Parameters)
 	const FBox2D  TestBounds(FVector2D(0, 0), FVector2D(1000, 1000));
 	const FString TestSeed = TEXT("RelaxationTest");
 
-	// Generate without relaxation
 	UVoronoiGenerator2D* GenNoRelax = NewObject<UVoronoiGenerator2D>();
 	GenNoRelax->SetBounds(TestBounds)->SetSeed(TestSeed);
 	GenNoRelax->SetRelaxationIterations(0);
 	FVoronoiDiagram2D DiagramNoRelax = GenNoRelax->GenerateRelaxed(20);
 
-	// Generate with relaxation
 	UVoronoiGenerator2D* GenRelaxed = NewObject<UVoronoiGenerator2D>();
 	GenRelaxed->SetBounds(TestBounds)->SetSeed(TestSeed);
 	GenRelaxed->SetRelaxationIterations(5);
@@ -442,7 +399,6 @@ bool FVoronoiLloydRelaxationTest::RunTest(const FString& Parameters)
 
 	TestEqual("Both should have same cell count", DiagramNoRelax.Cells.Num(), DiagramRelaxed.Cells.Num());
 
-	// Relaxed sites should have moved from original positions
 	float TotalDisplacement = 0.0f;
 	int32 SiteCount = FMath::Min(DiagramNoRelax.Sites.Num(), DiagramRelaxed.Sites.Num());
 	for (int32 i = 0; i < SiteCount; ++i)
@@ -452,13 +408,11 @@ bool FVoronoiLloydRelaxationTest::RunTest(const FString& Parameters)
 	float AvgDisplacement = (SiteCount > 0) ? TotalDisplacement / SiteCount : 0.0f;
 	TestTrue("Relaxation should move sites (avg displacement > 0)", AvgDisplacement > 0.1f);
 
-	// Relaxed sites should remain within bounds
 	for (int32 i = 0; i < DiagramRelaxed.Sites.Num(); ++i)
 	{
 		TestTrue(FString::Printf(TEXT("Relaxed site %d within bounds"), i), TestBounds.IsInside(DiagramRelaxed.Sites[i]));
 	}
 
-	// Relaxed cells should still be valid
 	for (const FVoronoiCell2D& Cell : DiagramRelaxed.Cells)
 	{
 		TestTrue("Relaxed cell should be valid", Cell.bIsValid);
@@ -467,7 +421,6 @@ bool FVoronoiLloydRelaxationTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// Test 13: Poisson Disc Sampling
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVoronoiPoissonDiscTest, "ProceduralGeometry.Voronoi.PoissonDisc", DefaultTestFlags)
 
 bool FVoronoiPoissonDiscTest::RunTest(const FString& Parameters)
@@ -481,13 +434,11 @@ bool FVoronoiPoissonDiscTest::RunTest(const FString& Parameters)
 
 	TestTrue("Should have sites generated", Diagram.Sites.Num() > 0);
 
-	// All sites within bounds
 	for (int32 i = 0; i < Diagram.Sites.Num(); ++i)
 	{
 		TestTrue(FString::Printf(TEXT("Site %d within bounds"), i), TestBounds.IsInside(Diagram.Sites[i]));
 	}
 
-	// Minimum distance constraint: all pairs must be >= MinSiteDistance apart
 	const float MinSiteDistance = 10.0f;
 	for (int32 i = 0; i < Diagram.Sites.Num(); ++i)
 	{
@@ -501,7 +452,6 @@ bool FVoronoiPoissonDiscTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// Test 14: Relaxation Iterations Behavior
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVoronoiRelaxationIterationsTest, "ProceduralGeometry.Voronoi.RelaxationIterations", DefaultTestFlags)
 
 bool FVoronoiRelaxationIterationsTest::RunTest(const FString& Parameters)
@@ -521,7 +471,6 @@ bool FVoronoiRelaxationIterationsTest::RunTest(const FString& Parameters)
 		Diagrams.Add(Gen->GenerateRelaxed(NumSites));
 	}
 
-	// All diagrams should have same number of sites
 	for (int32 i = 0; i < Diagrams.Num(); ++i)
 	{
 		TestEqual(FString::Printf(TEXT("Diagram with %d iterations has correct site count"), IterationCounts[i]),
@@ -529,7 +478,6 @@ bool FVoronoiRelaxationIterationsTest::RunTest(const FString& Parameters)
 			Diagrams[0].Sites.Num());
 	}
 
-	// Compute average displacement from 0-iteration baseline
 	auto ComputeAvgDisplacement = [](const TArray<FVector2D>& Sites1, const TArray<FVector2D>& Sites2) -> float {
 		float Total = 0.0f;
 		int32 Count = FMath::Min(Sites1.Num(), Sites2.Num());
@@ -544,25 +492,20 @@ bool FVoronoiRelaxationIterationsTest::RunTest(const FString& Parameters)
 	float Disp3 = ComputeAvgDisplacement(Diagrams[0].Sites, Diagrams[2].Sites);
 	float Disp10 = ComputeAvgDisplacement(Diagrams[0].Sites, Diagrams[3].Sites);
 
-	// The tolerance sits on the strict side of every comparison below. Slackening it the other way admits equality,
-	// which is exactly the regression these assertions exist to catch: a relaxation that applies only its first pass
-	// leaves Disp3 and Disp10 equal to Disp1 while every iteration count still "moves sites from baseline".
+	// The tolerance is strict on purpose: admitting equality would pass a relaxation that applies only its first pass.
 	const float Tolerance = 0.01f;
 
 	TestTrue("1 iteration should move sites from baseline", Disp1 > 0.1f);
 	TestTrue("3 iterations should move strictly more than 1", Disp3 > Disp1 + Tolerance);
 	TestTrue("10 iterations should move strictly more than 1", Disp10 > Disp1 + Tolerance);
 
-	// Lloyd converges, so the 10-iteration displacement settles at (not below) the 3-iteration one; the tolerance is
-	// permissive here because a converged pair may sit either side of equality by a rounding step.
+	// Lloyd converges, so the 10-iteration displacement settles at, not below, the 3-iteration one within a rounding step.
 	TestTrue("10 iterations should not move sites back toward the baseline", Disp10 > Disp3 - Tolerance);
 
-	// Convergence: difference between 3 and 10 iterations should be smaller than between 0 and 3
 	float DispDelta_0_3 = Disp3;
 	float DispDelta_3_10 = ComputeAvgDisplacement(Diagrams[2].Sites, Diagrams[3].Sites);
 	TestTrue("Convergence: delta 3->10 should be strictly less than delta 0->3", DispDelta_3_10 < DispDelta_0_3 - Tolerance);
 
-	// Negative iteration count should be clamped to 0
 	UVoronoiGenerator2D* GenNeg = NewObject<UVoronoiGenerator2D>();
 	GenNeg->SetBounds(TestBounds)->SetSeed(TestSeed);
 	GenNeg->SetRelaxationIterations(-5);
@@ -572,7 +515,6 @@ bool FVoronoiRelaxationIterationsTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// Test 15: Minimum Site Distance Parameter
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVoronoiMinSiteDistanceTest, "ProceduralGeometry.Voronoi.MinSiteDistance", DefaultTestFlags)
 
 bool FVoronoiMinSiteDistanceTest::RunTest(const FString& Parameters)
@@ -580,23 +522,19 @@ bool FVoronoiMinSiteDistanceTest::RunTest(const FString& Parameters)
 	const FBox2D  TestBounds(FVector2D(0, 0), FVector2D(1000, 1000));
 	const FString TestSeed = TEXT("MinDistTest");
 
-	// Generate with small MinSiteDistance
 	UVoronoiGenerator2D* GenSmall = NewObject<UVoronoiGenerator2D>();
 	GenSmall->SetBounds(TestBounds)->SetSeed(TestSeed);
 	GenSmall->SetMinSiteDistance(10.0f);
 	FVoronoiDiagram2D DiagramSmall = GenSmall->GenerateRandomSites(30, true);
 
-	// Generate with larger MinSiteDistance
 	UVoronoiGenerator2D* GenLarge = NewObject<UVoronoiGenerator2D>();
 	GenLarge->SetBounds(TestBounds)->SetSeed(TestSeed);
 	GenLarge->SetMinSiteDistance(50.0f);
 	FVoronoiDiagram2D DiagramLarge = GenLarge->GenerateRandomSites(30, true);
 
-	// Both should produce valid diagrams
 	TestTrue("Small distance: should have sites", DiagramSmall.Sites.Num() > 0);
 	TestTrue("Large distance: should have sites", DiagramLarge.Sites.Num() > 0);
 
-	// Verify minimum distance constraints for both
 	for (int32 i = 0; i < DiagramSmall.Sites.Num(); ++i)
 	{
 		for (int32 j = i + 1; j < DiagramSmall.Sites.Num(); ++j)
@@ -614,7 +552,6 @@ bool FVoronoiMinSiteDistanceTest::RunTest(const FString& Parameters)
 		}
 	}
 
-	// Compare average pairwise distances
 	auto ComputeAvgPairwiseDist = [](const TArray<FVector2D>& Sites) -> float {
 		float Total = 0.0f;
 		int32 Count = 0;
@@ -629,8 +566,7 @@ bool FVoronoiMinSiteDistanceTest::RunTest(const FString& Parameters)
 		return (Count > 0) ? Total / Count : 0.0f;
 	};
 
-	// Strict, because equality is the regression: both configurations share a seed, so a MinSiteDistance that stopped
-	// reaching the sampler would hand back the identical site set and satisfy any comparison that admits equality.
+	// Strict because equality is the regression: both configs share a seed, so an ignored MinSiteDistance repeats the sites.
 	const float AvgDistSmall = ComputeAvgPairwiseDist(DiagramSmall.Sites);
 	const float AvgDistLarge = ComputeAvgPairwiseDist(DiagramLarge.Sites);
 	TestTrue(FString::Printf(TEXT("Larger MinSiteDistance produces larger average pairwise distance (%.2f vs %.2f)"), AvgDistLarge, AvgDistSmall),
@@ -639,34 +575,23 @@ bool FVoronoiMinSiteDistanceTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// Test 16: RelaxSites graceful guard - verify no crash when GenerateRelaxed runs with 1 iteration
-// This exercises the ensureMsgf + early-return guard added to RelaxSites (the cell-count mismatch
-// check). RelaxSites is private and called via GenerateRelaxed; the guard is defensive because
-// ComputeVoronoiCells always produces Sites.Num() cells. We verify that a single relaxation
-// iteration with a minimal site count (including a config that can produce near-duplicate sites
-// after centroid movement) completes without crash and yields a valid, bounds-clamped diagram.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVoronoiRelaxSitesDuplicateGuardTest, "ProceduralGeometry.Voronoi.RelaxSites.DuplicateGuard", DefaultTestFlags)
 
 bool FVoronoiRelaxSitesDuplicateGuardTest::RunTest(const FString& Parameters)
 {
 	const FBox2D TestBounds(FVector2D(0, 0), FVector2D(100, 100));
 
-	// Use a large MinSiteDistance so Poisson disc yields very few sites (as few as 2-3),
-	// then apply 1 relaxation iteration. Centroid movement can push near-identical sites
-	// into positions where the duplicate-site clip path is exercised in ComputeCellForSite.
+	// A large MinSiteDistance yields very few sites, so one relaxation pass can exercise the duplicate-site clip path.
 	UVoronoiGenerator2D* Generator = NewObject<UVoronoiGenerator2D>();
 	Generator->SetBounds(TestBounds);
 	Generator->SetSeed(TEXT("DuplicateGuardTest"));
 	Generator->SetMinSiteDistance(40.0f);
 	Generator->SetRelaxationIterations(1);
 
-	// Should not crash. RelaxSites ensureMsgf guard must not fire (cell count always == site count).
 	FVoronoiDiagram2D Diagram = Generator->GenerateRelaxed(3);
 
-	// Cell count must equal site count after one relaxation pass.
 	TestEqual("Cell count equals site count after relaxation", Diagram.Cells.Num(), Diagram.Sites.Num());
 
-	// All sites must remain within bounds after the relaxation clamp.
 	for (int32 i = 0; i < Diagram.Sites.Num(); ++i)
 	{
 		const FVector2D& Site = Diagram.Sites[i];
@@ -674,7 +599,6 @@ bool FVoronoiRelaxSitesDuplicateGuardTest::RunTest(const FString& Parameters)
 		TestTrue(FString::Printf(TEXT("Relaxed site %d Y within bounds"), i), Site.Y >= 0.0f && Site.Y <= 100.0f);
 	}
 
-	// All valid cells must remain convex.
 	for (const FVoronoiCell2D& Cell : Diagram.Cells)
 	{
 		if (Cell.bIsValid)
@@ -686,15 +610,13 @@ bool FVoronoiRelaxSitesDuplicateGuardTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// Test: a regular lattice makes four cells meet at one point. Cells that touch only at that corner must
-// NOT be neighbours, and every recorded neighbour pair must be retrievable as a shared edge — adjacency
-// and edge retrieval answer the same question and may never disagree.
+// A regular lattice makes four cells meet at one point: corner-only contact is not adjacency, and every recorded
+// neighbour pair must be retrievable as a shared edge.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVoronoiCornerContactTest, "ProceduralGeometry.Voronoi.CornerContactIsNotAdjacent", DefaultTestFlags)
 
 bool FVoronoiCornerContactTest::RunTest(const FString& Parameters)
 {
-	// 3x3 lattice with zero jitter: cells are exact 100x100 squares, so diagonal pairs meet at a single
-	// point and orthogonal pairs share a full 100-unit border.
+	// Zero jitter, so cells are exact 100x100 squares: diagonal pairs meet at a point, orthogonal ones share a border.
 	constexpr int32 GridSide = 3;
 	constexpr float CellSize = 100.f;
 
@@ -769,8 +691,7 @@ bool FVoronoiCornerContactTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// Test 20: An unseeded generator is a contract violation, but the diagram must still say which seed produced it —
-// otherwise the provenance field names a layout that cannot be reproduced.
+// An unseeded generator is a contract violation, but the diagram must still record the seed it used.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FVoronoiUnseededSeedRecordedTest, "ProceduralGeometry.Voronoi.UnseededGeneratorRecordsTheSeedItUsed", DefaultTestFlags)
 
@@ -812,9 +733,7 @@ bool FVoronoiUnseededSeedRecordedTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// Test 21: Same seed, same generator instance, same diagram. The stream is re-derived at every RNG entry point, so a
-// second generate call cannot continue where the first stopped — reuse (a cached generator, a re-streamed cluster)
-// must not be able to make two peers disagree about a seed they both hold.
+// The stream is re-derived at every RNG entry point, so a second generate call cannot continue where the first stopped.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVoronoiReuseIsIdenticalTest, "ProceduralGeometry.Voronoi.GenerateTwiceOnOneInstanceIsIdentical", DefaultTestFlags)
 
 bool FVoronoiReuseIsIdenticalTest::RunTest(const FString& Parameters)
@@ -847,9 +766,8 @@ bool FVoronoiReuseIsIdenticalTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// Test 22: Seed is reflected and RandomStream is not, so an instance whose seed arrived by property copy or
-// deserialization has no stream derived from it. Generation must still come from the seed the diagram reports,
-// otherwise the provenance field names a layout the generator never produced.
+// Seed is reflected and RandomStream is not, so a seed that arrived by property copy has no stream derived from it;
+// generation must still come from the seed the diagram reports.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FVoronoiDeserializedSeedTest, "ProceduralGeometry.Voronoi.SeedSetWithoutSetSeedStillDrivesGeneration", DefaultTestFlags)
 
@@ -895,4 +813,4 @@ bool FVoronoiDeserializedSeedTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-#endif // WITH_DEV_AUTOMATION_TESTS
+#endif

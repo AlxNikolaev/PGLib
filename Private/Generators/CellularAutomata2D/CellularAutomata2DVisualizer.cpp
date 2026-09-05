@@ -10,13 +10,11 @@ DEFINE_LOG_CATEGORY_STATIC(LogCAVisualizer, Log, All);
 
 namespace
 {
-	// Wall color: dark charcoal
 	const FLinearColor WallLinearColor(0.016f, 0.016f, 0.018f);
 
-	// Grid line color
 	const FColor GridLineColor(20, 20, 25);
 
-	// Default floor color when region coloring is off
+	/** Floor color when region coloring is off. */
 	const FLinearColor DefaultFloorLinearColor(0.7f, 0.7f, 0.7f);
 
 	/** Golden ratio hue cycling for maximally distant region colors. HSVToLinearRGB expects H in [0,360]. */
@@ -33,7 +31,6 @@ namespace
 		return FLinearColor(Hue, 0.2f, 0.35f).HSVToLinearRGB();
 	}
 
-	/** Builds a human-readable summary of the CA config for the metrics overlay. */
 	FString BuildConfigSummary(const FCellularAutomataConfig& Config)
 	{
 		if (Config.bUseAdvancedOverride)
@@ -83,10 +80,9 @@ void ACellularAutomata2DVisualizer::OnConstruction(const FTransform& Transform)
 	const double			  StartTime = FPlatformTime::Seconds();
 	FCellularAutomataGridData GridData = Generator->GenerateWithGridData();
 
-	// The runtime cave path reconnects isolated regions before it converts the diagram, and styles such as
-	// SwissCheese are only usable with that pass; carving here with the same derived stream keeps the preview
-	// structurally identical to the cave the same config ships. CorridorProbability/CorridorWidth are absent
-	// from FCellularAutomataResolvedParams, so they are read off the config directly, as the runtime does.
+	// Carving here with the same derived stream the runtime cave path uses keeps the preview structurally
+	// identical to the cave the same config ships. CorridorProbability/CorridorWidth are absent from
+	// FCellularAutomataResolvedParams, so they come off the config directly, as the runtime does.
 	if (CaveConfig.CorridorProbability > 0.0f)
 	{
 		FRandomStream CorridorStream(static_cast<int32>(PGSeed::HashSeedString(Seed) ^ 0xCA55u));
@@ -101,8 +97,7 @@ void ACellularAutomata2DVisualizer::OnConstruction(const FTransform& Transform)
 
 	const double GenerationTimeMs = (FPlatformTime::Seconds() - StartTime) * 1000.0;
 
-	// Clear previous state — FlushDebugStrings is needed separately because
-	// FlushPersistentDebugLines does not clear DrawDebugString text.
+	// FlushDebugStrings is needed separately: FlushPersistentDebugLines does not clear DrawDebugString text.
 	FlushPersistentDebugLines(GetWorld());
 	FlushDebugStrings(GetWorld());
 	GridMeshComponent->ClearAllMeshSections();
@@ -129,8 +124,7 @@ void ACellularAutomata2DVisualizer::OnConstruction(const FTransform& Transform)
 	const FBox2D& B = Bounds;
 	int32		  SectionIndex = 0;
 
-	// ProceduralMeshComponent vertices are in LOCAL space (relative to actor).
-	// Bounds are in world space, so offset all mesh vertices by the actor's position.
+	// ProceduralMeshComponent vertices are actor-local while Bounds are world-space, hence the offset.
 	const FVector ActorLoc = GetActorLocation();
 	const FBox2D  LocalBounds(B.Min - FVector2D(ActorLoc.X, ActorLoc.Y), B.Max - FVector2D(ActorLoc.X, ActorLoc.Y));
 
@@ -149,10 +143,10 @@ void ACellularAutomata2DVisualizer::OnConstruction(const FTransform& Transform)
 		GridData.SurvivingRegions.Num(),
 		GridMeshComponent ? TEXT("valid") : TEXT("NULL"));
 
-	// Layer 1 (Z=0..1): Grid cells via ProceduralMesh
+	// Grid cells occupy Z=0..1, grid lines Z=2, boundaries Z=3, adjacency Z=5, center marker Z=10, metrics Z=15.
 	if (bShowGridCells)
 	{
-		// Section 0: Wall background quad spanning full grid bounds at Z=0
+		// Wall background quad spanning the full grid bounds at Z=0.
 		{
 			const float MinX = LocalBounds.Min.X;
 			const float MinY = LocalBounds.Min.Y;
@@ -181,7 +175,6 @@ void ACellularAutomata2DVisualizer::OnConstruction(const FTransform& Transform)
 			++SectionIndex;
 		}
 
-		// One section per surviving region at Z=1
 		for (int32 RegionId = 0; RegionId < GridData.Regions.Num(); ++RegionId)
 		{
 			if (!GridData.SurvivingRegions[RegionId])
@@ -213,7 +206,6 @@ void ACellularAutomata2DVisualizer::OnConstruction(const FTransform& Transform)
 			++SectionIndex;
 		}
 
-		// Culled regions at Z=1 (desaturated)
 		if (bShowCulledRegions)
 		{
 			for (int32 RegionId = 0; RegionId < GridData.Regions.Num(); ++RegionId)
@@ -237,7 +229,6 @@ void ACellularAutomata2DVisualizer::OnConstruction(const FTransform& Transform)
 			DebugMaterial ? *DebugMaterial->GetName() : TEXT("NULL"));
 	}
 
-	// Layer 3 (Z=2): Grid lines
 	if (bShowGridLines)
 	{
 		const float MinX = B.Min.X;
@@ -245,14 +236,12 @@ void ACellularAutomata2DVisualizer::OnConstruction(const FTransform& Transform)
 		const float MaxX = MinX + GridData.GridWidth * CS;
 		const float MaxY = MinY + GridData.GridHeight * CS;
 
-		// Vertical lines
 		for (int32 X = 0; X <= GridData.GridWidth; ++X)
 		{
 			const float PosX = MinX + X * CS;
 			DrawDebugLine(GetWorld(), FVector(PosX, MinY, 2.0f), FVector(PosX, MaxY, 2.0f), GridLineColor, true, -1.f, 0, 0.5f);
 		}
 
-		// Horizontal lines
 		for (int32 Y = 0; Y <= GridData.GridHeight; ++Y)
 		{
 			const float PosY = MinY + Y * CS;
@@ -260,7 +249,6 @@ void ACellularAutomata2DVisualizer::OnConstruction(const FTransform& Transform)
 		}
 	}
 
-	// Layer 4 (Z=3): Region boundaries from diagram (with optional Chaikin smoothing)
 	if (bShowRegionBoundaries)
 	{
 		for (const FLayoutCell2D& Cell : GridData.Diagram.Cells)
@@ -282,14 +270,13 @@ void ACellularAutomata2DVisualizer::OnConstruction(const FTransform& Transform)
 		}
 	}
 
-	// Layer 5 (Z=5): Adjacency graph
 	if (bShowAdjacencyGraph)
 	{
 		for (const FLayoutCell2D& Cell : GridData.Diagram.Cells)
 		{
 			for (int32 NeighborIdx : Cell.Neighbors)
 			{
-				// Only draw each edge once (lower index -> higher index)
+				// Each undirected edge is drawn once, from the lower index.
 				if (NeighborIdx > Cell.CellIndex)
 				{
 					const FVector2D& C1 = Cell.Center;
@@ -301,7 +288,6 @@ void ACellularAutomata2DVisualizer::OnConstruction(const FTransform& Transform)
 		}
 	}
 
-	// Layer 6 (Z=10): Center marker
 	if (bShowCenterMarker && GridData.CenterRegionId >= 0 && GridData.CenterRegionId < GridData.Regions.Num())
 	{
 		const int32 CenterX = GridData.GridWidth / 2;
@@ -314,7 +300,6 @@ void ACellularAutomata2DVisualizer::OnConstruction(const FTransform& Transform)
 		DrawDebugPoint(GetWorld(), CenterPos, 10.0f, FColor::Yellow, true);
 	}
 
-	// Layer 7: Metrics overlay
 	if (bShowMetrics)
 	{
 		const float LineSpacing = CS * 1.5f;
@@ -326,12 +311,10 @@ void ACellularAutomata2DVisualizer::OnConstruction(const FTransform& Transform)
 			++LineIndex;
 		};
 
-		// Grid dimensions
 		const int32 TotalCells = GridData.GridWidth * GridData.GridHeight;
 		DrawLine(TEXT("[CA Metrics]"));
 		DrawLine(FString::Printf(TEXT("Grid: %d x %d (%d cells)"), GridData.GridWidth, GridData.GridHeight, TotalCells));
 
-		// Floor/wall counts
 		int32 FloorCount = 0;
 		for (bool bIsFloor : GridData.Grid)
 		{
@@ -345,7 +328,6 @@ void ACellularAutomata2DVisualizer::OnConstruction(const FTransform& Transform)
 		const float WallPct = TotalCells > 0 ? (static_cast<float>(WallCount) / TotalCells) * 100.0f : 0.0f;
 		DrawLine(FString::Printf(TEXT("Floor: %d (%.1f%%) | Wall: %d (%.1f%%)"), FloorCount, FloorPct, WallCount, WallPct));
 
-		// Region counts
 		const int32 TotalRegions = GridData.Regions.Num();
 		int32		SurvivingCount = 0;
 		for (bool bSurvived : GridData.SurvivingRegions)
@@ -358,7 +340,6 @@ void ACellularAutomata2DVisualizer::OnConstruction(const FTransform& Transform)
 		const int32 CulledCount = TotalRegions - SurvivingCount;
 		DrawLine(FString::Printf(TEXT("Regions: %d total, %d surviving, %d culled"), TotalRegions, SurvivingCount, CulledCount));
 
-		// Largest/smallest surviving region, center region
 		int32 LargestSize = 0;
 		int32 SmallestSize = TotalCells;
 		int32 CenterSize = 0;
@@ -384,13 +365,10 @@ void ACellularAutomata2DVisualizer::OnConstruction(const FTransform& Transform)
 		}
 		DrawLine(FString::Printf(TEXT("Largest: %d cells | Smallest: %d cells | Center: %d cells"), LargestSize, SmallestSize, CenterSize));
 
-		// Generation time
 		DrawLine(FString::Printf(TEXT("Generation: %.2f ms"), GenerationTimeMs));
 
-		// Config summary
 		DrawLine(FString::Printf(TEXT("Config: %s"), *BuildConfigSummary(CaveConfig)));
 
-		// Seed
 		DrawLine(FString::Printf(TEXT("Seed: \"%s\""), *Seed));
 
 		UE_LOG(LogCAVisualizer, Verbose, TEXT("Metrics: drew %d lines at (%.1f, %.1f, %.1f)"), LineIndex, Anchor.X, Anchor.Y, Anchor.Z);

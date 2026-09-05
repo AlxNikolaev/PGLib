@@ -3,8 +3,7 @@
 
 #if WITH_DEV_AUTOMATION_TESTS
 
-// Named rather than anonymous: adaptive unity builds merge translation units, and short helper names
-// like MakeRect would collide with other test .cpp files in this module.
+// Named rather than anonymous: adaptive unity builds merge translation units, and short helper names collide.
 namespace GeomFnLibSatTestUtils
 {
 	/** Axis-aligned rectangle in the same counter-clockwise winding RotatedRectCorners emits. */
@@ -41,24 +40,16 @@ namespace GeomFnLibSatTestUtils
 	}
 } // namespace GeomFnLibSatTestUtils
 
-// ============================================================
-// ChaikinSubdivide
-// ============================================================
-
-// Test 1: Basic subdivision doubles vertex count
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FChaikinBasicDoublingTest, "ProceduralGeometry.GeometryUtils.ChaikinSubdivide.BasicDoubling", DefaultTestFlags)
 
 bool FChaikinBasicDoublingTest::RunTest(const FString& Parameters)
 {
-	// Square polygon — 4 vertices
 	TArray<FVector2D> Square = { FVector2D(0, 0), FVector2D(100, 0), FVector2D(100, 100), FVector2D(0, 100) };
 
-	// After 1 iteration: 4 edges * 2 points = 8 vertices
 	TArray<FVector2D> OneIter = Square;
 	FGeometryUtils::ChaikinSubdivide(OneIter, 1);
 	TestEqual("1 iteration on 4-vertex polygon should produce 8 vertices", OneIter.Num(), 8);
 
-	// After 2 iterations: 8 edges * 2 points = 16 vertices
 	TArray<FVector2D> TwoIter = Square;
 	FGeometryUtils::ChaikinSubdivide(TwoIter, 2);
 	TestEqual("2 iterations on 4-vertex polygon should produce 16 vertices", TwoIter.Num(), 16);
@@ -66,7 +57,6 @@ bool FChaikinBasicDoublingTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// Test 2: Triangle subdivision — output within convex hull
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FChaikinTriangleConvexHullTest, "ProceduralGeometry.GeometryUtils.ChaikinSubdivide.TriangleConvexHull", DefaultTestFlags)
 
@@ -74,13 +64,10 @@ bool FChaikinTriangleConvexHullTest::RunTest(const FString& Parameters)
 {
 	TArray<FVector2D> Triangle = { FVector2D(0, 0), FVector2D(100, 0), FVector2D(50, 100) };
 
-	// After 1 iteration: 3 edges * 2 points = 6 vertices
 	FGeometryUtils::ChaikinSubdivide(Triangle, 1);
 	TestEqual("1 iteration on triangle should produce 6 vertices", Triangle.Num(), 6);
 
 	// Chaikin never expands beyond the original convex hull.
-	// For a triangle with vertices (0,0), (100,0), (50,100):
-	// All output vertices must have X in [0, 100] and Y in [0, 100]
 	for (int32 i = 0; i < Triangle.Num(); ++i)
 	{
 		TestTrue(FString::Printf(TEXT("Vertex %d X >= 0"), i), Triangle[i].X >= -UE_KINDA_SMALL_NUMBER);
@@ -92,33 +79,28 @@ bool FChaikinTriangleConvexHullTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// Test 3: Empty and degenerate inputs — no-ops
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FChaikinDegenerateInputsTest, "ProceduralGeometry.GeometryUtils.ChaikinSubdivide.DegenerateInputs", DefaultTestFlags)
 
 bool FChaikinDegenerateInputsTest::RunTest(const FString& Parameters)
 {
-	// Empty array
 	{
 		TArray<FVector2D> Empty;
 		FGeometryUtils::ChaikinSubdivide(Empty, 2);
 		TestEqual("Empty array should remain empty", Empty.Num(), 0);
 	}
 
-	// 1 vertex
 	{
 		TArray<FVector2D> Single = { FVector2D(42, 42) };
 		FGeometryUtils::ChaikinSubdivide(Single, 2);
 		TestEqual("1 vertex should remain 1 vertex", Single.Num(), 1);
 	}
 
-	// 2 vertices
 	{
 		TArray<FVector2D> Two = { FVector2D(0, 0), FVector2D(100, 100) };
 		FGeometryUtils::ChaikinSubdivide(Two, 2);
 		TestEqual("2 vertices should remain 2 vertices", Two.Num(), 2);
 	}
 
-	// 0 iterations
 	{
 		TArray<FVector2D> Square = { FVector2D(0, 0), FVector2D(100, 0), FVector2D(100, 100), FVector2D(0, 100) };
 		TArray<FVector2D> Original = Square;
@@ -137,7 +119,6 @@ bool FChaikinDegenerateInputsTest::RunTest(const FString& Parameters)
 		}
 	}
 
-	// Negative iterations
 	{
 		TArray<FVector2D> Square = { FVector2D(0, 0), FVector2D(100, 0), FVector2D(100, 100), FVector2D(0, 100) };
 		TArray<FVector2D> Original = Square;
@@ -148,39 +129,32 @@ bool FChaikinDegenerateInputsTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// Test 4: Subdivision preserves closure
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FChaikinPreservesClosureTest, "ProceduralGeometry.GeometryUtils.ChaikinSubdivide.PreservesClosure", DefaultTestFlags)
 
 bool FChaikinPreservesClosureTest::RunTest(const FString& Parameters)
 {
-	// Pentagon
 	TArray<FVector2D> Pentagon = { FVector2D(50, 0), FVector2D(100, 35), FVector2D(80, 100), FVector2D(20, 100), FVector2D(0, 35) };
 
 	FGeometryUtils::ChaikinSubdivide(Pentagon, 2);
 
-	// 5 edges -> 10 after iter 1 -> 20 after iter 2
 	TestEqual("2 iterations on pentagon should produce 20 vertices", Pentagon.Num(), 20);
 
-	// Verify the polygon is still implicitly closed: the last vertex should NOT equal the first
-	// (Chaikin produces a new vertex pair per edge, including the wrap-around edge from last to first,
-	// so the polygon remains implicitly closed without duplicating the first vertex)
+	// The wrap-around edge gets its own vertex pair, so the polygon stays implicitly closed without
+	// duplicating the first vertex.
 	const FVector2D& First = Pentagon[0];
 	const FVector2D& Last = Pentagon.Last();
 
-	// The last and first vertices should be distinct (they come from different edges)
 	const float DistFirstLast = FVector2D::Distance(First, Last);
 	TestTrue("First and last vertices should be distinct (implicitly closed polygon)", DistFirstLast > UE_KINDA_SMALL_NUMBER);
 
 	return true;
 }
 
-// Test 5: Smoothing effect on right-angle corners
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FChaikinSmoothsRightAnglesTest, "ProceduralGeometry.GeometryUtils.ChaikinSubdivide.SmoothsRightAngles", DefaultTestFlags)
 
 bool FChaikinSmoothsRightAnglesTest::RunTest(const FString& Parameters)
 {
-	// L-shaped polygon with 90-degree corners
 	TArray<FVector2D> LShape = {
 		FVector2D(0, 0), FVector2D(200, 0), FVector2D(200, 100), FVector2D(100, 100), FVector2D(100, 200), FVector2D(0, 200)
 	};
@@ -189,8 +163,6 @@ bool FChaikinSmoothsRightAnglesTest::RunTest(const FString& Parameters)
 
 	FGeometryUtils::ChaikinSubdivide(LShape, 2);
 
-	// After 2 iterations, NO output vertex should coincide with any original vertex
-	// This confirms all corners have been cut
 	for (int32 i = 0; i < LShape.Num(); ++i)
 	{
 		for (int32 j = 0; j < Original.Num(); ++j)
@@ -204,13 +176,8 @@ bool FChaikinSmoothsRightAnglesTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// ============================================================
-// RotatedRectCorners
-// ============================================================
-// Together with ConvexPolygonsOverlap this is the SAT gate that decides which Voronoi cells a rotated
-// room footprint claims, so an angle-convention or corner-order regression silently moves every room.
-
-// Test 6: Corner positions at 0, 90 and 45 degrees
+// The angle convention and corner order here feed the SAT gate that decides which Voronoi cells a rotated
+// room footprint claims, so a regression silently moves every room.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FRotatedRectCornersAnglesTest, "ProceduralGeometry.GeometryUtils.RotatedRectCorners.CornerPositions", DefaultTestFlags)
 
@@ -230,7 +197,7 @@ bool FRotatedRectCornersAnglesTest::RunTest(const FString& Parameters)
 		}
 	};
 
-	// The array is Reset, not appended to: a pre-populated buffer must still come back with exactly four corners.
+	// The output array is Reset, not appended to.
 	TArray<FVector2D> Corners = { FVector2D(9, 9), FVector2D(9, 9), FVector2D(9, 9), FVector2D(9, 9), FVector2D(9, 9) };
 
 	// 0 degrees: local order (-HX,-HY), (HX,-HY), (HX,HY), (-HX,HY) translated by Center.
@@ -267,7 +234,6 @@ bool FRotatedRectCornersAnglesTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// Test 7: Winding and area are rotation-invariant
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FRotatedRectCornersWindingTest, "ProceduralGeometry.GeometryUtils.RotatedRectCorners.WindingAndArea", DefaultTestFlags)
 
@@ -284,7 +250,6 @@ bool FRotatedRectCornersWindingTest::RunTest(const FString& Parameters)
 
 		const double Area = GeomFnLibSatTestUtils::SignedArea(Corners);
 
-		// Rotation preserves orientation, so the emitted quad stays counter-clockwise at every angle.
 		TestTrue(FString::Printf(TEXT("Winding stays counter-clockwise at %.0f degrees (signed area %.2f)"), Angle, Area), Area > 0.0);
 		TestEqual(
 			FString::Printf(TEXT("Area is preserved at %.0f degrees"), Angle), static_cast<float>(Area), static_cast<float>(ExpectedArea), 1.0f);
@@ -293,11 +258,6 @@ bool FRotatedRectCornersWindingTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// ============================================================
-// ConvexPolygonsOverlap (SAT)
-// ============================================================
-
-// Test 8: Axis-aligned rectangles at the touch / gap / overlap boundary
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FConvexPolygonsOverlapAxisAlignedTest, "ProceduralGeometry.GeometryUtils.ConvexPolygonsOverlap.AxisAligned", DefaultTestFlags)
 
@@ -309,7 +269,6 @@ bool FConvexPolygonsOverlapAxisAlignedTest::RunTest(const FString& Parameters)
 	TestTrue(
 		"Edge-to-edge touching rectangles overlap", FGeometryUtils::ConvexPolygonsOverlap(Base, GeomFnLibSatTestUtils::MakeRect(100, 0, 200, 100)));
 
-	// Corner-to-corner contact is still contact on every axis.
 	TestTrue("Corner-to-corner touching rectangles overlap",
 		FGeometryUtils::ConvexPolygonsOverlap(Base, GeomFnLibSatTestUtils::MakeRect(100, 100, 200, 200)));
 
@@ -319,25 +278,21 @@ bool FConvexPolygonsOverlapAxisAlignedTest::RunTest(const FString& Parameters)
 	TestTrue(
 		"Rectangles overlapping by one unit overlap", FGeometryUtils::ConvexPolygonsOverlap(Base, GeomFnLibSatTestUtils::MakeRect(99, 0, 199, 100)));
 
-	// A fully contained rectangle has no separating axis of its own either.
 	TestTrue("Contained rectangle overlaps", FGeometryUtils::ConvexPolygonsOverlap(Base, GeomFnLibSatTestUtils::MakeRect(25, 25, 75, 75)));
 
 	return true;
 }
 
-// Test 9: The classic AABB false positive — rotated rect whose bounds overlap but whose polygon does not
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FConvexPolygonsOverlapRotatedTest, "ProceduralGeometry.GeometryUtils.ConvexPolygonsOverlap.RotatedAABBFalsePositive", DefaultTestFlags)
 
 bool FConvexPolygonsOverlapRotatedTest::RunTest(const FString& Parameters)
 {
-	// A square rotated 45 degrees: a diamond with vertices (100,0), (0,100), (-100,0), (0,-100).
-	// Half-extent 70.710678 in each local axis puts the corners exactly 100 out along the world axes.
+	// A diamond with vertices (100,0), (0,100), (-100,0), (0,-100).
 	TArray<FVector2D> Diamond;
 	FGeometryUtils::RotatedRectCorners(FVector2D::ZeroVector, 45.0f, FVector2D(141.421356, 141.421356), Diamond);
 
-	// The diamond's bounds are [-100,100] on both axes, so this rect's bounds overlap it in [60,100]^2,
-	// but its nearest corner (60,60) sits outside the x+y=100 edge.
+	// Bounds overlap in [60,100]^2, but the nearest corner (60,60) sits outside the x+y=100 edge.
 	const TArray<FVector2D> BoundsOverlapOnly = GeomFnLibSatTestUtils::MakeRect(60, 60, 160, 160);
 	TestFalse("Rotated rect vs AABB-overlapping rect is separated", FGeometryUtils::ConvexPolygonsOverlap(Diamond, BoundsOverlapOnly));
 	TestFalse("Separation result is symmetric", FGeometryUtils::ConvexPolygonsOverlap(BoundsOverlapOnly, Diamond));
@@ -350,7 +305,6 @@ bool FConvexPolygonsOverlapRotatedTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// Test 10: Rectangle against a convex hexagon standing in for a Voronoi cell
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FConvexPolygonsOverlapHexagonTest, "ProceduralGeometry.GeometryUtils.ConvexPolygonsOverlap.RectVsHexagon", DefaultTestFlags)
 
@@ -363,21 +317,18 @@ bool FConvexPolygonsOverlapHexagonTest::RunTest(const FString& Parameters)
 	TestTrue(
 		"Rect reaching into the hexagon overlaps", FGeometryUtils::ConvexPolygonsOverlap(Hexagon, GeomFnLibSatTestUtils::MakeRect(80, -20, 180, 80)));
 
-	// Bounds overlap in [80,100] x [40,86.6], but the rect lies entirely beyond the hexagon's
-	// upper-right edge normal — only that edge's axis separates them, so a dropped or mis-wrapped
+	// Bounds overlap, but only the upper-right edge's own axis separates them: a dropped or mis-wrapped
 	// polygon edge would report an overlap here.
 	const TArray<FVector2D> BeyondEdge = GeomFnLibSatTestUtils::MakeRect(80, 40, 180, 140);
 	TestFalse("Rect beyond a single hexagon edge is separated", FGeometryUtils::ConvexPolygonsOverlap(Hexagon, BeyondEdge));
 	TestFalse("Hexagon separation is symmetric", FGeometryUtils::ConvexPolygonsOverlap(BeyondEdge, Hexagon));
 
-	// Far away on the X axis: separated by the rectangle's own axis.
 	TestFalse(
 		"Rect clear of the hexagon is separated", FGeometryUtils::ConvexPolygonsOverlap(Hexagon, GeomFnLibSatTestUtils::MakeRect(150, -50, 350, 50)));
 
 	return true;
 }
 
-// Test 11: Degenerate inputs
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FConvexPolygonsOverlapDegenerateTest, "ProceduralGeometry.GeometryUtils.ConvexPolygonsOverlap.DegenerateInputs", DefaultTestFlags)
 
@@ -391,8 +342,8 @@ bool FConvexPolygonsOverlapDegenerateTest::RunTest(const FString& Parameters)
 	TestFalse("Two-vertex segment never overlaps", FGeometryUtils::ConvexPolygonsOverlap({ FVector2D(10, 10), FVector2D(90, 90) }, Rect));
 	TestFalse("Rejection applies to the second polygon too", FGeometryUtils::ConvexPolygonsOverlap(Rect, { FVector2D(50, 50) }));
 
-	// A zero-area triangle clears the vertex-count gate but contributes no axes: every one of its edges
-	// has zero length and is skipped, so the verdict rests entirely on the rectangle's own four axes.
+	// A zero-area triangle clears the vertex-count gate but contributes no axes, so the verdict rests
+	// entirely on the rectangle's own four axes.
 	const TArray<FVector2D> PointTriangleInside = { FVector2D(50, 50), FVector2D(50, 50), FVector2D(50, 50) };
 	TestTrue("Zero-area triangle inside the rect overlaps", FGeometryUtils::ConvexPolygonsOverlap(Rect, PointTriangleInside));
 

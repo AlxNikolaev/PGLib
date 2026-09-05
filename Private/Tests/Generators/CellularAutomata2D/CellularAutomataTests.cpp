@@ -9,11 +9,8 @@
 namespace
 {
 	/**
-	 * Hand-built grid of solid blobs separated by walls. The corridor tests need a substrate whose disconnected pairs
-	 * are a property of the input rather than of CA chance: an emergent substrate can come out already connected, or
-	 * with a single surviving region, and then the assertions the test exists for have nothing to run on.
-	 *
-	 * Names carry the CACorridorRef_ prefix because adaptive unity builds can merge these translation units.
+	 * Hand-built blobs separated by walls, so the disconnected pairs the corridor tests need are a property of the
+	 * input rather than of CA chance. Prefixed because unity builds can merge these translation units.
 	 */
 	FCellularAutomataGridData CACorridorRef_MakeBlobGrid(int32 GridW, int32 GridH, const TArray<FIntRect>& Blobs)
 	{
@@ -70,7 +67,6 @@ namespace
 	}
 } // namespace
 
-// Test 1: Default Generate() produces non-empty diagram
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCellularAutomataDefaultGenerateTest, "ProceduralGeometry.CellularAutomata.DefaultGenerate", DefaultTestFlags)
 
 bool FCellularAutomataDefaultGenerateTest::RunTest(const FString& Parameters)
@@ -91,7 +87,6 @@ bool FCellularAutomataDefaultGenerateTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// Test 2: Determinism - same seed produces identical diagram
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCellularAutomataDeterminismTest, "ProceduralGeometry.CellularAutomata.Determinism", DefaultTestFlags)
 
 bool FCellularAutomataDeterminismTest::RunTest(const FString& Parameters)
@@ -109,9 +104,7 @@ bool FCellularAutomataDeterminismTest::RunTest(const FString& Parameters)
 
 	TestEqual("Same cell count", Diagram1.Cells.Num(), Diagram2.Cells.Num());
 
-	// Counts and centres are blind to the drift that matters: an adjacency or contour pass that started reading a
-	// TSet in hash order leaves every cell with the same number of vertices, the same number of neighbours and the
-	// same centre while moving the vertices and reshuffling the neighbour lists. The hash covers all of it.
+	// Counts and centres are blind to iteration-order drift that moves vertices and reshuffles neighbours; the hash is not.
 	if (!TestTrue(TEXT("Deterministic seed produced a non-empty diagram to compare"), Diagram1.Cells.Num() > 0))
 	{
 		return false;
@@ -123,7 +116,6 @@ bool FCellularAutomataDeterminismTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// Test 3: Neighbor symmetry - if A neighbors B, B neighbors A
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCellularAutomataNeighborSymmetryTest, "ProceduralGeometry.CellularAutomata.NeighborSymmetry", DefaultTestFlags)
 
 bool FCellularAutomataNeighborSymmetryTest::RunTest(const FString& Parameters)
@@ -154,7 +146,6 @@ bool FCellularAutomataNeighborSymmetryTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// Test 4: FillProbability=0.0 carves most interior cells (low fill = mostly floor)
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCellularAutomataLowFillTest, "ProceduralGeometry.CellularAutomata.LowFillProbability", DefaultTestFlags)
 
 bool FCellularAutomataLowFillTest::RunTest(const FString& Parameters)
@@ -168,8 +159,7 @@ bool FCellularAutomataLowFillTest::RunTest(const FString& Parameters)
 
 	FLayoutDiagram2D Diagram = Generator->Generate();
 
-	// With FillProbability=0.0 and 0 iterations, all 64 interior floor cells
-	// form one connected region that merges into a single cell
+	// FillProbability 0 with 0 iterations leaves all 64 interior floor cells as one merged region.
 	TestEqual("FillProbability=0 with 0 iterations should produce 1 merged region", Diagram.Cells.Num(), 1);
 
 	// The boundary of an 8x8 rectangular interior block simplifies to 4 vertices
@@ -181,7 +171,6 @@ bool FCellularAutomataLowFillTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// Test 5: FillProbability=1.0 produces empty or near-empty diagram
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCellularAutomataHighFillTest, "ProceduralGeometry.CellularAutomata.HighFillProbability", DefaultTestFlags)
 
 bool FCellularAutomataHighFillTest::RunTest(const FString& Parameters)
@@ -201,7 +190,6 @@ bool FCellularAutomataHighFillTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// Test 6: MinRegionSize filter removes small regions
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCellularAutomataMinRegionSizeTest, "ProceduralGeometry.CellularAutomata.MinRegionSize", DefaultTestFlags)
 
 bool FCellularAutomataMinRegionSizeTest::RunTest(const FString& Parameters)
@@ -209,14 +197,12 @@ bool FCellularAutomataMinRegionSizeTest::RunTest(const FString& Parameters)
 	const FBox2D  TestBounds(FVector2D(-500, -500), FVector2D(500, 500));
 	const FString TestSeed = TEXT("RegionSizeTest");
 
-	// Generate with MinRegionSize=1 (keep all regions)
 	UCellularAutomataGenerator2D* GenKeepAll = NewObject<UCellularAutomataGenerator2D>();
 	GenKeepAll->SetBounds(TestBounds)->SetSeed(TestSeed);
 	GenKeepAll->SetMinRegionSize(1);
 	GenKeepAll->SetKeepCenterRegion(false);
 	FLayoutDiagram2D DiagramAll = GenKeepAll->Generate();
 
-	// Generate with high MinRegionSize (cull small regions)
 	UCellularAutomataGenerator2D* GenCulled = NewObject<UCellularAutomataGenerator2D>();
 	GenCulled->SetBounds(TestBounds)->SetSeed(TestSeed);
 	GenCulled->SetMinRegionSize(50);
@@ -225,13 +211,11 @@ bool FCellularAutomataMinRegionSizeTest::RunTest(const FString& Parameters)
 
 	TestTrue("Keeping all regions should have cells", DiagramAll.Cells.Num() > 0);
 
-	// Culling small regions should produce fewer or equal cells
 	TestTrue("High MinRegionSize should produce fewer or equal cells", DiagramCulled.Cells.Num() <= DiagramAll.Cells.Num());
 
 	return true;
 }
 
-// Test 7: bKeepCenterRegion=true preserves center region even when below MinRegionSize
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCellularAutomataKeepCenterTest, "ProceduralGeometry.CellularAutomata.KeepCenterRegion", DefaultTestFlags)
 
 bool FCellularAutomataKeepCenterTest::RunTest(const FString& Parameters)
@@ -239,32 +223,27 @@ bool FCellularAutomataKeepCenterTest::RunTest(const FString& Parameters)
 	const FBox2D  TestBounds(FVector2D(-500, -500), FVector2D(500, 500));
 	const FString TestSeed = TEXT("CenterRegionTest");
 
-	// Generate with bKeepCenterRegion=true and high MinRegionSize
 	UCellularAutomataGenerator2D* GenKeepCenter = NewObject<UCellularAutomataGenerator2D>();
 	GenKeepCenter->SetBounds(TestBounds)->SetSeed(TestSeed);
 	GenKeepCenter->SetMinRegionSize(9999);
 	GenKeepCenter->SetKeepCenterRegion(true);
 	FLayoutDiagram2D DiagramKeep = GenKeepCenter->Generate();
 
-	// Generate with bKeepCenterRegion=false and same high MinRegionSize
 	UCellularAutomataGenerator2D* GenCullCenter = NewObject<UCellularAutomataGenerator2D>();
 	GenCullCenter->SetBounds(TestBounds)->SetSeed(TestSeed);
 	GenCullCenter->SetMinRegionSize(9999);
 	GenCullCenter->SetKeepCenterRegion(false);
 	FLayoutDiagram2D DiagramCull = GenCullCenter->Generate();
 
-	// With bKeepCenterRegion=true, the center region is preserved
 	TestTrue("KeepCenterRegion=true should preserve cells", DiagramKeep.Cells.Num() > 0);
 	TestTrue("KeepCenterRegion=true should have valid CenterCellIndex",
 		DiagramKeep.CenterCellIndex >= 0 && DiagramKeep.CenterCellIndex < DiagramKeep.Cells.Num());
 
-	// With bKeepCenterRegion=false and very high MinRegionSize, all regions may be culled
 	TestTrue("KeepCenterRegion=true should produce >= cells compared to false", DiagramKeep.Cells.Num() >= DiagramCull.Cells.Num());
 
 	return true;
 }
 
-// Test 8: Cell budget — huge bounds + small GridSize degrades resolution instead of returning empty.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCellularAutomataOOMGuardTest, "ProceduralGeometry.CellularAutomata.OOMGuard", DefaultTestFlags)
 
 bool FCellularAutomataOOMGuardTest::RunTest(const FString& Parameters)
@@ -284,7 +263,6 @@ bool FCellularAutomataOOMGuardTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// Test 9: Region merging produces correct region-level cells
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCellularAutomataRegionMergingTest, "ProceduralGeometry.CellularAutomata.RegionMerging", DefaultTestFlags)
 
 bool FCellularAutomataRegionMergingTest::RunTest(const FString& Parameters)
@@ -300,18 +278,15 @@ bool FCellularAutomataRegionMergingTest::RunTest(const FString& Parameters)
 
 	FLayoutDiagram2D Diagram = Generator->Generate();
 
-	// Region merging should produce fewer cells than total possible interior cells
 	TestTrue("Should have cells", Diagram.Cells.Num() > 0);
 	TestTrue("Merged regions should be fewer than raw grid cells", Diagram.Cells.Num() < 8 * 8);
 
-	// Each cell should have a valid polygon
 	for (int32 i = 0; i < Diagram.Cells.Num(); ++i)
 	{
 		TestTrue(FString::Printf(TEXT("Cell %d should have >= 3 vertices"), i), Diagram.Cells[i].Vertices.Num() >= 3);
 		TestEqual(FString::Printf(TEXT("Cell %d index matches"), i), Diagram.Cells[i].CellIndex, i);
 	}
 
-	// Neighbor symmetry at region level
 	for (int32 i = 0; i < Diagram.Cells.Num(); ++i)
 	{
 		for (int32 NeighborIdx : Diagram.Cells[i].Neighbors)
@@ -326,21 +301,17 @@ bool FCellularAutomataRegionMergingTest::RunTest(const FString& Parameters)
 		}
 	}
 
-	// CenterCellIndex should be valid
 	TestTrue("CenterCellIndex should be valid", Diagram.CenterCellIndex >= 0 && Diagram.CenterCellIndex < Diagram.Cells.Num());
 
 	return true;
 }
 
-// Test 10: CarveCorridors bridges a pair of regions that share no boundary
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FCellularAutomataCarveCorridorsTest, "ProceduralGeometry.CellularAutomata.CarveCorridorsConnectsDisconnected", DefaultTestFlags)
 
 bool FCellularAutomataCarveCorridorsTest::RunTest(const FString& Parameters)
 {
-	// Two hand-built blobs with no shared boundary and no diagram adjacency: the disconnected pair CarveCorridors
-	// exists to bridge, present by construction. An emergent CA substrate can come out already connected or collapsed
-	// to one region, and then this test has nothing to assert on.
+	// Two blobs with no shared boundary and no diagram adjacency: the disconnected pair exists by construction.
 	FCellularAutomataGridData GridData = CACorridorRef_MakeTwoBlobGrid();
 
 	const int32 FloorBefore = CACorridorRef_CountFloor(GridData);
@@ -359,11 +330,9 @@ bool FCellularAutomataCarveCorridorsTest::RunTest(const FString& Parameters)
 		}
 	}
 
-	// The carve has to leave the two blobs reachable from one another, not merely add floor somewhere. Re-flooding
-	// the modified grid through the production path answers exactly that: one region means one connected component.
+	// Re-flood through the production path: one region means the two blobs are actually reachable from each other.
 	UCellularAutomataGenerator2D* Generator = NewObject<UCellularAutomataGenerator2D>();
-	// Bounds and cell size only place the traced polygons in world space; they are set so the rebuild reads a
-	// well-defined origin rather than a default-constructed box.
+	// Bounds and cell size only place the traced polygons in world space.
 	Generator->SetBounds(FBox2D(FVector2D::ZeroVector, FVector2D(GridData.GridWidth * GridData.CellSize, GridData.GridHeight * GridData.CellSize)));
 	Generator->SetGridSize(static_cast<int32>(GridData.CellSize));
 	Generator->RebuildDiagram(GridData);
@@ -372,7 +341,6 @@ bool FCellularAutomataCarveCorridorsTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// Test 11: CarveCorridors with probability 0 is a no-op
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FCellularAutomataCarveCorridorsNoOpTest, "ProceduralGeometry.CellularAutomata.CarveCorridorsProbabilityZeroNoOp", DefaultTestFlags)
 
@@ -386,8 +354,7 @@ bool FCellularAutomataCarveCorridorsNoOpTest::RunTest(const FString& Parameters)
 
 	TestTrue(TEXT("Grid unchanged with probability 0"), ZeroProbability.Grid == Source.Grid);
 
-	// Control: the same substrate at probability 1 must change, or "unchanged" above would be a statement about the
-	// input having nothing to carve rather than about the probability gate.
+	// Control: the same substrate must carve at probability 1, or the no-op above says nothing about the gate.
 	FCellularAutomataGridData FullProbability = Source;
 	FRandomStream			  FullStream(42);
 	UCellularAutomataGenerator2D::CarveCorridors(FullProbability, 1.0f, 2, FullStream);
@@ -397,14 +364,12 @@ bool FCellularAutomataCarveCorridorsNoOpTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// Test 12: CarveCorridors leaves an already-connected pair alone
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FCellularAutomataCarveCorridorsAllConnectedTest, "ProceduralGeometry.CellularAutomata.CarveCorridorsAllConnectedNoOp", DefaultTestFlags)
 
 bool FCellularAutomataCarveCorridorsAllConnectedTest::RunTest(const FString& Parameters)
 {
-	// Same two blobs, but recorded as diagram neighbours: CarveCorridors reads connectivity off the diagram, so this
-	// is the "already connected" case stated as an input instead of hoped for from a CA configuration.
+	// Same two blobs recorded as diagram neighbours: CarveCorridors reads connectivity off the diagram.
 	FCellularAutomataGridData Connected = CACorridorRef_MakeTwoBlobGrid();
 	Connected.Diagram.Cells[0].Neighbors = { 1 };
 	Connected.Diagram.Cells[1].Neighbors = { 0 };
@@ -416,8 +381,7 @@ bool FCellularAutomataCarveCorridorsAllConnectedTest::RunTest(const FString& Par
 
 	TestTrue(TEXT("Grid unchanged when the pair is already connected"), Connected.Grid == GridBeforeCarve);
 
-	// Control: drop the adjacency and the identical grid does carve, so the no-op above is the adjacency skip and not
-	// a substrate that could never be carved.
+	// Control: without the adjacency the identical grid does carve, so the no-op above is the adjacency skip.
 	FCellularAutomataGridData Disconnected = CACorridorRef_MakeTwoBlobGrid();
 	FRandomStream			  DisconnectedStream(42);
 	UCellularAutomataGenerator2D::CarveCorridors(Disconnected, 1.0f, 2, DisconnectedStream);
@@ -427,14 +391,12 @@ bool FCellularAutomataCarveCorridorsAllConnectedTest::RunTest(const FString& Par
 	return true;
 }
 
-// Test 13: CorridorWidth changes how much a corridor carves
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FCellularAutomataCarveCorridorsWidthTest, "ProceduralGeometry.CellularAutomata.CarveCorridorsWidthChangesCarve", DefaultTestFlags)
 
 bool FCellularAutomataCarveCorridorsWidthTest::RunTest(const FString& Parameters)
 {
-	// Two hand-built floor blobs that share no boundary: the carve is forced regardless of CA randomness,
-	// so CorridorWidth is the only variable between the two runs below.
+	// The carve is forced regardless of CA randomness, so CorridorWidth is the only variable between the runs.
 	FCellularAutomataGridData NarrowData = CACorridorRef_MakeTwoBlobGrid();
 	const int32				  FloorBefore = CACorridorRef_CountFloor(NarrowData);
 
@@ -453,17 +415,11 @@ bool FCellularAutomataCarveCorridorsWidthTest::RunTest(const FString& Parameters
 	return true;
 }
 
-// ============================================================
-// CarveCorridors nearest-pair equivalence
-// ============================================================
-
 namespace
 {
 	/**
-	 * Reference CarveCorridors: the plain double loop over every cell of both regions, kept so the indexed search in
-	 * the generator can be proven to pick the same pair. Every other step — pair ordering, the adjacency skip, the
-	 * probability draw, the Bresenham walk and the carve band — is a literal copy, so the two runs consume the random
-	 * stream identically and any divergence in the output grid is a divergence in the chosen pair.
+	 * Reference CarveCorridors: the plain double loop over both regions, against which the generator's indexed search
+	 * is compared. Every other step is a literal copy, so both runs consume the random stream identically.
 	 */
 	void CACorridorRef_CarveCorridorsBruteForce(FCellularAutomataGridData& GridData, float Probability, int32 Width, FRandomStream& InRandomStream)
 	{
@@ -604,11 +560,8 @@ namespace
 	}
 
 	/**
-	 * Lattice of irregular pockets, one per slot, each grown by a seeded walk confined to its slot interior so a
-	 * one-cell wall always separates neighbouring slots. Emergent CA substrates were tried first and rejected: their
-	 * surviving regions are usually diagram-adjacent (or collapse to one region), which makes CarveCorridors skip
-	 * every pair and turns the comparison vacuous. The pockets are concave and ragged, which is what the boundary
-	 * pruning in the indexed search has to survive; convex rectangles would not exercise it.
+	 * Lattice of irregular pockets, each grown by a seeded walk confined to its slot so a one-cell wall separates
+	 * neighbours. Concave and ragged on purpose: convex rectangles would not exercise the indexed search's pruning.
 	 */
 	FCellularAutomataGridData CACorridorRef_MakePocketGrid(int32 SlotsX, int32 SlotsY, int32 SlotPitch, int32 WalkSteps, int32 Seed)
 	{
@@ -683,15 +636,13 @@ namespace
 	}
 } // namespace
 
-// Test 14: the indexed nearest-pair search must carve exactly what the full double loop carves
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCellularAutomataCarveCorridorsNearestPairTest,
 	"ProceduralGeometry.CellularAutomata.CarveCorridors.NearestPairMatchesBruteForce",
 	DefaultTestFlags)
 
 bool FCellularAutomataCarveCorridorsNearestPairTest::RunTest(const FString& Parameters)
 {
-	// Each case asserts its own carve count: a shared total would let the two hand-built blob cases, which carve by
-	// construction, mask a SwissCheese case that silently stopped producing disconnected pairs.
+	// Each case asserts its own carve count so a case that stopped producing disconnected pairs cannot hide.
 	auto CompareRun = [this](const FString& CaseName, const FCellularAutomataGridData& Source, int32 CorridorWidth) {
 		FCellularAutomataGridData Indexed = Source;
 		FRandomStream			  IndexedStream(4242);
@@ -727,8 +678,7 @@ bool FCellularAutomataCarveCorridorsNearestPairTest::RunTest(const FString& Para
 		TestTrue(FString::Printf(TEXT("%s: at least one cell was carved, so the comparison is not vacuous"), *CaseName), Carved > 0);
 	};
 
-	// Hand-built blobs: four separated rectangles guarantee carving, and the asymmetric layout makes a wrong pair
-	// choice move the corridor by a visible number of cells.
+	// Four separated rectangles guarantee carving, and the asymmetric layout makes a wrong pair choice visible.
 	{
 		const TArray<FIntRect> Blobs = { FIntRect(FIntPoint(2, 2), FIntPoint(9, 9)),
 			FIntRect(FIntPoint(20, 3), FIntPoint(28, 12)),
@@ -740,8 +690,7 @@ bool FCellularAutomataCarveCorridorsNearestPairTest::RunTest(const FString& Para
 		CompareRun(TEXT("FourBlobs width 3"), Blobbed, 3);
 	}
 
-	// Many small irregular pockets: the many-region case the index exists for, and the shape class that makes the
-	// boundary pruning non-trivial.
+	// Many small irregular pockets: the many-region case the index exists for.
 	const TArray<int32> PocketSeeds = { 101, 202, 303, 404 };
 	for (const int32 PocketSeed : PocketSeeds)
 	{
@@ -752,10 +701,7 @@ bool FCellularAutomataCarveCorridorsNearestPairTest::RunTest(const FString& Para
 	return true;
 }
 
-// ============================================================
-// Reuse of one generator instance must reproduce the layout: the CA re-seeds its stream at the top of every run,
-// so a cached or re-streamed generator cannot drift away from the seed it was configured with.
-// ============================================================
+// The CA re-seeds its stream at the top of every run, so reusing one instance must reproduce the layout.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FCellularAutomataRepeatGenerateTest, "ProceduralGeometry.CellularAutomata.GenerateTwiceOnOneInstanceIsIdentical", DefaultTestFlags)
 
@@ -774,25 +720,20 @@ bool FCellularAutomataRepeatGenerateTest::RunTest(const FString& Parameters)
 
 	TestEqual(TEXT("Reusing one instance gives the same cell count"), Second.Cells.Num(), First.Cells.Num());
 
-	// Counts alone would miss a stream left mid-sequence by the first run: the second cave would have a similar cell
-	// count and completely different geometry. The structural hash covers vertices, centres and neighbour lists.
+	// Counts alone would miss a stream left mid-sequence by the first run; the structural hash would not.
 	TestEqual(
 		TEXT("Reusing one instance is structurally identical"), PGTestHash::HashLayoutDiagram2D(Second), PGTestHash::HashLayoutDiagram2D(First));
 
 	return true;
 }
 
-// ============================================================
-// A run that coarsens to fit the cell budget must not coarsen the generator: the degraded pitch belongs to that
-// call's bounds, and a later run whose bounds fit must generate at the authored pitch.
-// ============================================================
+// A coarsened run must not coarsen the generator: the degraded pitch belongs to that call's bounds only.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FCellularAutomataDegradedCellSizeLeakTest, "ProceduralGeometry.CellularAutomata.DegradedCellSizeDoesNotLeakIntoGridSize", DefaultTestFlags)
 
 bool FCellularAutomataDegradedCellSizeLeakTest::RunTest(const FString& Parameters)
 {
-	// An all-wall fill with no smoothing keeps the near-budget raster cheap; this test asserts on cell size, not on
-	// cave shape, so both runs legitimately come back with an empty diagram.
+	// An all-wall fill keeps the near-budget raster cheap; the assertions are on cell size, so an empty diagram is fine.
 	AddExpectedMessagePlain(TEXT("No surviving regions"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, 0);
 	AddExpectedMessagePlain(TEXT("Cell budget exceeded"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, 0);
 
@@ -820,11 +761,7 @@ bool FCellularAutomataDegradedCellSizeLeakTest::RunTest(const FString& Parameter
 	return true;
 }
 
-// ============================================================
-// Boundary tracing at a pinch corner. The ring below leaves the outside void and the enclosed hole meeting
-// diagonally at one grid corner; pairing the two edges there by anything but geometry splices the hole into the
-// outer boundary as a single keyhole loop whose area is outer-minus-hole and which visits the corner twice.
-// ============================================================
+// Pinch corner: the void and the enclosed hole meet at one grid corner, where a non-geometric pairing merges them.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FCellularAutomataBoundaryPinchTest, "ProceduralGeometry.CellularAutomata.BoundaryTracePinchKeepsHoleSeparate", DefaultTestFlags)
 
@@ -875,8 +812,7 @@ bool FCellularAutomataBoundaryPinchTest::RunTest(const FString& Parameters)
 		Shoelace += A.X * B.Y - B.X * A.Y;
 	}
 
-	// 24 = the 5x5 footprint minus the removed corner cell. 15 would be that outer area minus the 3x3 hole, which is
-	// what a merged keyhole loop measures.
+	// 24 = the 5x5 footprint minus the removed corner; a merged keyhole loop would measure 15.
 	TestEqual(TEXT("The traced polygon is the outer boundary, not the outer boundary minus the hole"),
 		static_cast<float>(FMath::Abs(Shoelace) * 0.5),
 		24.0f,
@@ -894,12 +830,7 @@ bool FCellularAutomataBoundaryPinchTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// ============================================================
-// One CA layout cell is a whole cave lobe and the CA walls its raster boundary ring, so no lobe can reach the raster
-// edge. This pins the literal false the conversion writes, not a computed rule — it cannot tell a correct exterior
-// rule from a wrong one, it only stops the always-false computation this replaced from creeping back as apparent
-// protection. The rule that does get exercised lives on the raster path, in DrunkardWalk.ExteriorRingIsMarked.
-// ============================================================
+// A CA layout cell is a whole cave lobe behind a walled raster ring, so no lobe can reach the raster edge.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FCellularAutomataRegionExteriorTest, "ProceduralGeometry.CellularAutomata.RegionCellsAreNeverExterior", DefaultTestFlags)
 
@@ -923,10 +854,7 @@ bool FCellularAutomataRegionExteriorTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// ============================================================
-// SetGridSize raises a request below the floor. The value it raised to is what generates, and the clamp says so
-// instead of leaving the caller's own log line describing a resolution that was never used.
-// ============================================================
+// SetGridSize raises a request below the floor, and the value it raised to is what generates.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FLayoutGeneratorGridSizeClampTest, "ProceduralGeometry.LayoutGenerator.GridSizeClampReportsEffectiveValue", DefaultTestFlags)
 
@@ -949,4 +877,4 @@ bool FLayoutGeneratorGridSizeClampTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-#endif // WITH_DEV_AUTOMATION_TESTS
+#endif

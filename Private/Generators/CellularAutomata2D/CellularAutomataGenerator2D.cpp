@@ -6,14 +6,9 @@
 namespace
 {
 	/**
-	 * Boundary cells of one region plus a uniform bucket grid over them (built on the first query), used to answer
-	 * "which cell of this region is nearest to point P" without scanning the region.
-	 *
-	 * Only boundary cells can win: from a cell whose four orthogonal neighbours all belong to the same region, the
-	 * single-axis step toward any cell of another region stays inside the region and strictly shortens the distance,
-	 * so an interior cell is never a minimiser. Ties resolve to the lowest position in the region's own cell array,
-	 * and the boundary subset keeps that array's order, so the pair reported here is the same pair a full double
-	 * loop over both regions would settle on.
+	 * Boundary cells of one region with a lazily built bucket grid over them, answering "which cell of this region is
+	 * nearest to P". Only boundary cells can win, and ties resolve to the lowest position in the region's cell array,
+	 * so the pair reported matches the one a full double loop over both regions would settle on.
 	 */
 	struct FCACorridorBoundaryIndex
 	{
@@ -65,9 +60,7 @@ namespace
 				return false;
 			}
 
-			// The boundary set has to be collected while RegionIds is still pre-carve, but the buckets over it are a
-			// pure function of that set, so most substrates (every pair already diagram-adjacent, or the probability
-			// roll rejecting every pair) never pay for them.
+			// Buckets are a pure function of the boundary set, so runs that never query one never pay for them.
 			if (!bBucketsBuilt)
 			{
 				BuildBuckets();
@@ -80,17 +73,14 @@ namespace
 			const int32 MaxRing = FMath::Max(FMath::Max(FMath::Abs(FromBucketX), FMath::Abs(NumBucketsX - 1 - FromBucketX)),
 				FMath::Max(FMath::Abs(FromBucketY), FMath::Abs(NumBucketsY - 1 - FromBucketY)));
 
-			// From is usually outside this region's bucket grid entirely; the rings below that first ring hold no
-			// buckets at all, so skipping straight to it keeps a distant query from sweeping empty rings.
+			// From is usually outside this region's bucket grid, so start at the first ring that can hold buckets.
 			const int32 GapX = FMath::Max(0, FMath::Max(-FromBucketX, FromBucketX - (NumBucketsX - 1)));
 			const int32 GapY = FMath::Max(0, FMath::Max(-FromBucketY, FromBucketY - (NumBucketsY - 1)));
 
 			for (int32 Ring = FMath::Max(GapX, GapY); Ring <= MaxRing; ++Ring)
 			{
-				// Every cell in a bucket Ring steps away sits at least (Ring - 1) * BucketSize from From, so once that
-				// bound passes the best distance found no further ring can beat it — or tie it, which matters because
-				// a tie at a lower index would win. The slack keeps float rounding of a squared integer distance from
-				// making a tie look one ulp farther than the bound.
+				// A ring cannot beat or tie the best once its (Ring - 1) * BucketSize floor passes it, and ties matter
+				// because a lower index wins; the slack absorbs float rounding of a squared integer distance.
 				if (OutBestIndex != INDEX_NONE && Ring > 0)
 				{
 					const double RingFloor = static_cast<double>(Ring - 1) * BucketSize;
@@ -139,8 +129,7 @@ namespace
 				MaxY = FMath::Max(MaxY, Cell.Y);
 			}
 
-			// Aim for roughly one cell per bucket, then coarsen until the bucket array cannot outgrow the cell list
-			// it indexes (a sparse ring of cells around a large empty middle would otherwise allocate by area).
+			// Roughly one cell per bucket, then coarsen so the bucket array cannot outgrow the cell list it indexes.
 			const int64 SpanX = static_cast<int64>(MaxX - MinX) + 1;
 			const int64 SpanY = static_cast<int64>(MaxY - MinY) + 1;
 			BucketSize = FMath::Max(1, FMath::FloorToInt(FMath::Sqrt(static_cast<double>(SpanX * SpanY) / Cells.Num())));
@@ -354,8 +343,7 @@ FCellularAutomataGridData UCellularAutomataGenerator2D::GenerateInternal()
 {
 	const double StartTime = FPlatformTime::Seconds();
 
-	// Re-seed from the configured seed so a fixed seed yields identical output regardless of any prior
-	// Generate() call on this instance (idempotent reuse).
+	// Re-seed so a fixed seed yields identical output regardless of any prior Generate() call on this instance.
 	InitializeRandomStream();
 
 	UE_LOG(LogRoguelikeGeometry,
@@ -388,13 +376,10 @@ FCellularAutomataGridData UCellularAutomataGenerator2D::GenerateInternal()
 
 	bool bDegradedResolution = false;
 
-	// The pitch this run generates at. It is deliberately a local: coarsening is a property of this call's
-	// bounds, and writing it back to the GridSize UPROPERTY would silently coarsen every later run on the
-	// same instance, including ones whose bounds fit the authored pitch.
+	// A local, not the GridSize UPROPERTY: coarsening belongs to this call's bounds, not to later runs.
 	int32 EffectiveGridSize = GridSize;
 
-	// Enlarge the cell size so the grid fits the cell budget rather than refusing to generate. Solving
-	// (W/c)(H/c) <= MaxGridCells for c gives c >= sqrt(W*H / MaxGridCells).
+	// Enlarge the cell size to fit the cell budget rather than refuse to generate: c >= sqrt(W*H / MaxGridCells).
 	if (static_cast<int64>(FMath::CeilToInt(BoundsWidth / static_cast<float>(EffectiveGridSize)))
 			* static_cast<int64>(FMath::CeilToInt(BoundsHeight / static_cast<float>(EffectiveGridSize)))
 		> PGGrid::MaxGridCells)
@@ -504,8 +489,7 @@ FCellularAutomataGridData UCellularAutomataGenerator2D::GenerateInternal()
 
 	UE_LOG(LogRoguelikeGeometry, Log, TEXT("[CA] Flood-fill found %d regions, center region=%d"), Regions.Num(), CenterRegionId);
 
-	// When bKeepCenterRegion is set but the exact center cell is a wall, fall back to the region
-	// nearest the center so culling always has a target to preserve.
+	// When the exact center cell is a wall, fall back to the nearest region so culling has a target to preserve.
 	if (bKeepCenterRegion && CenterRegionId < 0 && Regions.Num() > 0)
 	{
 		const FVector2D CenterWorld(Bounds.Min.X + (CenterX + 0.5f) * CellSizeVal, Bounds.Min.Y + (CenterY + 0.5f) * CellSizeVal);
@@ -587,7 +571,6 @@ void UCellularAutomataGenerator2D::CarveCorridors(FCellularAutomataGridData& Gri
 
 	Width = FMath::Max(1, Width);
 
-	// Identify surviving region indices
 	TArray<int32> SurvivingIds;
 	for (int32 i = 0; i < GridData.SurvivingRegions.Num(); ++i)
 	{
@@ -603,9 +586,7 @@ void UCellularAutomataGenerator2D::CarveCorridors(FCellularAutomataGridData& Gri
 		return;
 	}
 
-	// Built while RegionIds still describes the pre-carve layout, which is also what GridData.Regions holds: the
-	// carve below rewrites RegionIds for the cells it opens but never touches Regions, so the pair search must keep
-	// reading the original membership.
+	// Built while RegionIds still holds the pre-carve layout: the carve rewrites RegionIds but never Regions.
 	TArray<FCACorridorBoundaryIndex> BoundaryIndexes;
 	BoundaryIndexes.SetNum(SurvivingIds.Num());
 	for (int32 Slot = 0; Slot < SurvivingIds.Num(); ++Slot)
@@ -617,19 +598,16 @@ void UCellularAutomataGenerator2D::CarveCorridors(FCellularAutomataGridData& Gri
 		}
 	}
 
-	// Build neighbor set from current diagram for surviving regions
 	TMap<int32, int32> RegionToDiagramCell;
 	for (int32 CellIdx = 0; CellIdx < GridData.Diagram.Cells.Num(); ++CellIdx)
 	{
-		// Map by finding which surviving region index this diagram cell corresponds to
-		// The diagram cells are ordered by surviving region (same order as BuildDiagramFromRegions)
+		// Diagram cells are ordered by surviving region, the same order BuildDiagramFromRegions emits.
 		if (CellIdx < SurvivingIds.Num())
 		{
 			RegionToDiagramCell.Add(SurvivingIds[CellIdx], CellIdx);
 		}
 	}
 
-	// Find disconnected pairs (surviving regions that are NOT neighbors in the diagram)
 	TSet<TPair<int32, int32>> ConnectedPairs;
 	for (int32 CellIdx = 0; CellIdx < GridData.Diagram.Cells.Num(); ++CellIdx)
 	{
@@ -660,23 +638,20 @@ void UCellularAutomataGenerator2D::CarveCorridors(FCellularAutomataGridData& Gri
 
 			if (ConnectedPairs.Contains(TPair<int32, int32>(MinCell, MaxCell)))
 			{
-				// Already connected — skip
 				continue;
 			}
 
-			// Probabilistic check
 			if (InRandomStream.FRand() > Probability)
 			{
 				continue;
 			}
 
-			// Find nearest cells between the two regions
 			const int32						RegionIdA = SurvivingIds[a];
 			const FCACorridorBoundaryIndex& IndexA = BoundaryIndexes[a];
 			FCACorridorBoundaryIndex&		IndexB = BoundaryIndexes[b];
 
-			// First strictly-closest pair in region order: each A cell contributes its own nearest B cell (ties to
-			// the lowest B position), and only a strict improvement replaces the running best.
+			// First strictly-closest pair in region order: ties go to the lowest B position and only a strict
+			// improvement replaces the running best.
 			float	  BestDistSq = FLT_MAX;
 			FIntPoint BestA(0, 0);
 			FIntPoint BestB(0, 0);
@@ -694,10 +669,9 @@ void UCellularAutomataGenerator2D::CarveCorridors(FCellularAutomataGridData& Gri
 				}
 			}
 
-			// Carve a straight-line corridor from BestA to BestB
 			const int32 HalfWidth = Width / 2;
 
-			// Bresenham-like line from BestA to BestB
+			// Bresenham line from BestA to BestB.
 			int32		X0 = BestA.X, Y0 = BestA.Y;
 			int32		X1 = BestB.X, Y1 = BestB.Y;
 			const int32 DX = FMath::Abs(X1 - X0);
@@ -708,7 +682,6 @@ void UCellularAutomataGenerator2D::CarveCorridors(FCellularAutomataGridData& Gri
 
 			while (true)
 			{
-				// Carve a band of width cells centered on (X0, Y0)
 				for (int32 OffY = -HalfWidth; OffY <= HalfWidth; ++OffY)
 				{
 					for (int32 OffX = -HalfWidth; OffX <= HalfWidth; ++OffX)
@@ -716,7 +689,7 @@ void UCellularAutomataGenerator2D::CarveCorridors(FCellularAutomataGridData& Gri
 						const int32 CX = X0 + OffX;
 						const int32 CY = Y0 + OffY;
 
-						// Stay within bounds, keep boundary walls intact
+						// The outermost ring stays wall.
 						if (CX > 0 && CX < GridData.GridWidth - 1 && CY > 0 && CY < GridData.GridHeight - 1)
 						{
 							const int32 Idx = CY * GridData.GridWidth + CX;
@@ -776,8 +749,7 @@ void UCellularAutomataGenerator2D::RebuildDiagram(FCellularAutomataGridData& Gri
 
 	GridData.CenterRegionId = NewCenterRegionId;
 
-	// GridData.CellSize, not GridSize: a grid that came back coarsened would otherwise be rebuilt at the authored
-	// pitch and its polygons would no longer line up with the cells they were traced from.
+	// GridData.CellSize, not GridSize: a coarsened grid must rebuild at the pitch its cells were traced at.
 	GridData.Diagram = BuildDiagramFromRegions(
 		GridData.Grid, GridData.RegionIds, GridData.Regions, GridData.CenterRegionId, GridData.GridWidth, GridData.GridHeight, GridData.CellSize);
 
@@ -796,7 +768,6 @@ FLayoutDiagram2D UCellularAutomataGenerator2D::BuildDiagramFromRegions(const TAr
 
 	const float CellSize = InCellSize;
 
-	// Stage 1: Identify surviving regions
 	TMap<int32, int32> RegionToCellIndex;
 	TArray<int32>	   SurvivingRegionIds;
 
@@ -817,7 +788,6 @@ FLayoutDiagram2D UCellularAutomataGenerator2D::BuildDiagramFromRegions(const TAr
 		return FLayoutDiagram2D();
 	}
 
-	// Stage 2: Trace boundaries and build cells
 	FLayoutDiagram2D Diagram;
 	Diagram.Bounds = Bounds;
 	Diagram.Seed = Seed;
@@ -836,7 +806,6 @@ FLayoutDiagram2D UCellularAutomataGenerator2D::BuildDiagramFromRegions(const TAr
 		UE_LOG(
 			LogRoguelikeGeometry, Verbose, TEXT("[CA] Region %d: %d grid cells, %d boundary vertices"), RegionId, Region.Num(), Cell.Vertices.Num());
 
-		// Compute center as arithmetic mean of constituent cell centers
 		FVector2D CenterSum = FVector2D::ZeroVector;
 
 		for (const FIntPoint& GridCell : Region)
@@ -846,9 +815,7 @@ FLayoutDiagram2D UCellularAutomataGenerator2D::BuildDiagramFromRegions(const TAr
 
 		Cell.Center = CenterSum / static_cast<float>(Region.Num());
 
-		// One layout cell is a whole cave lobe here, and the CA forces its outermost ring to wall at seed, at every
-		// iteration and while carving corridors, so no lobe can reach the raster edge. Exterior is a per-grid-cell
-		// concept on the raster path and a bounds-contact concept on the Voronoi path; on this one it is always false.
+		// The CA forces the outermost ring to wall at every step, so no lobe can reach the raster edge.
 		Cell.bIsExterior = false;
 
 		Diagram.Cells.Add(Cell);
@@ -859,7 +826,7 @@ FLayoutDiagram2D UCellularAutomataGenerator2D::BuildDiagramFromRegions(const TAr
 		}
 	}
 
-	// Stage 3: Compute region neighbors via wall cells
+	// Two regions are neighbours when one wall cell touches both.
 	const int32 DX[] = { 1, -1, 0, 0 };
 	const int32 DY[] = { 0, 0, 1, -1 };
 
@@ -901,7 +868,7 @@ FLayoutDiagram2D UCellularAutomataGenerator2D::BuildDiagramFromRegions(const TAr
 		}
 	}
 
-	// Fallback: if center region was culled, find closest cell
+	// A culled center region falls back to the cell closest to the center point.
 	if (Diagram.CenterCellIndex == INDEX_NONE && Diagram.Cells.Num() > 0)
 	{
 		float BestDistSq = FLT_MAX;
@@ -922,9 +889,8 @@ FLayoutDiagram2D UCellularAutomataGenerator2D::BuildDiagramFromRegions(const TAr
 TArray<FVector2D> UCellularAutomataGenerator2D::TraceBoundaryPolygon(
 	const TArray<FIntPoint>& Region, const TArray<int32>& RegionIds, int32 RegionId, int32 InGridWidth, int32 InGridHeight, float InCellSize) const
 {
-	// Collect directed boundary edges in grid corner coordinates (CCW, interior on left).
-	// A region can pinch to a single corner, emitting two outgoing edges from it, so allow multiple
-	// outgoing edges per start corner (multimap) and disambiguate during chaining.
+	// Directed boundary edges in grid corner coordinates, counter-clockwise with the interior on the left. A region can
+	// pinch to a single corner, so a corner may carry more than one outgoing edge.
 	TMultiMap<FIntPoint, FIntPoint> EdgeMap;
 
 	auto IsOutsideRegion = [&](int32 NX, int32 NY) -> bool {
@@ -968,8 +934,7 @@ TArray<FVector2D> UCellularAutomataGenerator2D::TraceBoundaryPolygon(
 		}
 	}
 
-	// Chaining reads a lexicographically sorted edge list rather than the multimap: which loop a corner ends up in
-	// must not depend on hash-bucket order.
+	// Chaining reads a sorted edge list, not the multimap: loop membership must not depend on hash-bucket order.
 	TArray<TPair<FIntPoint, FIntPoint>> Edges;
 	Edges.Reserve(EdgeMap.Num());
 	for (const TPair<FIntPoint, FIntPoint>& Edge : EdgeMap)
@@ -998,22 +963,22 @@ TArray<FVector2D> UCellularAutomataGenerator2D::TraceBoundaryPolygon(
 		OutgoingByCorner.FindOrAdd(Edges[EdgeIdx].Key).Add(EdgeIdx);
 	}
 
-	// Every boundary edge is one unit axis step, so a direction is one of four; numbering them counter-clockwise
-	// turns "which way does this edge leave the corner" into arithmetic.
+	// Every boundary edge is one unit axis step, so numbering the four directions counter-clockwise makes turn
+	// selection arithmetic.
 	auto DirectionIndex = [](const FIntPoint& Step) -> int32 {
 		if (Step.X > 0)
 		{
-			return 0; // +X
+			return 0;
 		}
 		if (Step.Y > 0)
 		{
-			return 1; // +Y
+			return 1;
 		}
 		if (Step.X < 0)
 		{
-			return 2; // -X
+			return 2;
 		}
-		return 3; // -Y
+		return 3;
 	};
 
 	TArray<TArray<FIntPoint>> Loops;
@@ -1050,12 +1015,9 @@ TArray<FVector2D> UCellularAutomataGenerator2D::TraceBoundaryPolygon(
 				break;
 			}
 
-			// Two cells of one region can meet at a single corner while the void outside and a void enclosed by the
-			// region meet at the same point; the corner then carries two outgoing edges and pairing them the wrong
-			// way chains the outer boundary and the hole into one keyhole loop. Standard planar face traversal picks
-			// the pairing: from the reversed incoming direction, the first outgoing edge counter-clockwise is the
-			// sharpest turn that keeps the region's interior on the left, which is the winding these edges are
-			// emitted with. A U-turn back along the incoming edge sorts last so a chain is never stranded.
+			// At a pinched corner the outer void and an enclosed void meet, and the wrong pairing chains the boundary
+			// and the hole into one keyhole loop. From the reversed incoming direction the first outgoing edge
+			// counter-clockwise keeps the interior on the left; a U-turn sorts last so a chain is never stranded.
 			const FIntPoint Incoming = Corner - Edges[CurrentEdge].Key;
 			const int32		ReverseDir = DirectionIndex(FIntPoint(-Incoming.X, -Incoming.Y));
 
@@ -1096,7 +1058,7 @@ TArray<FVector2D> UCellularAutomataGenerator2D::TraceBoundaryPolygon(
 
 	if (Loops.Num() > 0)
 	{
-		// Select outer boundary (largest absolute area by shoelace)
+		// The outer boundary is the loop with the largest absolute shoelace area; the rest are holes.
 		int32 BestLoopIndex = 0;
 		float BestArea = 0.0f;
 

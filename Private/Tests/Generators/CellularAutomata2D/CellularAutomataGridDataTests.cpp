@@ -3,7 +3,6 @@
 
 #if WITH_DEV_AUTOMATION_TESTS
 
-// Test 1: GridData structural consistency — parallel arrays, valid dimensions, valid CenterRegionId
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FCellularAutomataGridDataStructuralTest, "ProceduralGeometry.CellularAutomataGenerator2D.GridDataStructuralConsistency", DefaultTestFlags)
 
@@ -15,33 +14,25 @@ bool FCellularAutomataGridDataStructuralTest::RunTest(const FString& Parameters)
 
 	FCellularAutomataGridData GridData = Generator->GenerateWithGridData();
 
-	// Grid array matches declared dimensions
 	TestEqual("Grid.Num() == GridWidth * GridHeight", GridData.Grid.Num(), GridData.GridWidth * GridData.GridHeight);
 
-	// Region ID array is parallel to grid
 	TestEqual("RegionIds.Num() == Grid.Num()", GridData.RegionIds.Num(), GridData.Grid.Num());
 
-	// Survival flags parallel to regions
 	TestEqual("SurvivingRegions.Num() == Regions.Num()", GridData.SurvivingRegions.Num(), GridData.Regions.Num());
 
-	// Non-degenerate grid
 	TestTrue("GridWidth > 0", GridData.GridWidth > 0);
 	TestTrue("GridHeight > 0", GridData.GridHeight > 0);
 
-	// Valid cell size
 	TestTrue("CellSize > 0", GridData.CellSize > 0.0f);
 
-	// CenterRegionId is valid
 	TestTrue("CenterRegionId is -1 or within [0, Regions.Num())",
 		GridData.CenterRegionId == -1 || (GridData.CenterRegionId >= 0 && GridData.CenterRegionId < GridData.Regions.Num()));
 
-	// At least one region survived
 	TestTrue("Diagram has cells", GridData.Diagram.Cells.Num() > 0);
 
 	return true;
 }
 
-// Test 2: GridData region ID consistency — grid cells and region IDs are mutually consistent
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FCellularAutomataGridDataRegionIdConsistencyTest, "ProceduralGeometry.CellularAutomataGenerator2D.GridDataRegionIdConsistency", DefaultTestFlags)
 
@@ -53,7 +44,6 @@ bool FCellularAutomataGridDataRegionIdConsistencyTest::RunTest(const FString& Pa
 
 	FCellularAutomataGridData GridData = Generator->GenerateWithGridData();
 
-	// Every floor cell in a surviving region has RegionIds[i] >= 0
 	for (int32 i = 0; i < GridData.Grid.Num(); ++i)
 	{
 		if (GridData.Grid[i])
@@ -63,7 +53,6 @@ bool FCellularAutomataGridDataRegionIdConsistencyTest::RunTest(const FString& Pa
 		}
 	}
 
-	// Every wall cell has RegionIds == -1 OR belongs to a culled region
 	for (int32 i = 0; i < GridData.Grid.Num(); ++i)
 	{
 		if (!GridData.Grid[i])
@@ -77,7 +66,6 @@ bool FCellularAutomataGridDataRegionIdConsistencyTest::RunTest(const FString& Pa
 		}
 	}
 
-	// Every surviving region has at least one floor cell
 	for (int32 r = 0; r < GridData.Regions.Num(); ++r)
 	{
 		if (!GridData.SurvivingRegions[r])
@@ -102,7 +90,6 @@ bool FCellularAutomataGridDataRegionIdConsistencyTest::RunTest(const FString& Pa
 	return true;
 }
 
-// Test 3: Generate() matches GenerateWithGridData().Diagram — refactor regression
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCellularAutomataGridDataRefactorRegressionTest,
 	"ProceduralGeometry.CellularAutomataGenerator2D.GenerateMatchesGridDataDiagram",
 	DefaultTestFlags)
@@ -112,7 +99,7 @@ bool FCellularAutomataGridDataRefactorRegressionTest::RunTest(const FString& Par
 	const FBox2D  TestBounds(FVector2D(-500, -500), FVector2D(500, 500));
 	const FString TestSeed = TEXT("RefactorRegressionTest");
 
-	// Two separate generator instances with identical config (same seed resets the random stream)
+	// Separate instances, same seed: the seed resets the random stream.
 	UCellularAutomataGenerator2D* Gen1 = NewObject<UCellularAutomataGenerator2D>();
 	Gen1->SetBounds(TestBounds)->SetSeed(TestSeed);
 	FLayoutDiagram2D Diagram1 = Gen1->Generate();
@@ -142,15 +129,12 @@ bool FCellularAutomataGridDataRefactorRegressionTest::RunTest(const FString& Par
 	return true;
 }
 
-// Test 4: SurvivingRegions reflects MinRegionSize culling
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FCellularAutomataGridDataCullingTest, "ProceduralGeometry.CellularAutomataGenerator2D.SurvivingRegionsReflectsCulling", DefaultTestFlags)
 
 bool FCellularAutomataGridDataCullingTest::RunTest(const FString& Parameters)
 {
-	// Whether a given seed's cave splits into multiple regions is an emergent property — search a fixed
-	// seed family for a multi-region layout instead of pinning one seed's output, so the assertions stay
-	// meaningful across deliberate seeding changes.
+	// Whether a seed's cave splits into multiple regions is emergent, so search a seed family rather than pin one seed.
 	FCellularAutomataGridData GridData;
 	bool					  bFoundMultiRegion = false;
 	for (int32 SeedIdx = 0; SeedIdx < 16 && !bFoundMultiRegion; ++SeedIdx)
@@ -183,7 +167,6 @@ bool FCellularAutomataGridDataCullingTest::RunTest(const FString& Parameters)
 
 	TestTrue("At least one region was culled with high MinRegionSize", bHasCulledRegion);
 
-	// Center region should survive when bKeepCenterRegion is true
 	if (GridData.CenterRegionId >= 0 && GridData.CenterRegionId < GridData.SurvivingRegions.Num())
 	{
 		TestTrue("Center region survived despite high MinRegionSize", GridData.SurvivingRegions[GridData.CenterRegionId]);
@@ -192,4 +175,4 @@ bool FCellularAutomataGridDataCullingTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-#endif // WITH_DEV_AUTOMATION_TESTS
+#endif

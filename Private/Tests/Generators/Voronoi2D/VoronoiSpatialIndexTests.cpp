@@ -76,10 +76,7 @@ namespace VoroIndexTest
 		return Sites;
 	}
 
-	/**
-	 * Tight clusters with exact duplicates sprinkled in. Collapsed cells and coincident sites are the two
-	 * branches where the indexed path could diverge without a well-spread site set ever noticing.
-	 */
+	/** Tight clusters with exact duplicates: collapsed cells and coincident sites are where the indexed path could diverge. */
 	static TArray<FVector2D> MakeClusteredSites(const FBox2D& Bounds, const int32 Count, const int32 Seed)
 	{
 		FRandomStream	  Rng(Seed);
@@ -119,9 +116,8 @@ namespace VoroIndexTest
 	}
 
 	/**
-	 * Lloyd relaxation feeds each pass's cell centroids back in as the next pass's sites, so the pruned and
-	 * exhaustive paths only stay equal here if they agree to the last bit every iteration. This is the shape the
-	 * coarse room-placement diagram is built with, which makes it the one that decides room layout.
+	 * Lloyd relaxation feeds each pass's centroids back in as the next pass's sites, so the pruned and exhaustive
+	 * paths stay equal only if they agree to the last bit every iteration.
 	 */
 	static FVoronoiDiagram2D BuildRelaxedDiagram(const FBox2D& Bounds, const int32 NumSites, const int32 RelaxIterations, const int32 PruningValue)
 	{
@@ -163,8 +159,7 @@ namespace VoroIndexTest
 
 		for (int32 SiteIdx = 0; SiteIdx < Exhaustive.Sites.Num(); ++SiteIdx)
 		{
-			// Under relaxation the sites of pass N are the cells of pass N-1, so a divergence reaches this array
-			// one iteration before it reaches a vertex list. Reporting it here says which pass went wrong.
+			// Under relaxation the sites of pass N are the cells of pass N-1, so reporting here says which pass went wrong.
 			if (Exhaustive.Sites[SiteIdx] != Pruned.Sites[SiteIdx])
 			{
 				Test.AddError(FString::Printf(TEXT("%s: site %d is (%.17g, %.17g) vs (%.17g, %.17g)"),
@@ -211,8 +206,7 @@ namespace VoroIndexTest
 
 			for (int32 VertIdx = 0; VertIdx < A.Vertices.Num(); ++VertIdx)
 			{
-				// Exact comparison on purpose: the pruned path only ever skips operations that provably do
-				// nothing, so a difference of even one ULP means a clip that mattered was dropped.
+				// Exact comparison: the pruned path only skips operations that provably do nothing, so one ULP means a lost clip.
 				if (A.Vertices[VertIdx] != B.Vertices[VertIdx])
 				{
 					Test.AddError(FString::Printf(TEXT("%s: cell %d vertex %d is (%.17g, %.17g) vs (%.17g, %.17g)"),
@@ -239,8 +233,8 @@ namespace VoroIndexTest
 	}
 } // namespace VoroIndexTest
 
-// Covers F126: the spatially pruned cell build must produce the same diagram as the exhaustive one, not merely
-// an equivalent-looking one. This is the guard that lets the pruning default to on.
+// The spatially pruned cell build must produce the same diagram as the exhaustive one, not an equivalent-looking
+// one; this is the guard that lets pruning default to on.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVoronoiPrunedMatchesFullScanTest, "ProceduralGeometry.Voronoi.PrunedMatchesFullScan", DefaultTestFlags)
 
 bool FVoronoiPrunedMatchesFullScanTest::RunTest(const FString& Parameters)
@@ -269,9 +263,8 @@ bool FVoronoiPrunedMatchesFullScanTest::RunTest(const FString& Parameters)
 		}
 	}
 
-	// Relaxed generation is the shape UCellDungeonGenerator2D builds its coarse room-placement diagram with, and
-	// it is the one that compounds: each Lloyd pass reads back the previous pass's centroids, so a single-bit
-	// disagreement in one pass becomes a different site set, and a different room layout, in the next.
+	// Relaxed generation compounds: each Lloyd pass reads back the previous pass's centroids, so a single-bit
+	// disagreement becomes a different site set, and a different room layout, in the next pass.
 	{
 		constexpr int32 RelaxedSiteCount = 600;
 		constexpr int32 RelaxIterations = 8;
@@ -293,25 +286,12 @@ bool FVoronoiPrunedMatchesFullScanTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// Records the F126 benchmark in the automation log and asserts what the index actually guarantees: the pruned
-// build performs strictly fewer half-plane clips than the exhaustive one, having skipped only clips that cannot
-// change a vertex. The clip count is the quantity the optimisation is about and it is the same on every machine,
-// so it is what the assertions read; the durations sit beside it because the exit criterion is stated in time,
-// but a wall clock on a shared build machine measures the machine as much as the algorithm.
-//
-// Two orderings are measured, because the win depends on the order sites are emitted in and not just on how many
-// there are. Random order (the coarse placement diagram, every Poisson-sampled diagram) collapses the working
-// polygon within a handful of clips. Row-major order at substrate scale is the opposite case and the dominant
-// workload: FVoronoiGridGenerator emits its sites row by row, so a cell keeps a full-width working polygon until
-// the scan reaches its own row and only the remainder of the scan is skipped. That case carries a duration
-// assertion too, because it is where the extra per-candidate bookkeeping could outweigh what it saves, and a
-// regression there would be a regression in the path this work exists to speed up.
-//
-// The 4x-sites ratios are recorded, not asserted: the build is still quadratic. While the working polygon is
-// near the bounds box the security disc spans more than FVoronoiSiteIndex's swept-bucket ceiling, so nothing is
-// skipped there. Pruning against the FINAL cell radius instead would be asymptotic, but it drops clips that
-// graze intermediate polygons, and those clips decide the endpoints later intersections are computed from, so
-// the diagram would move. Bit-identity and an asymptotic win are not both available from this algorithm.
+// Logs the benchmark and asserts what the index guarantees: strictly fewer half-plane clips than the exhaustive
+// build. Clip counts are the same on every machine, so they decide the result; the durations only sit beside them.
+// Two orderings are measured because the win depends on emission order: random order collapses the working polygon
+// within a handful of clips, while row-major substrate order keeps a full-width polygon until the scan reaches its
+// own row, and that case also carries a duration assertion. The 4x-sites ratios are logged, not asserted: the build
+// stays quadratic, and pruning against the final cell radius would be asymptotic but would move the diagram.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVoronoiPruningScalingTest, "ProceduralGeometry.Voronoi.PruningScaling", DefaultTestFlags)
 
 bool FVoronoiPruningScalingTest::RunTest(const FString& Parameters)
@@ -374,7 +354,7 @@ bool FVoronoiPruningScalingTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// Covers F112: the indexed point-location answers must be the answers the linear scans give, probe for probe.
+// The indexed point-location answers must be the answers the linear scans give, probe for probe.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVoronoiSiteIndexNearestTest, "ProceduralGeometry.VoronoiSiteIndex.NearestMatchesLinearScan", DefaultTestFlags)
 
 bool FVoronoiSiteIndexNearestTest::RunTest(const FString& Parameters)
@@ -434,7 +414,7 @@ bool FVoronoiSiteIndexNearestTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// Covers F128: the box gather must never hide a site the caller's own containment filter would have accepted.
+// The box gather must never hide a site the caller's own containment filter would have accepted.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVoronoiSiteIndexBoxQueryTest, "ProceduralGeometry.VoronoiSiteIndex.BoxQueryIsExactAndOrdered", DefaultTestFlags)
 
 bool FVoronoiSiteIndexBoxQueryTest::RunTest(const FString& Parameters)
@@ -479,8 +459,7 @@ bool FVoronoiSiteIndexBoxQueryTest::RunTest(const FString& Parameters)
 		}
 	}
 
-	// The rings around any bucket must partition the site set: every site exactly once, none twice. A ring walk
-	// that overlaps or leaves a gap would make the nearest-site search silently miss or double-count sites.
+	// The rings around a bucket must partition the site set, or the nearest-site search misses or double-counts.
 	int32 CenterBX = 0;
 	int32 CenterBY = 0;
 	Index.GetBucketCoords(FVector2D(1200.0, -400.0), CenterBX, CenterBY);

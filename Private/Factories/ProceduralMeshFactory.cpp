@@ -37,7 +37,7 @@ bool UProceduralMeshFactory::CreatePrismMesh(const FMeshGenerationParams& Params
 	OutMeshData.Vertices.Append(BottomVerts);
 	OutMeshData.Vertices.Append(TopVerts);
 
-	// Order matters!!!
+	// Order is fixed: each call appends to the arrays the next one indexes into.
 	ComposeFaceTriangles(Params.FoundationVertices, OutMeshData.Triangles);
 	CalcNormals(VertexCount, OutMeshData);
 	CalcUVs(BottomVerts, TopVerts, Params.UVScale, OutMeshData);

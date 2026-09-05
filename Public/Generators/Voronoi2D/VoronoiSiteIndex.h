@@ -4,23 +4,17 @@
 #include "Containers/ArrayView.h"
 
 /**
- * Uniform bucket grid over a Voronoi site set: the one spatial acceleration structure shared by the cell
- * build and by the point-location queries on a finished diagram.
- *
- * It is a plain value type owned by the caller rather than a member of the diagram on purpose. Diagrams are
- * copied between passes and read from ParallelFor workers, so an index cached inside one would be both a
- * data race and bytes retained for the lifetime of the level; a caller builds one per pass and drops it.
- *
- * Every query resolves distance ties to the lowest site index, which is the answer the linear scans it
- * replaces produce, so substituting the index cannot move a single placement.
+ * Uniform bucket grid over a Voronoi site set, shared by the cell build and by point-location queries on a
+ * finished diagram. A plain value type the caller builds per pass and drops: diagrams are copied between
+ * passes and read from ParallelFor workers, so an index cached inside one would be a data race. Every query
+ * resolves distance ties to the lowest site index, matching the linear scans it replaces.
  */
 class PROCEDURALGEOMETRY_API FVoronoiSiteIndex
 {
 public:
 	/**
-	 * Buckets InSites for roughly one site per bucket. InBounds is the caller's clip box; the grid is grown
-	 * to cover any site outside it, because a site the grid cannot reach would be silently missing from every
-	 * answer instead of merely costing an extra bucket.
+	 * Buckets InSites for roughly one site per bucket. InBounds is the caller's clip box; the grid grows to
+	 * cover any site outside it, since a site the grid cannot reach is missing from every answer.
 	 */
 	void Build(TArrayView<const FVector2D> InSites, const FBox2D& InBounds);
 
@@ -36,34 +30,27 @@ public:
 	void GatherRing(int32 BX, int32 BY, int32 Ring, TArray<int32>& OutSites) const;
 
 	/**
-	 * Appends every site held by a bucket that Box overlaps, in ascending index order. Buckets are only
-	 * partly covered by Box, so the result is a superset of the sites inside it: callers that need an exact
-	 * answer keep their own containment filter, and the index only narrows how many sites that filter sees.
+	 * Appends every site held by a bucket that Box overlaps, in ascending index order. The result is a superset
+	 * of the sites inside Box, so callers needing an exact answer keep their own containment filter.
 	 */
 	void GatherSitesInBox(const FBox2D& Box, TArray<int32>& OutSites) const;
 
 	/**
-	 * The site nearest Point, ties to the lowest index. INDEX_NONE only when nothing was built.
-	 * Distances are compared at the same float width FVoronoiDiagram2D::FindClosestCellBySite uses, so the two
-	 * answer identically even on the near-ties where float and double disagree.
+	 * The site nearest Point, ties to the lowest index; INDEX_NONE only when nothing was built. Distances are
+	 * compared at the float width FVoronoiDiagram2D::FindClosestCellBySite uses, so the two answer identically.
 	 */
 	int32 FindNearestSite(const FVector2D& Point) const;
 
 	/**
-	 * The next site index at or above MinIndex, other than IgnoreIndex, that may lie within RadiusSq of
-	 * Center; INDEX_NONE when no site at or above MinIndex can. The guarantee is one-sided on purpose: every
-	 * index the query steps over is proven to be at or beyond RadiusSq, which is what lets a caller skip that
-	 * range outright, but the index it returns is only a candidate. When the disc covers so much of the grid
-	 * that narrowing it would cost more than the caller saves, the query answers with the next index and lets
-	 * the caller test it: the caller was going to do that work in the unindexed case anyway.
+	 * The next site index at or above MinIndex, other than IgnoreIndex, that may lie within RadiusSq of Center;
+	 * INDEX_NONE when none can. The guarantee is one-sided: every index stepped over is proven to be at or
+	 * beyond RadiusSq, but the index returned is only a candidate the caller must still test.
 	 */
 	int32 FindNextCandidateSite(const FVector2D& Center, double RadiusSq, int32 MinIndex, int32 IgnoreIndex) const;
 
 	/**
 	 * Largest squared radius for which FindNextCandidateSite still narrows instead of answering with the next
-	 * index. A caller in a tight loop tests its radius against this first so it only pays for the query while the
-	 * query can pay it back; above the limit the answer is the loop counter the caller already holds.
-	 * Zero when nothing was built, which keeps such a caller on its unindexed path.
+	 * index; a caller tests its radius against this before paying for the query. Zero when nothing was built.
 	 */
 	double GetNarrowingRadiusSqLimit() const;
 

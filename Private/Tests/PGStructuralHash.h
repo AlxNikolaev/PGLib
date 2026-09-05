@@ -9,18 +9,7 @@
 	#include "Generators/LayoutGenerator.h"
 	#include "Generators/Voronoi2D/VoronoiGenerator2D.h"
 
-/**
- * Structural hashes over PGLib generator output, for the same-seed determinism tests.
- *
- * Counts alone cannot see the failure those tests exist to catch: a clip or adjacency pass that starts depending on
- * container iteration order leaves every cell with the same number of vertices and neighbours while moving the
- * vertices and reshuffling the neighbour lists. The hash therefore covers the coordinates as well, quantized so the
- * last bit of a float cannot red the suite, and for neighbours it covers a SORTED copy of the index list: the raw
- * order is filled from a TSet and is hash-derived, so sorting is what makes two runs comparable while still catching
- * a changed neighbour set.
- *
- * Names carry the PGTestHash prefix because adaptive unity builds can merge these translation units.
- */
+/** Structural hashes over generator output for same-seed determinism tests; prefixed because unity builds merge these translation units. */
 namespace PGTestHash
 {
 	/** 1/100 of a world unit: finer than any placement decision downstream, coarser than float round-off. */
@@ -33,7 +22,7 @@ namespace PGTestHash
 		return Hash;
 	}
 
-	/** Vertices are hashed in order: winding and starting vertex are part of what has to stay put. */
+	/** Order-sensitive: winding and starting vertex are part of what has to stay put. */
 	inline uint32 HashPolygon(uint32 Hash, const TArray<FVector2D>& Vertices)
 	{
 		Hash = HashCombine(Hash, GetTypeHash(Vertices.Num()));
@@ -44,6 +33,7 @@ namespace PGTestHash
 		return Hash;
 	}
 
+	/** Sorted before hashing: neighbour lists come from a TSet, so their raw order is hash-derived rather than stable. */
 	inline uint32 HashNeighbors(uint32 Hash, const TArray<int32>& Neighbors)
 	{
 		Hash = HashCombine(Hash, GetTypeHash(Neighbors.Num()));
@@ -103,4 +93,4 @@ namespace PGTestHash
 	}
 } // namespace PGTestHash
 
-#endif // WITH_DEV_AUTOMATION_TESTS
+#endif

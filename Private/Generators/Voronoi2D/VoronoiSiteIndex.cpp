@@ -6,10 +6,7 @@
 
 namespace VoronoiSiteIndexInternal
 {
-	/**
-	 * Ceiling on the buckets FindNextCandidateSite will sweep for one answer. Past it the sweep costs more than
-	 * the single half-plane clip the caller performs on the answer, so the query stops narrowing.
-	 */
+	/** Buckets FindNextCandidateSite will sweep before a sweep costs more than the clip it saves the caller. */
 	static constexpr int64 MaxSweptBuckets = 64;
 
 	/** Buckets per axis for an extent, never fewer than one so a degenerate axis still addresses a row. */
@@ -52,14 +49,13 @@ void FVoronoiSiteIndex::Build(const TArrayView<const FVector2D> InSites, const F
 	const FVector2D Size = GridBounds.GetSize();
 	const double	Area = static_cast<double>(Size.X) * static_cast<double>(Size.Y);
 
-	// One site per bucket on average: fewer and the ring walks degenerate into linear scans, more and the
-	// bucket table costs more than the sites it indexes.
+	// One site per bucket on average: fewer buckets degenerate the ring walks into linear scans, more cost more than
+	// the sites they index.
 	BucketSize = (Area > 0.0) ? FMath::Sqrt(Area / static_cast<double>(Sites.Num())) : 0.0;
 	if (!(BucketSize > 0.0))
 	{
-		// Collinear sites have no area to divide up, so the site count is spread along the one axis that has
-		// an extent instead. Fully coincident sites have neither, and land in a single bucket that answers
-		// every query with a linear walk, which is the right trade for an input that degenerate.
+		// Collinear sites have no area, so the count spreads along the one axis with an extent; fully coincident
+		// sites have neither and land in a single bucket answering every query with a linear walk.
 		const double LongestAxis = FMath::Max(static_cast<double>(Size.X), static_cast<double>(Size.Y));
 		BucketSize = (LongestAxis > 0.0) ? (LongestAxis / static_cast<double>(Sites.Num())) : 1.0;
 		if (!(BucketSize > 0.0))
@@ -71,9 +67,7 @@ void FVoronoiSiteIndex::Build(const TArrayView<const FVector2D> InSites, const F
 	BucketsX = VoronoiSiteIndexInternal::AxisBucketCount(Size.X, BucketSize);
 	BucketsY = VoronoiSiteIndexInternal::AxisBucketCount(Size.Y, BucketSize);
 
-	// A sliver extent (one axis thousands of times the other) asks for one bucket per unit of the long axis
-	// once the area-derived bucket size collapses. Coarsening until the product fits the shared grid budget
-	// bounds the table the same way every other rasterizing pass in PGLib is bounded.
+	// A sliver extent collapses the area-derived bucket size, so coarsen until the table fits the grid budget.
 	while (static_cast<int64>(BucketsX) * static_cast<int64>(BucketsY) > PGGrid::MaxGridCells)
 	{
 		const double Overshoot =
@@ -102,8 +96,8 @@ void FVoronoiSiteIndex::Build(const TArrayView<const FVector2D> InSites, const F
 		BucketStart[Bucket + 1] += BucketStart[Bucket];
 	}
 
-	// Filling in ascending site order leaves every bucket's list ascending, which is what lets the queries
-	// break ties toward the lowest index and lets FindNextCandidateSite binary-search and bail early.
+	// Ascending fill order leaves every bucket list ascending, so queries break ties toward the lowest index and
+	// FindNextCandidateSite can binary-search and bail early.
 	BucketSites.SetNumUninitialized(Sites.Num());
 	TArray<int32> Cursor = BucketStart;
 	for (int32 SiteIdx = 0; SiteIdx < Sites.Num(); ++SiteIdx)
@@ -121,8 +115,7 @@ void FVoronoiSiteIndex::GetBucketCoords(const FVector2D& Point, int32& OutX, int
 		return;
 	}
 
-	// Clamp in double before narrowing: a query far outside the grid overflows the int32 conversion, and an
-	// overflowed bucket coordinate reads a wrong (or out-of-range) bucket instead of the nearest edge one.
+	// Clamp in double before narrowing: a query far outside the grid overflows the int32 conversion.
 	const double LocalX = (static_cast<double>(Point.X) - GridBounds.Min.X) / BucketSize;
 	const double LocalY = (static_cast<double>(Point.Y) - GridBounds.Min.Y) / BucketSize;
 	OutX = static_cast<int32>(FMath::Clamp(FMath::FloorToDouble(LocalX), 0.0, static_cast<double>(BucketsX - 1)));
@@ -274,20 +267,16 @@ int32 FVoronoiSiteIndex::FindNearestSite(const FVector2D& Point) const
 
 	int32 Best = INDEX_NONE;
 
-	// Narrowed to float deliberately: FVoronoiDiagram2D::FindClosestCellBySite compares its distances at float
-	// width, so two sites whose double distances differ in the eighth digit are a tie to it and it keeps the
-	// lower index. Comparing at double width here would pick the other one on those inputs, and this query
-	// exists to answer exactly what that scan answers.
+	// Float on purpose: FVoronoiDiagram2D::FindClosestCellBySite compares at float width and keeps the lower index
+	// on a tie, and this query has to answer exactly what that scan answers.
 	float BestDistSq = 0.0f;
 
 	for (int32 Ring = 0; Ring <= MaxRing; ++Ring)
 	{
 		if (Best != INDEX_NONE)
 		{
-			// A bucket the ring shells out to sits at least (Ring - 1) bucket widths from the query bucket.
-			// The bound is loosened by a hair because BestDistSq is a rounded float: a site whose true
-			// distance is a fraction above it can still round to the same float and, with a lower index, win
-			// the tie the scan resolves in its favour.
+			// A ring bucket sits at least (Ring - 1) bucket widths away; the bound is loosened a hair because a
+			// site just past it can round to the same float BestDistSq and win the tie on the lower index.
 			const double RingMinDist = static_cast<double>(Ring - 1) * BucketSize;
 			if (RingMinDist > 0.0 && RingMinDist * RingMinDist > static_cast<double>(BestDistSq) * (1.0 + 1e-6))
 			{
@@ -325,9 +314,7 @@ int32 FVoronoiSiteIndex::FindNextCandidateSite(const FVector2D& Center, const do
 		   return Sites.IsValidIndex(First) ? First : INDEX_NONE;
 	};
 
-	// Every site lies inside GridBounds, so a disc that swallows the whole grid contains all of them and the
-	// answer is simply the next allowed index. This is the common case while the caller's clip polygon is
-	// still close to the full bounds box, and it is what keeps those early steps O(1) instead of a grid sweep.
+	// A disc that swallows the whole grid contains every site, so the answer is the next allowed index.
 	if (RadiusSq >= MaxGridCornerDistSq(Center))
 	{
 		return NextAllowedIndex();
@@ -342,10 +329,8 @@ int32 FVoronoiSiteIndex::FindNextCandidateSite(const FVector2D& Center, const do
 	GetBucketCoords(FVector2D(Center.X - Radius, Center.Y - Radius), MinBX, MinBY);
 	GetBucketCoords(FVector2D(Center.X + Radius, Center.Y + Radius), MaxBX, MaxBY);
 
-	// A disc this wide would cost more to sweep than the single half-plane clip the caller performs on the
-	// answer, so hand back the next index unnarrowed. Skipping nothing is always sound; it just leaves the
-	// caller doing what it would have done without an index at all, which is the right trade while its
-	// working polygon is still large.
+	// A disc this wide costs more to sweep than the clip it saves, so hand back the next index unnarrowed;
+	// skipping nothing is always sound.
 	if (static_cast<int64>(MaxBX - MinBX + 1) * static_cast<int64>(MaxBY - MinBY + 1) > VoronoiSiteIndexInternal::MaxSweptBuckets)
 	{
 		return NextAllowedIndex();
@@ -397,11 +382,9 @@ double FVoronoiSiteIndex::GetNarrowingRadiusSqLimit() const
 		return 0.0;
 	}
 
-	// A disc of radius R covers at most ceil(2R / BucketSize) + 1 buckets per axis, so a square box stays inside
-	// the sweep ceiling while that span is at most the ceiling's square root. Solving the span back for R gives
-	// the radius below which FindNextCandidateSite reaches its sweep rather than its give-up branch. The bound is
-	// deliberately the square-box one: a disc centred so that one axis spans fewer buckets might still be swept,
-	// and a caller that skips those loses a little pruning, never an answer.
+	// A disc of radius R covers at most ceil(2R / BucketSize) + 1 buckets per axis, so solving the square-box span
+	// back for R gives the radius below which FindNextCandidateSite sweeps instead of giving up. The square-box
+	// bound is conservative: a caller that skips a sweepable disc loses pruning, never an answer.
 	const int32	 MaxSpan = FMath::Max(1, static_cast<int32>(FMath::Sqrt(static_cast<double>(VoronoiSiteIndexInternal::MaxSweptBuckets))));
 	const double MaxRadius = static_cast<double>(MaxSpan - 1) * BucketSize * 0.5;
 	return MaxRadius * MaxRadius;

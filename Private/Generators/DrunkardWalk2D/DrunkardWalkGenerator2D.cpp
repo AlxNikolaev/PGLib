@@ -5,8 +5,7 @@
 
 namespace
 {
-	// Side indices: 0=+X (right), 1=-X (left), 2=+Y (up), 3=-Y (down).
-	// Opposite(side) = side ^ 1 (0<->1, 2<->3).
+	// Side indices: 0=+X, 1=-X, 2=+Y, 3=-Y; the opposite side is side ^ 1.
 	const FIntPoint GDirVec[4] = { FIntPoint(1, 0), FIntPoint(-1, 0), FIntPoint(0, 1), FIntPoint(0, -1) };
 
 	/** A room under construction during the walk, in signed grid coordinates. */
@@ -197,11 +196,9 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 {
 	const double StartTime = FPlatformTime::Seconds();
 
-	// Re-seed from the configured seed so a fixed seed yields identical output regardless of any prior
-	// Generate() call on this instance (idempotent reuse).
+	// Re-seed so a fixed seed yields identical output regardless of any prior Generate() call on this instance.
 	InitializeRandomStream();
 
-	// Build the placement queue (type indices expanded by Weight). Optionally shuffled for variety.
 	TArray<int32> Queue = BuildRoomQueue(RoomTypes, bShuffleRoomOrder, RandomStream);
 	const int32	  RequestedRoomCount = Queue.Num();
 
@@ -243,7 +240,7 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 		return MakeEmptyResult();
 	}
 
-	// --- Walk over an unbounded signed integer grid ---
+	// The walk runs on an unbounded signed integer grid.
 
 	// Floor cells (corridor + room) keyed by signed position.
 	TMap<FIntPoint, uint8> CellTypeMap;
@@ -281,9 +278,8 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 		}
 	};
 
-	// Open rooms = placed rooms that still have an untried exit side. The next room normally grows from
-	// the most-recently-opened room (a single winding path); with BranchProbability it grows from a
-	// random open room instead, creating branch points. Reserve so element references stay stable across Add.
+	// Open rooms still have an untried exit side. The next room grows from the most recent one, or from a random one
+	// at BranchProbability. Reserved so element references stay stable across Add.
 	TArray<FWalkRoom> OpenRooms;
 	OpenRooms.Reserve(RequestedRoomCount + 1);
 
@@ -306,8 +302,8 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 		OpenRooms.Add(First);
 	}
 
-	// --- Per-attempt accumulators: a corridor system (main corridor + forks) is traced into these,
-	//     validated for clearance, then committed atomically (or discarded and retried). ---
+	// A corridor system (main corridor plus forks) is traced into these accumulators, validated for clearance, then
+	// committed atomically or discarded and retried.
 	struct FPendingRoom
 	{
 		FIntPoint Min;
@@ -337,7 +333,6 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 		PendingCellSet.Reset();
 	};
 
-	// --- Debug counters (summarized at the end) ---
 	int32 StatTraceCalls = 0;	   // TraceOne invocations
 	int32 StatRejectSelfTouch = 0; // corridor would fold onto itself
 	int32 StatRejectRoomFit = 0;   // room edge couldn't cover the corridor end
@@ -351,11 +346,9 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 	TSet<FIntPoint>		  LastTraceCorridorCells;
 	const TSet<FIntPoint> NoExemptCells;
 
-	// Traces one corridor (bending + variable width via bounded random walk) from StartOutside heading
-	// InitialDir, then places its room (next from the queue) at the terminal. Appends geometry to the
-	// pending accumulators. ExemptCells are ignored by the clearance test (the corridor a fork grows off).
-	// When bCollectForks, fork seeds (cell + dir) are appended to OutForkSeeds.
-	// Returns true if the room fit (geometry appended), false otherwise (nothing appended).
+	// Traces one corridor from StartOutside heading InitialDir and places the queue next room at its terminal,
+	// appending to the pending accumulators. ExemptCells are ignored by the clearance test; a false return appends
+	// nothing.
 	auto TraceOne = [&](FIntPoint							 StartOutside,
 						FIntPoint							 InitialDir,
 						int32								 InitialWidth,
@@ -385,13 +378,11 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 		TArray<TPair<FIntPoint, FIntPoint>> ForkSeeds;
 		Rail.Reserve(Len);
 
-		// Self-avoidance: track this corridor's own cells so it can never fold back onto itself (which
-		// would merge bands into a blob). The new band may only touch the immediately previous band.
+		// A corridor may never fold back onto itself: a new band may only touch the immediately previous band.
 		TSet<FIntPoint> SelfSet;
 		TSet<FIntPoint> PrevBandSet;
 
-		// Bends are spaced at least MinSegment cells apart, so corridors read as clean hallways with
-		// occasional corners rather than per-step erosion jitter.
+		// Bends stay at least MinSegment cells apart so corridors read as hallways rather than per-step jitter.
 		const int32 MinSegment = FMath::Max(2, CorridorWidthMax + 1);
 		int32		StepsSinceTurn = 0;
 
@@ -424,10 +415,8 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 				CurBandSet.Add(C);
 			}
 
-			// Reject if the new band folds onto itself or overlaps pending geometry from earlier
-			// corridors/rooms in this attempt (prevents fork corridors from plowing through
-			// the main corridor or pending rooms). The 1-cell margin is checked around each
-			// band cell; the previous band and current band cells are exempt (contiguity is ok).
+			// Reject a band that folds onto itself or comes within one cell of this attempt's pending geometry; the
+			// previous and current bands are exempt because contiguity is expected.
 			for (const FIntPoint& C : Band)
 			{
 				for (int32 ny = -1; ny <= 1; ++ny)
@@ -439,9 +428,8 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 						{
 							continue;
 						}
-						// A fork is seeded just off its parent's rail, so the parent's band is inside the fork's
-						// first two clearance rings; further along, honouring the exemption would let a turning
-						// fork run back over its parent unrejected.
+						// A fork is seeded just off the parent rail, so the exemption holds only for the first two
+						// rings; further along it would let a turning fork run back over its parent.
 						if (k <= 1 && ExemptCells.Contains(N))
 						{
 							continue;
@@ -538,7 +526,6 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 			}
 		}
 
-		// Commit into pending accumulators.
 		LocalQueueCursor = MySlot + 1;
 		for (const FIntPoint& C : MyCells)
 		{
@@ -590,8 +577,7 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 			SourceIdx = OpenRooms.Num() - 1;
 		}
 
-		// Capture source geometry locals. OpenRooms is Reserve'd so the element reference stays valid
-		// across the later Add; we still capture to avoid relying on it after the push.
+		// Captured up front so nothing depends on the OpenRooms element reference after the later Add.
 		const FIntPoint CurMin = OpenRooms[SourceIdx].Min;
 		const int32		CurW = OpenRooms[SourceIdx].W;
 		const int32		CurH = OpenRooms[SourceIdx].H;
@@ -612,9 +598,8 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 				continue;
 			}
 
-			// Outside-adjacent edge cell at perpendicular index 0. Which end of the edge span that is
-			// flips with the sign of PerpOf(Dir), so sides 1 and 2 start from the far corner — otherwise
-			// the band walks off the edge and the door is a cell narrower than the corridor.
+			// Outside-adjacent edge cell at perpendicular index 0; which end that is flips with the sign of
+			// PerpOf(Dir), so sides 1 and 2 start from the far corner or the band walks off the edge.
 			FIntPoint O;
 			switch (Side)
 			{
@@ -637,23 +622,20 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 				ResetPending();
 				LocalQueueCursor = QueueIdx;
 
-				// Choose a starting width that fits the source edge and a band offset along the edge.
 				const int32		StartWidth = RandomStream.RandRange(CorridorWidthMin, FMath::Min(CorridorWidthMax, EdgeLen));
 				const int32		P0 = RandomStream.RandRange(0, EdgeLen - StartWidth);
 				const FIntPoint StartOutside = O + Perp * (P0 + StartWidth / 2);
 
-				// Trace the main corridor + room; collect any fork seeds.
 				TArray<TPair<FIntPoint, FIntPoint>> ForkSeeds;
 				if (!TraceOne(StartOutside, Dir, StartWidth, SourcePlacedIndex, NoExemptCells, true, ForkSeeds))
 				{
 					continue; // main room didn't fit this attempt
 				}
 
-				// Every fork grows off this corridor, so its cells stay exempt for all of them; forks placed
-				// earlier in this attempt do not, so two forks can never plow through each other.
+				// Only the parent corridor stays exempt, so two forks can never plow through each other.
 				const TSet<FIntPoint> ParentCorridorCells = LastTraceCorridorCells;
 
-				// Trace fork branches (one level deep). Each fork connects back to the same source room.
+				// Forks go one level deep and each connects back to the same source room.
 				int32 AttemptForksPlaced = 0;
 				for (const TPair<FIntPoint, FIntPoint>& ForkSeed : ForkSeeds)
 				{
@@ -669,14 +651,13 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 					}
 				}
 
-				// Clearance: every pending cell must keep a RoomBorderMargin gap from committed floor,
-				// except cells of the source room (the door connection is allowed to touch).
+				// Every pending cell keeps a RoomBorderMargin gap from committed floor, except the source room's own
+				// cells, which the door is allowed to touch.
 				bool bClear = true;
 				for (const FIntPoint& C : PendingCellSet)
 				{
-					// The overlap test stands outside the margin ring: the ring exempts every pending cell,
-					// so at RoomBorderMargin 0 (a legal "rooms may touch" authoring) it would exempt C itself
-					// and the solver would stamp candidate rooms straight over committed ones.
+					// The overlap test stands outside the margin ring, which exempts every pending cell: at margin 0
+					// the ring would exempt C itself and rooms would be stamped over committed ones.
 					if (CellTypeMap.Contains(C) && !InRect(C, CurMin, CurW, CurH))
 					{
 						bClear = false;
@@ -745,8 +726,7 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 					CorridorTargetRoom.Add(PendingRooms[PRail.TargetPending].PlacedIndex);
 				}
 
-				// Counted here rather than at the trace: an attempt discarded by the clearance test above
-				// contributes no geometry, so its forks must not show up in the layout's fork count.
+				// Counted after the clearance test so a discarded attempt's forks never reach the layout count.
 				StatForksPlaced += AttemptForksPlaced;
 
 				QueueIdx = LocalQueueCursor;
@@ -756,14 +736,12 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 
 		if (!bPlaced)
 		{
-			// Source has no exit that fits the next room — drop it. The default source then becomes the
-			// most-recent remaining open room (i.e. backtracking to the previous room).
+			// No exit fits the next room, so drop the source and fall back to the previous open room.
 			++StatBacktracks;
 			OpenRooms.RemoveAt(SourceIdx);
 		}
 		else if (OpenRooms[SourceIdx].AvailableSides.Num() == 0)
 		{
-			// Source fully used — remove it from the open set.
 			OpenRooms.RemoveAt(SourceIdx);
 		}
 	}
@@ -793,7 +771,7 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 		StatBacktracks,
 		CorridorPolylines.Num());
 
-	// --- Rasterize signed cells into a final grid sized to actual extents ---
+	// Rasterize the signed cells into a grid sized to the actual extents.
 
 	auto ComputeExtents = [&](FIntPoint& OutMin, FIntPoint& OutMax) {
 		OutMin = FIntPoint(MAX_int32, MAX_int32);
@@ -819,9 +797,8 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 
 	bool bDegradedResolution = false;
 
-	// The walk footprint is intrinsic, so we cannot shrink it by retuning bounds. To honor the cell budget we
-	// merge the signed cell map down by an integer factor (combining S*S cells into one) and enlarge the physical
-	// cell size by the same factor, preserving world extents at a coarser resolution.
+	// The walk footprint is intrinsic, so the cell budget is honoured by merging S*S signed cells into one and
+	// enlarging the physical cell size by the same factor, preserving world extents at a coarser resolution.
 	{
 		const int32 Pad = FMath::Max(1, WallThickness);
 		const int64 RawWidth = (MaxExtent.X - MinExtent.X + 1) + 2 * Pad;
@@ -907,8 +884,7 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 		CellType[Index] = Pair.Value;
 	}
 
-	// Wall classification: only non-floor cells within WallThickness (Chebyshev) of a floor cell become
-	// walls; everything farther stays Empty (carved away — no wall).
+	// Only non-floor cells within WallThickness (Chebyshev) of a floor cell become walls; the rest stay Empty.
 	const int32 WT = FMath::Max(1, WallThickness);
 	for (int32 Y = 0; Y < GHeight; ++Y)
 	{
@@ -916,7 +892,7 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 		{
 			if (!Grid[Y * GWidth + X])
 			{
-				continue; // seed only from floor cells
+				continue;
 			}
 			for (int32 dy = -WT; dy <= WT; ++dy)
 			{
@@ -974,7 +950,6 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 	const int32 CenterX = (PlacedRoomsSigned.Num() > 0) ? RoomCenters[0].X : GWidth / 2;
 	const int32 CenterY = (PlacedRoomsSigned.Num() > 0) ? RoomCenters[0].Y : GHeight / 2;
 
-	// Flood-fill: identify connected floor regions
 	TArray<int32>			  RegionIds;
 	TArray<TArray<FIntPoint>> Regions;
 	int32					  CenterRegionId = -1;
@@ -995,8 +970,7 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 	const float	 MinYWorld = CenterPoint.Y - (CenterY + 0.5f) * CellSizeVal;
 	const FBox2D OutputBounds(FVector2D(MinXWorld, MinYWorld), FVector2D(MinXWorld + GWidth * CellSizeVal, MinYWorld + GHeight * CellSizeVal));
 
-	// ConvertGridToDiagram uses the inherited Bounds for world-space vertex positions; set it to the
-	// output frame for that call, then restore so Generate() does not mutate caller-configured state.
+	// ConvertGridToDiagram reads the inherited Bounds, so swap in the output frame and restore it afterwards.
 	const FBox2D SavedBounds = Bounds;
 	Bounds = OutputBounds;
 	FLayoutDiagram2D Diagram = ConvertGridToDiagram(Grid, GWidth, GHeight);

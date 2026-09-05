@@ -24,10 +24,8 @@ struct PROCEDURALGEOMETRY_API FDrunkardWalkPlacedRoom
 };
 
 /**
- * Debug/visualization data from the drunkard walk generation pipeline.
- * NOT a stable production API — use Generate() for production callers.
- * This struct exposes raw intermediate state for visualization and testing.
- * Fields and layout may change between tasks without backward compatibility guarantees.
+ * Raw intermediate state of the drunkard walk pipeline, for visualization and testing. Production callers
+ * use Generate() instead; this layout carries no compatibility guarantee.
  */
 struct PROCEDURALGEOMETRY_API FDrunkardWalkGridData
 {
@@ -47,7 +45,7 @@ struct PROCEDURALGEOMETRY_API FDrunkardWalkGridData
 	int32							GridHeight;
 	float							CellSize;
 	bool							bDegradedResolution = false; // true when cell size was enlarged to fit the cell budget
-	FLayoutDiagram2D				Diagram;					 // Final output (existing)
+	FLayoutDiagram2D				Diagram;					 // Final merged diagram
 };
 
 UCLASS()
@@ -71,13 +69,11 @@ class PROCEDURALGEOMETRY_API UDrunkardWalkGenerator2D final : public ULayoutGene
 public:
 	UDrunkardWalkGenerator2D();
 
-	// Covariant base class overrides
 	virtual UDrunkardWalkGenerator2D* SetBounds(const FBox2D& InBounds) override;
 	virtual UDrunkardWalkGenerator2D* SetSeed(const FString& InSeed) override;
 	virtual UDrunkardWalkGenerator2D* SetGridSize(int32 InSize) override;
 	virtual UDrunkardWalkGenerator2D* SetCenter(const FVector2D& InCenter) override;
 
-	// Generator-specific config
 	UDrunkardWalkGenerator2D* SetRoomTypes(const TArray<FRoomTypeConfig>& InRoomTypes);
 	UDrunkardWalkGenerator2D* SetCorridorLengthRange(int32 InMin, int32 InMax);
 
@@ -106,7 +102,6 @@ public:
 	/** Applies a fully resolved parameter set in one call. */
 	UDrunkardWalkGenerator2D* ApplyResolvedParams(const FDrunkardWalkResolvedParams& Params);
 
-	// Generation
 	virtual FLayoutDiagram2D Generate() override;
 
 	/** Returns full intermediate grid data including placed rooms and regions. For visualization/testing only. */
@@ -117,9 +112,8 @@ private:
 	FDrunkardWalkGridData GenerateInternal();
 
 	/**
-	 * Expands RoomTypes into a flat queue of type indices (one entry per room, count = Weight) and
-	 * optionally shuffles it with Fisher-Yates so the placement order varies per seed.
-	 * Extracted so it can be verified in isolation from the full walk pipeline.
+	 * Expands RoomTypes into a flat queue of type indices (one entry per room, count = Weight) and optionally
+	 * shuffles it with Fisher-Yates so the placement order varies per seed.
 	 */
 	static TArray<int32> BuildRoomQueue(const TArray<FRoomTypeConfig>& RoomTypes, bool bShuffle, FRandomStream& RandomStream);
 };

@@ -5,10 +5,7 @@
 
 namespace
 {
-	/**
-	 * Cells needed to span Extent at InCellSize. Evaluated in double and clamped, so a non-finite or absurd extent
-	 * cannot narrow into a negative cell count on its way into an allocation.
-	 */
+	/** Cells needed to span Extent at InCellSize, evaluated in double so an absurd extent cannot narrow negative. */
 	int64 GeomLib_ProjectGridAxis(double Extent, double InCellSize)
 	{
 		const double Cells = FMath::CeilToDouble(Extent / InCellSize);
@@ -20,10 +17,8 @@ namespace
 	}
 
 	/**
-	 * Doubles InOutCellSize until the projected grid fits CellBudget, so every grid in this file shares one finite
-	 * guard, one clamp and one pass bound. Each pass halves both axis counts, so any finite extent reaches the
-	 * budget within a few dozen passes; the pass bound is the backstop that keeps a caller from spinning here.
-	 * A caller that still exceeds CellBudget on return has an input no cell size can accommodate and must bail.
+	 * Doubles InOutCellSize until the projected grid fits CellBudget. A caller still over budget on return has an
+	 * input no cell size can accommodate and must bail.
 	 */
 	void GeomLib_CoarsenToCellBudget(double ExtentX, double ExtentY, int64 CellBudget, double& InOutCellSize, int64& OutNumX, int64& OutNumY)
 	{
@@ -94,12 +89,8 @@ bool FGeometryUtils::ClipPolygonByHalfPlane(
 		return InPrevSide / Denominator;
 	};
 
-	// A crossing point that lands on one of the edge's own endpoints must be emitted once, not twice:
-	// that endpoint is already appended in its own right (Prev by the previous iteration, Curr by the
-	// branch below), so the interpolated copy is a zero-length edge that every downstream degeneracy
-	// filter then has to compensate for. The guard is expressed on Alpha rather than on a world-space
-	// distance because Alpha is scale-free: the same threshold holds for a 10-unit cell and for a
-	// 100000-unit bounds box.
+	// A crossing that lands on an edge endpoint must be emitted once: that endpoint is already appended in its own
+	// right, so the interpolated copy is a zero-length edge. The guard is on Alpha because Alpha is scale-free.
 	constexpr double CoincidentAlpha = UE_DOUBLE_KINDA_SMALL_NUMBER;
 
 	for (const FVector2D& Curr : OutPolygon)
@@ -145,7 +136,7 @@ bool FGeometryUtils::PointInPolygon(const TArray<FVector2D>& PolygonVertices, co
 		return false;
 	}
 
-	// Use winding number algorithm
+	// Winding-number test.
 	int32		WindingNumber = 0;
 	const int32 NumVertices = PolygonVertices.Num();
 
@@ -156,11 +147,11 @@ bool FGeometryUtils::PointInPolygon(const TArray<FVector2D>& PolygonVertices, co
 
 		if (V1.Y <= Point.Y)
 		{
-			if (V2.Y > Point.Y) // Upward crossing
+			if (V2.Y > Point.Y)
 			{
-				// Cross product in double to match the clipping pipeline and stay consistent on near-collinear edges.
+				// The cross product is taken in double to match the clipping pipeline on near-collinear edges.
 				const double CrossProduct = (double(V2.X) - V1.X) * (double(Point.Y) - V1.Y) - (double(V2.Y) - V1.Y) * (double(Point.X) - V1.X);
-				if (CrossProduct > 0.0) // Point is left of edge
+				if (CrossProduct > 0.0)
 				{
 					++WindingNumber;
 				}
@@ -168,11 +159,10 @@ bool FGeometryUtils::PointInPolygon(const TArray<FVector2D>& PolygonVertices, co
 		}
 		else
 		{
-			if (V2.Y <= Point.Y) // Downward crossing
+			if (V2.Y <= Point.Y)
 			{
-				// Cross product in double to match the clipping pipeline and stay consistent on near-collinear edges.
 				const double CrossProduct = (double(V2.X) - V1.X) * (double(Point.Y) - V1.Y) - (double(V2.Y) - V1.Y) * (double(Point.X) - V1.X);
-				if (CrossProduct < 0.0) // Point is right of edge
+				if (CrossProduct < 0.0)
 				{
 					--WindingNumber;
 				}
@@ -212,7 +202,6 @@ bool FGeometryUtils::MaxInscribedCircle(const TArray<FVector2D>& PolygonVertices
 		return false;
 	}
 
-	// Get polygon bounding box
 	FVector2D MinBounds, MaxBounds;
 	GetPolygonBounds(PolygonVertices, MinBounds, MaxBounds);
 
@@ -231,22 +220,18 @@ bool FGeometryUtils::MaxInscribedCircle(const TArray<FVector2D>& PolygonVertices
 		}
 	};
 
-	// Priority queue for cells (max-heap by potential)
 	TArray<FCell> CellQueue;
 
-	// Initial grid size
 	const float GridSize = FMath::Min(MaxBounds.X - MinBounds.X, MaxBounds.Y - MinBounds.Y) / 4.0f;
 
-	// Degenerate (collinear / zero-area) polygon: one axis has zero extent, so the cell size is 0 and the grid
-	// below has no finite cell count. There is no inscribed circle of positive radius for such a polygon, so bail.
+	// A collinear polygon has zero extent on one axis and no inscribed circle of positive radius.
 	if (!(GridSize > UE_KINDA_SMALL_NUMBER))
 	{
 		return false;
 	}
 
-	// Cell i sits at MinBounds + i * CellSize rather than at a stepped position, so cells stay distinct however far
-	// the polygon is from the origin. A step below the representable spacing at those coordinates makes every cell
-	// identical, which no addressing scheme can rescue — reject it.
+	// Cell i sits at MinBounds + i * CellSize so cells stay distinct however far the polygon is from the origin; a
+	// step below the representable spacing there makes every cell identical and cannot be rescued.
 	const double MaxMagnitude =
 		FMath::Max(FMath::Max(FMath::Abs(MinBounds.X), FMath::Abs(MaxBounds.X)), FMath::Max(FMath::Abs(MinBounds.Y), FMath::Abs(MaxBounds.Y)));
 	double CellSizeD = GridSize;
@@ -261,11 +246,8 @@ bool FGeometryUtils::MaxInscribedCircle(const TArray<FVector2D>& PolygonVertices
 		return false;
 	}
 
-	// A sliver polygon (one axis thousands of times longer than the other) projects a seed grid whose cell count is
-	// bounded only by that ratio, so coarsen the cells until it fits. The budget is far below the rasterization
-	// ceiling in GridBudget.h because a cell here is a 32-byte FCell carrying an eagerly evaluated point-in-polygon
-	// distance, not one byte of a mask; coarsening only lowers the starting resolution, which the subdivision loop
-	// below recovers where it matters.
+	// A sliver polygon projects a seed grid bounded only by its axis ratio, so coarsen until it fits. The budget sits
+	// far below the GridBudget.h ceiling because a cell here is an FCell with an eager point-in-polygon distance.
 	constexpr int64 SeedGridBudget = 65'536;
 
 	int64 NumX = 0;
@@ -277,14 +259,12 @@ bool FGeometryUtils::MaxInscribedCircle(const TArray<FVector2D>& PolygonVertices
 		return false;
 	}
 
-	// Start with bounding box center
 	FCell BestCell(GetPolygonCentroid(PolygonVertices), 0, PolygonVertices);
 
 	// Max-heap by potential: the best candidate is always the top, so subdividing one cell costs a push per child
 	// instead of re-sorting the whole queue.
 	auto ByDescendingPotential = [](const FCell& A, const FCell& B) { return A.Potential > B.Potential; };
 
-	// Create initial grid
 	const float HalfCell = static_cast<float>(CellSizeD * 0.5);
 	CellQueue.Reserve(static_cast<int32>(NumX * NumY));
 
@@ -306,19 +286,16 @@ bool FGeometryUtils::MaxInscribedCircle(const TArray<FVector2D>& PolygonVertices
 
 	CellQueue.Heapify(ByDescendingPotential);
 
-	// Main polylabel loop
 	while (CellQueue.Num() > 0 && CellQueue.HeapTop().Potential - BestCell.Distance > Epsilon)
 	{
 		FCell CurrentCell = CellQueue.HeapTop();
 		CellQueue.HeapPopDiscard(ByDescendingPotential);
 
-		// Don't subdivide further if we can't possibly get better
 		if (CurrentCell.Potential - BestCell.Distance <= Epsilon)
 		{
 			continue;
 		}
 
-		// Subdivide cell into four
 		const float NewHalfSize = CurrentCell.HalfSize * 0.5f;
 		if (NewHalfSize < Epsilon)
 		{
@@ -359,14 +336,11 @@ void FGeometryUtils::PoissonDiskSampling(
 		return;
 	}
 
-	// Get polygon bounds
 	FVector2D MinBounds, MaxBounds;
 	GetPolygonBounds(PolygonVertices, MinBounds, MaxBounds);
 
-	// Grid for spatial acceleration. Its natural cell size holds at most one point per cell, so the cell count is a
-	// function of the bounds alone and is unrelated to the MaxPoints the sampler can ever store: a kilometre-scale
-	// bounds asks for billions of buckets, which overflows an int32 product into TArray::SetNum and otherwise dies
-	// in the allocator. Tie the bucket budget to MaxPoints and coarsen the cells until the grid fits it.
+	// The acceleration grid cell count follows the bounds alone, not MaxPoints, so a kilometre-scale bounds would
+	// overflow an int32 product into TArray::SetNum; the bucket budget is tied to MaxPoints instead.
 	const int64 BucketBudget = FMath::Clamp(static_cast<int64>(MaxPoints) * 64, static_cast<int64>(1024), PGGrid::MaxGridCells);
 
 	// Computed at float width, matching the cell size every caller under the budget receives.
@@ -383,9 +357,8 @@ void FGeometryUtils::PoissonDiskSampling(
 
 	if (CellSizeD > RequestedCellSize)
 	{
-		// A bucket is only an address for the rejection test, and NeighborRing below is derived from the cell size so
-		// the searched ring always spans Radius. The emitted points are therefore the same at any bucket size, which
-		// is why this is a lifecycle fact and not a designer-actionable degradation.
+		// NeighborRing is derived from the cell size, so the searched ring always spans Radius and the emitted points
+		// are the same at any bucket size.
 		UE_LOG(LogRoguelikeGeometry,
 			Verbose,
 			TEXT("[Geometry] PoissonDiskSampling: acceleration grid coarsened from cell %.3f to %.3f to fit %lld buckets for MaxPoints=%d "
@@ -400,11 +373,9 @@ void FGeometryUtils::PoissonDiskSampling(
 	const int32 GridWidth = static_cast<int32>(GridWidth64);
 	const int32 GridHeight = static_cast<int32>(GridHeight64);
 
-	// Two points within Radius of each other differ by at most this many buckets on either axis. At the natural cell
-	// size that is the classic 2-cell ring; a coarsened grid needs a narrower ring, never a wider one.
+	// Two points within Radius differ by at most this many buckets per axis; a coarser grid needs a narrower ring.
 	const int32 NeighborRing = FMath::FloorToInt(Radius / CellSize) + 1;
 
-	// Grid to store point indices per cell
 	TArray<TArray<int32>> Grid;
 	Grid.SetNum(GridWidth * GridHeight);
 
@@ -416,7 +387,6 @@ void FGeometryUtils::PoissonDiskSampling(
 		return Y * GridWidth + X;
 	};
 
-	// Find initial point inside polygon
 	FVector2D InitialPoint;
 	bool	  bFoundInitial = false;
 
@@ -436,14 +406,12 @@ void FGeometryUtils::PoissonDiskSampling(
 		return;
 	}
 
-	// Add initial point
 	OutPoints.Add(InitialPoint);
 	Grid[GetGridIndex(InitialPoint)].Add(0);
 
 	TArray<int32> ActivePoints;
 	ActivePoints.Add(0);
 
-	// Main Poisson disk sampling loop
 	const int32 MaxCandidatesPerPoint = 30;
 
 	while (ActivePoints.Num() > 0 && OutPoints.Num() < MaxPoints)
@@ -456,19 +424,16 @@ void FGeometryUtils::PoissonDiskSampling(
 
 		for (int32 Candidate = 0; Candidate < MaxCandidatesPerPoint; ++Candidate)
 		{
-			// Generate candidate in annulus [Radius, 2*Radius]
 			const float Angle = RandomStream.FRandRange(0, 2.0f * PI);
 			const float Distance = RandomStream.FRandRange(Radius, 2.0f * Radius);
 
 			const FVector2D CandidatePoint = ActivePoint + FVector2D(FMath::Cos(Angle) * Distance, FMath::Sin(Angle) * Distance);
 
-			// Check if candidate is inside polygon
 			if (!PointInPolygon(PolygonVertices, CandidatePoint))
 			{
 				continue;
 			}
 
-			// Check distance to existing points in nearby grid cells
 			bool		bTooClose = false;
 			const int32 CandidateGridX = FMath::FloorToInt((CandidatePoint.X - MinBounds.X) / CellSize);
 			const int32 CandidateGridY = FMath::FloorToInt((CandidatePoint.Y - MinBounds.Y) / CellSize);
@@ -499,7 +464,6 @@ void FGeometryUtils::PoissonDiskSampling(
 
 			if (!bTooClose)
 			{
-				// Add valid candidate
 				const int32 NewPointIndex = OutPoints.Add(CandidatePoint);
 				Grid[GetGridIndex(CandidatePoint)].Add(NewPointIndex);
 				ActivePoints.Add(NewPointIndex);
@@ -510,7 +474,6 @@ void FGeometryUtils::PoissonDiskSampling(
 
 		if (!bFoundValidCandidate)
 		{
-			// Remove this active point as it can't generate more candidates
 			ActivePoints.RemoveAt(ActiveIndex);
 		}
 	}
@@ -534,17 +497,13 @@ void FGeometryUtils::ChaikinSubdivide(TArray<FVector2D>& Vertices, int32 Iterati
 			const FVector2D& P0 = Vertices[i];
 			const FVector2D& P1 = Vertices[(i + 1) % N];
 
-			// Q = 3/4 * P0 + 1/4 * P1
 			Subdivided.Add(P0 * 0.75f + P1 * 0.25f);
-			// R = 1/4 * P0 + 3/4 * P1
 			Subdivided.Add(P0 * 0.25f + P1 * 0.75f);
 		}
 
 		Vertices = MoveTemp(Subdivided);
 	}
 }
-
-// Helper functions
 
 void FGeometryUtils::GetPolygonBounds(const TArray<FVector2D>& PolygonVertices, FVector2D& OutMin, FVector2D& OutMax)
 {
@@ -568,7 +527,6 @@ float FGeometryUtils::DistanceToLineSegment(const FVector2D& Point, const FVecto
 	const float LineLengthSq = LineVector.SizeSquared();
 	if (LineLengthSq < UE_SMALL_NUMBER)
 	{
-		// Line is effectively a point
 		return FVector2D::Distance(Point, LineStart);
 	}
 
@@ -731,8 +689,7 @@ void FGeometryUtils::OffsetPolylineToRibbon(const TArray<FVector2D>& Polyline, c
 	for (int32 i = 1; i < N - 1; ++i)
 	{
 		const FVector2D Averaged = (SegNormal(i - 1, i) + SegNormal(i, i + 1)).GetSafeNormal();
-		// At an exact 180-degree reversal the two segment normals cancel to zero, which would pinch the
-		// ribbon to zero width. Fall back to the incoming segment's perpendicular so the width is preserved.
+		// At an exact 180-degree reversal the segment normals cancel, so fall back to the incoming perpendicular.
 		Nrm[i] = Averaged.IsNearlyZero() ? SegNormal(i - 1, i) : Averaged;
 	}
 	const float H = Width * 0.5f;

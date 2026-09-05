@@ -19,10 +19,8 @@ FDrunkardWalkResolvedParams FDrunkardWalkConfig::Resolve() const
 	Params.bShuffleRoomOrder = bShuffleRoomOrder;
 	Params.BranchProbability = FMath::Clamp(BranchProbability, 0.0f, 1.0f);
 
-	// Copy and clamp room types; drop entries that ask for nothing at all. A type with Weight <= 0 but Min > 0 is a
-	// mandatory-count entry, not a degenerate one: dropping it here would keep it out of the Mins array
-	// ResolveForTotal builds and silently void the Min guarantee. Min is honoured only on that path — the counts this
-	// function reports are the authored weights, so a Min-only type comes back at zero here.
+	// A type with Weight <= 0 but Min > 0 is a mandatory-count entry and must survive for ResolveForTotal; the counts
+	// reported here are the authored weights, so a Min-only type comes back at zero.
 	Params.RoomTypes.Reserve(RoomTypes.Num());
 	int32 TotalRooms = 0;
 	for (const FRoomTypeConfig& Type : RoomTypes)
@@ -65,14 +63,10 @@ FDrunkardWalkResolvedParams FDrunkardWalkConfig::Resolve() const
 
 FDrunkardWalkResolvedParams FDrunkardWalkConfig::ResolveForTotal(const int32 TotalRooms) const
 {
-	// Validate all non-room params via the base Resolve() first, then redistribute room counts
-	// using the pool-aware weighted distribution: mandatory minimums first, then proportionally
-	// by weight up to per-type maximums.
 	FDrunkardWalkResolvedParams Params = Resolve();
 
 	if (Params.RoomTypes.Num() == 0 || TotalRooms <= 0)
 	{
-		// No types or no rooms requested — clear any absolute counts from Resolve() and return.
 		for (FRoomTypeConfig& Type : Params.RoomTypes)
 		{
 			Type.Weight = 0;
@@ -81,7 +75,6 @@ FDrunkardWalkResolvedParams FDrunkardWalkConfig::ResolveForTotal(const int32 Tot
 		return Params;
 	}
 
-	// Build Weight / Min / Max arrays from the resolved (clamped) types.
 	TArray<int32> Weights, Mins, Maxes;
 	Weights.Reserve(Params.RoomTypes.Num());
 	Mins.Reserve(Params.RoomTypes.Num());
@@ -96,13 +89,11 @@ FDrunkardWalkResolvedParams FDrunkardWalkConfig::ResolveForTotal(const int32 Tot
 		TotalWeight += W;
 	}
 
-	// Distribute TotalRooms: mandatory minimums first, then proportionally by weight up to Max.
 	TArray<int32> Counts;
 	if (TotalWeight == 0)
 	{
-		// Every surviving type is a Min-only entry, so there is nothing to distribute the leftover budget by. The
-		// pool distributor would hand the whole budget out equally in that case; a mandatory count is a floor the
-		// author asked for, not a share of the pool, so place exactly the minimums instead.
+		// With no weights the distributor would split the budget equally, but a Min is a floor rather than a share of
+		// the pool, so place exactly the minimums.
 		Counts.SetNumZeroed(Params.RoomTypes.Num());
 		int32 TotalMin = 0;
 		for (int32 i = 0; i < Params.RoomTypes.Num(); ++i)
@@ -111,7 +102,7 @@ FDrunkardWalkResolvedParams FDrunkardWalkConfig::ResolveForTotal(const int32 Tot
 			TotalMin += Counts[i];
 		}
 
-		// Minimums that overrun the budget still have to fit inside it; the distributor scales them down for us.
+		// Minimums that overrun the budget still have to fit inside it; the distributor scales them down.
 		if (TotalMin > TotalRooms)
 		{
 			ProceduralGeometry_DistributePoolByWeight(Counts, Weights, Mins, Maxes, TotalRooms);

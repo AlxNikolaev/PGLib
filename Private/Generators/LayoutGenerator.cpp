@@ -53,13 +53,12 @@ ULayoutGenerator* ULayoutGenerator::SetGridSize(int32 InSize)
 
 void ULayoutGenerator::InitializeRandomStream()
 {
-	// The class default object must not invent a seed: NewObject copies Seed off it, so every instance would start
-	// out already seeded, its own substitution would never run, and every unseeded generator in the process would
-	// silently share one layout with no way to tell that from a seed the caller chose.
+	// The class default object must not invent a seed: NewObject copies Seed off it, so every unseeded generator in
+	// the process would silently share one layout.
 	if (Seed.IsEmpty() && !HasAnyFlags(RF_ClassDefaultObject))
 	{
-		// Stored back on the member so both diagram conversions carry it out on FLayoutDiagram2D::Seed: pasting that
-		// string into Seed is the only way to see this layout again.
+		// Stored back on the member so the diagram carries it out on FLayoutDiagram2D::Seed; pasting that string
+		// into Seed is the only way to see this layout again.
 		Seed = FGuid::NewGuid().ToString(EGuidFormats::Digits);
 		bSeedSubstituted = true;
 	}
@@ -99,22 +98,17 @@ FLayoutDiagram2D ULayoutGenerator::ConvertGridToDiagram(const TArray<bool>& Grid
 	const float MinX = Bounds.Min.X;
 	const float MinY = Bounds.Min.Y;
 
-	// Exterior means "this floor cell is on the outside of the layout", the raster equivalent of a Voronoi cell
-	// touching the diagram bounds, which is what the location-growth guards downstream read it as. The raster is
-	// padded, so the outermost ring of floor sits one cell in from the array edge and a plain "is on the array
-	// edge" test can never be true. A floor cell therefore counts as exterior when it is on the raster edge, or
-	// when one of its four orthogonal neighbours is a non-floor cell that itself lies on the raster edge.
-	// Widening this to "adjacent to any void" would make a one-cell-wide corridor exterior along its whole length
-	// and the guards would then refuse to grow a location along it.
+	// Exterior means the floor cell is on the outside of the layout, which is what the location-growth guards read
+	// it as. The raster is padded, so a plain "on the array edge" test can never be true; a cell counts as exterior
+	// when it is on the raster edge or orthogonally touches a non-floor cell that is. Widening this to "adjacent to
+	// any void" would mark a one-cell-wide corridor exterior along its whole length and block growth along it.
 	auto LiesOnRasterEdge = [GridWidth, GridHeight](int32 X, int32 Y) { return X == 0 || X == GridWidth - 1 || Y == 0 || Y == GridHeight - 1; };
 
-	// Map from grid linear index to cell index
 	TArray<int32> GridToCellIndex;
 	GridToCellIndex.Init(INDEX_NONE, GridWidth * GridHeight);
 
-	// One cell per carved grid position, so a near-budget grid emits on the order of a million of them. Sizing the
-	// array up front removes the reallocation chain, and building each cell in place removes a per-cell copy of its
-	// vertex and neighbour arrays.
+	// A near-budget grid emits on the order of a million cells, so the array is sized up front and each cell is
+	// built in place rather than copied.
 	int32 CarvedCount = 0;
 	for (const bool bIsFloor : Grid)
 	{
@@ -125,7 +119,6 @@ FLayoutDiagram2D ULayoutGenerator::ConvertGridToDiagram(const TArray<bool>& Grid
 	}
 	Diagram.Cells.Reserve(CarvedCount);
 
-	// First pass: create cells for carved grid positions
 	for (int32 Y = 0; Y < GridHeight; ++Y)
 	{
 		for (int32 X = 0; X < GridWidth; ++X)
@@ -142,17 +135,17 @@ FLayoutDiagram2D ULayoutGenerator::ConvertGridToDiagram(const TArray<bool>& Grid
 			FLayoutCell2D& Cell = Diagram.Cells.AddDefaulted_GetRef();
 			Cell.CellIndex = CellIndex;
 
-			// CCW rectangle vertices
+			// Rectangle corners, wound CCW.
 			const float X0 = MinX + X * CellSize;
 			const float Y0 = MinY + Y * CellSize;
 			const float X1 = MinX + (X + 1) * CellSize;
 			const float Y1 = MinY + (Y + 1) * CellSize;
 
 			Cell.Vertices.SetNum(4);
-			Cell.Vertices[0] = FVector2D(X0, Y0); // bottom-left
-			Cell.Vertices[1] = FVector2D(X1, Y0); // bottom-right
-			Cell.Vertices[2] = FVector2D(X1, Y1); // top-right
-			Cell.Vertices[3] = FVector2D(X0, Y1); // top-left
+			Cell.Vertices[0] = FVector2D(X0, Y0);
+			Cell.Vertices[1] = FVector2D(X1, Y0);
+			Cell.Vertices[2] = FVector2D(X1, Y1);
+			Cell.Vertices[3] = FVector2D(X0, Y1);
 
 			Cell.Center = FVector2D(MinX + (X + 0.5f) * CellSize, MinY + (Y + 0.5f) * CellSize);
 
@@ -175,7 +168,6 @@ FLayoutDiagram2D ULayoutGenerator::ConvertGridToDiagram(const TArray<bool>& Grid
 		}
 	}
 
-	// Second pass: compute neighbors and find center cell
 	float		BestCenterDistSq = FLT_MAX;
 	const int32 DX[] = { 1, -1, 0, 0 };
 	const int32 DY[] = { 0, 0, 1, -1 };

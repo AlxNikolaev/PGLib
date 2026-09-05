@@ -10,26 +10,18 @@
 
 namespace VoronoiGenerator2DInternal
 {
-	/**
-	 * Below this site count the index costs more to build than the clips it saves, and every diagram this
-	 * small is off the hot path anyway.
-	 */
+	/** Below this site count the index costs more to build than the clips it saves. */
 	static constexpr int32 MinSitesForSpatialPruning = 64;
 
 	/**
-	 * Relative slack on the "this bisector cannot reach the polygon" test. The bound is exact in real
-	 * arithmetic, so only the rounding of the midpoint and the normalized normal can flip a site that sits
-	 * exactly on the threshold; a margin seven orders of magnitude above double rounding keeps such a site on
-	 * the clipped side of the decision, where it behaves exactly as the exhaustive path treats it.
+	 * Relative slack on the bisector-cannot-reach test: the bound is exact in real arithmetic, so only rounding of
+	 * the midpoint and normal can flip a site on the threshold, and this margin keeps it on the clipped side.
 	 */
 	static constexpr double SecurityRadiusMargin = 1.0 + 1e-9;
 
 	/**
-	 * Clips between two measurements of the working polygon's radius while that radius is still too large to
-	 * prune anything. Clipping only ever keeps points of the polygon it was handed, so the radius never grows and
-	 * a measurement taken a few clips ago is a valid (merely loose) bound; measuring after every clip costs more
-	 * than the clips it saves in that regime, and the only consequence of the delay is that pruning starts at
-	 * most this many clips late.
+	 * Clips between radius measurements while the radius is still too large to prune. Clipping never grows the
+	 * radius, so a stale measurement is a valid loose bound and pruning starts at most this many clips late.
 	 */
 	static constexpr int32 RadiusRefreshStride = 8;
 
@@ -72,8 +64,7 @@ float FVoronoiCell2D::GetArea() const
 	if (Vertices.Num() < 3)
 		return 0.0f;
 
-	// Accumulate the shoelace sum in double to avoid float cancellation at fine substrate scale,
-	// mirroring the precision used by the clipping pipeline; return float only at the end.
+	// The shoelace sum accumulates in double to avoid float cancellation at fine substrate scale.
 	double Area = 0.0;
 	for (int32 i = 0; i < Vertices.Num(); ++i)
 	{
@@ -233,8 +224,8 @@ int32 FVoronoiDiagram2D::FindClosestCellBySite(const FVector2D& Point) const
 
 int32 FVoronoiDiagram2D::FindCellContainingPoint(const FVector2D& Point, const FVoronoiSiteIndex& Index) const
 {
-	// Cells are clipped to Bounds, so nothing outside can be contained. The margin keeps a point sitting on the
-	// boundary in the slow path rather than answering INDEX_NONE for a cell edge the scan would have matched.
+	// Cells are clipped to Bounds, so nothing outside can be contained; the margin keeps a boundary point in the
+	// slow path instead of answering INDEX_NONE.
 	if (Bounds.bIsValid)
 	{
 		const double Margin = FMath::Max(1.0, static_cast<double>(Bounds.GetExtent().GetMax()) * 1e-4);
@@ -285,9 +276,8 @@ void UVoronoiGenerator2D::EnsureSeeded()
 			*Seed);
 	}
 
-	// Unconditional: Seed is reflected and RandomStream is not, so an instance that received its Seed by property copy
-	// or deserialization would otherwise draw from FRandomStream(0) while reporting that Seed. Re-deriving here also
-	// makes a second generate call on one instance reproduce the first.
+	// Unconditional because Seed is reflected and RandomStream is not: an instance that received its Seed by property
+	// copy or deserialization would otherwise draw from FRandomStream(0) while reporting that Seed.
 	InitializeRandomStream();
 }
 
@@ -336,7 +326,6 @@ FVoronoiDiagram2D UVoronoiGenerator2D::GenerateRandomSites(const int32 NumSites,
 
 	if (bUsePoissonDisc)
 	{
-		// Build a polygon from the bounding box and use the shared O(N) Poisson-disc sampler.
 		const TArray<FVector2D> BoundsPolygon = {
 			Bounds.Min, FVector2D(Bounds.Max.X, Bounds.Min.Y), Bounds.Max, FVector2D(Bounds.Min.X, Bounds.Max.Y)
 		};
@@ -383,9 +372,7 @@ void UVoronoiGenerator2D::ComputeVoronoiCells(const TArray<FVector2D>& Sites, FV
 		FVector2D(Bounds.Max.X, Bounds.Max.Y),
 		FVector2D(Bounds.Min.X, Bounds.Max.Y) };
 
-	// Read once into a local so no single diagram is built half one way and half the other. The cvar is
-	// render-thread-safe, so the value a worker sees is the value that was set rather than a stale shadow, and a
-	// toggle therefore reaches every diagram of the next generation together.
+	// Read once into a local so no single diagram is built half one way and half the other.
 	const bool bUsePruning =
 		CVarVoronoiSpatialPruning.GetValueOnAnyThread() != 0 && Sites.Num() >= VoronoiGenerator2DInternal::MinSitesForSpatialPruning;
 
@@ -410,8 +397,7 @@ void UVoronoiGenerator2D::ComputeVoronoiCells(const TArray<FVector2D>& Sites, FV
 
 	{
 		const float Tolerance = VoronoiUtils::ComputeAdjacencyTolerance(Bounds);
-		// Bucket granularity = Tolerance/2 so true clip coincidences (< Tolerance apart) hash
-		// within ±2 buckets of each other; the 3x3 neighborhood probe below catches them all.
+		// Bucket granularity Tolerance/2 puts coincident vertices within two buckets, which the 3x3 probe covers.
 		const double QuantStep = static_cast<double>(Tolerance) * 0.5;
 
 		using FVertKey = TPair<int64, int64>;
@@ -430,8 +416,7 @@ void UVoronoiGenerator2D::ComputeVoronoiCells(const TArray<FVector2D>& Sites, FV
 			}
 		}
 
-		// Tally candidate pairs via exact-bucket sharing first, then probe the 3x3 neighborhood
-		// to catch coincident vertices that straddle a bucket boundary.
+		// The 3x3 probe catches coincident vertices that straddle a bucket boundary.
 		TSet<TPair<int32, int32>> CandidatePairs;
 		for (auto& [VertKey, CellList] : VertexToCells)
 		{
@@ -459,12 +444,9 @@ void UVoronoiGenerator2D::ComputeVoronoiCells(const TArray<FVector2D>& Sites, FV
 			}
 		}
 
-		// Verify each candidate pair by finding two DISTINCT A-vertices that each coincide with some
-		// B-vertex. Counting coincident PAIRS instead would let a single corner contact qualify as soon
-		// as one polygon carries that corner twice, so two cells meeting at a zero-width point would be
-		// recorded as neighbours. Both the coincidence and the far-apart test go through
-		// VoronoiUtils::VerticesCoincide at the same tolerance VoronoiUtils::GetSharedEdge will use, so
-		// adjacency cannot claim an edge that edge retrieval then refuses to return.
+		// A pair needs two distinct A-vertices that each coincide with a B-vertex; counting coincident pairs would
+		// let a single corner contact qualify. The tolerance matches GetSharedEdge, so adjacency cannot claim an
+		// edge that edge retrieval then refuses to return.
 		TArray<FVector2D> SharedVerts;
 		for (const TPair<int32, int32>& Pair : CandidatePairs)
 		{
@@ -513,26 +495,10 @@ void UVoronoiGenerator2D::ComputeVoronoiCells(const TArray<FVector2D>& Sites, FV
 	}
 }
 
-// The cell of a site is the bounds box clipped by the perpendicular bisector against every other site, which
-// is quadratic in the site count. Most of those clips do nothing: once the working polygon fits inside a disc
-// of radius R around the site, a site farther than 2R away has its bisector at least R from the site, so every
-// vertex tests on the inside and FGeometryUtils::ClipPolygonByHalfPlane copies the polygon through element for
-// element. Skipping such a site therefore removes an operation that provably had no effect — the clips that do
-// happen, their order, and the floating-point history of every vertex are unchanged, which is what lets the
-// indexed and exhaustive paths be compared vertex-for-vertex rather than within a tolerance.
-//
-// R is remeasured as the cell shrinks, so the test tightens, and FVoronoiSiteIndex answers "lowest site index at
-// or above j within 2R" without touching the sites outside that disc. The saving depends on the site ORDER, not
-// just the count: for sites whose index order is unrelated to their position (Poisson sampling, random
-// placement) the polygon collapses within the first handful of clips and the rest of the scan disappears. Sites
-// emitted in row-major grid order keep a wide working polygon until the scan reaches their own row, so their
-// early clips genuinely do cut and are all performed, and only the remainder of the scan is skipped.
-//
-// This stays quadratic in the worst case and is meant to: the equivalence is bit-for-bit because a skipped site
-// could not have touched the CURRENT polygon, and while that polygon is still near the bounds box almost nothing
-// qualifies. Deciding from the FINAL cell radius instead would prune far more, but a clip that only grazes an
-// intermediate polygon still rewrites the endpoints later clips intersect against, so dropping it moves
-// surviving vertices by a rounding step and the level with them.
+// The cell is the bounds box clipped by the bisector against every other site. A site farther than 2R from a working
+// polygon of radius R cannot cut it, so skipping it drops a provable no-op and leaves the clips performed, their order
+// and every vertex bit-for-bit identical to the exhaustive path. Deciding from the final cell radius would prune far
+// more, but a clip that only grazes an intermediate polygon still moves the vertices later clips intersect against.
 void UVoronoiGenerator2D::ComputeCellForSite(
 	FVoronoiCell2D& OutCell, int32 SiteIndex, const TArray<FVector2D>& AllSites, const FVoronoiSiteIndex* Index) const
 {
@@ -546,9 +512,7 @@ void UVoronoiGenerator2D::ComputeCellForSite(
 	const FVector2D Site = AllSites[SiteIndex];
 	double			PolygonRadiusSq = VoronoiGenerator2DInternal::MaxRadiusSq(OutCell.Vertices, Site);
 
-	// Above this radius the index answers "the next index", which the loop counter already holds, so asking it
-	// would cost a square root and two bucket lookups for nothing. Testing the radius against the limit first is
-	// what keeps the unprunable stretch of the scan as cheap as the exhaustive path it has to match.
+	// Above this radius the index only answers with the next index, which the loop counter already holds.
 	const double NarrowingRadiusSqLimit = Index ? Index->GetNarrowingRadiusSqLimit() : 0.0;
 	int32		 ClipsSinceRadiusRefresh = 0;
 
@@ -577,8 +541,7 @@ void UVoronoiGenerator2D::ComputeCellForSite(
 		const FVector2D MidPoint = (Site + AllSites[j]) * 0.5f;
 		const FVector2D Normal = (AllSites[j] - Site).GetSafeNormal();
 
-		// Coincident sites yield a zero-length normal; the perpendicular bisector is undefined, so the
-		// half-plane clip would be a no-op that leaves two overlapping degenerate cells. Skip it.
+		// Coincident sites yield a zero-length normal, leaving the perpendicular bisector undefined.
 		if (Normal.IsNearlyZero())
 		{
 			continue;
@@ -596,9 +559,7 @@ void UVoronoiGenerator2D::ComputeCellForSite(
 
 		if (Index)
 		{
-			// Once the query is narrowing, the polygon is small and a tighter radius immediately buys more
-			// skipping, so it is worth measuring every clip. Before that the measurement only has to be frequent
-			// enough to notice the radius crossing the limit.
+			// While narrowing, a tighter radius immediately buys more skipping, so measure after every clip.
 			++ClipsSinceRadiusRefresh;
 			if (bNarrowed || ClipsSinceRadiusRefresh >= VoronoiGenerator2DInternal::RadiusRefreshStride)
 			{
@@ -634,8 +595,7 @@ void UVoronoiGenerator2D::RelaxSites(TArray<FVector2D>& Sites)
 			Sites.Num(),
 			TempDiagram.Cells.Num()))
 	{
-		// UE_LOG is the shipping-build fallback: ensureMsgf is stripped in Shipping builds,
-		// so this log line ensures the error is always captured regardless of build config.
+		// ensureMsgf is stripped in Shipping, so the same message goes to the log.
 		UE_LOG(LogRoguelikeGeometry,
 			Error,
 			TEXT("[Voronoi] RelaxSites: cell count mismatch — expected %d, got %d; skipping relaxation step"),

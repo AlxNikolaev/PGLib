@@ -24,36 +24,26 @@ enum class ECaveRegionScale : uint8
 	Massive UMETA(DisplayName = "Massive", ToolTip = "Grid density multiplier 20, min region 100 cells. Maximum detail, slower generation."),
 };
 
-/**
- * Result of parsing a B/S notation rule string (e.g., "B678/S345").
- * Contains the parsed birth/survival arrays on success, or an error message on failure.
- */
+/** Result of parsing a B/S notation rule string; ErrorMessage is empty on success. */
 struct PROCEDURALGEOMETRY_API FCARuleParseResult
 {
 	TArray<int32> BirthRule;
 	TArray<int32> SurvivalRule;
 	FString		  ErrorMessage;
 
-	/** Returns true if the parse succeeded (no error). */
 	bool IsValid() const { return ErrorMessage.IsEmpty(); }
 };
 
 /**
- * Parses a B/S notation rule string into birth and survival neighbor-count arrays.
- *
- * Expected format: "B{digits}/S{digits}" — e.g., "B678/S345", "b12/s0345".
- * Case-insensitive. All whitespace is stripped before parsing.
- * An empty string is valid and returns empty arrays (caller should use defaults).
- *
- * @param RuleString  The rule string to parse (e.g., "B678/S345"). Empty string is valid.
- * @return            Parse result with arrays populated on success, or ErrorMessage on failure.
+ * Parses a B/S notation rule string into birth and survival neighbour-count arrays. The format is
+ * "B{digits}/S{digits}", case-insensitive, with all whitespace stripped. An empty string is valid and
+ * returns empty arrays for the caller to replace with defaults.
  */
 PROCEDURALGEOMETRY_API FCARuleParseResult ParseBSRuleNotation(const FString& RuleString);
 
 /**
- * Resolved CA parameters ready for consumption by UCellularAutomataGenerator2D.
- * Plain C++ struct — NOT a USTRUCT. Defined here because it is the return type of
- * FCellularAutomataConfig::Resolve(), so callers in other modules must see its definition.
+ * Resolved CA parameters for UCellularAutomataGenerator2D. Deliberately not a USTRUCT, and defined here
+ * because it is the return type of FCellularAutomataConfig::Resolve() that other modules must see.
  */
 struct PROCEDURALGEOMETRY_API FCellularAutomataResolvedParams
 {
@@ -67,18 +57,13 @@ struct PROCEDURALGEOMETRY_API FCellularAutomataResolvedParams
 };
 
 /**
- * Encapsulates all cellular automata cave generation parameters behind designer-friendly semantic controls.
- * Designers select a visual preset (ECaveStyle) and adjust sliders for openness, smoothness, and scale.
- * An advanced override mode allows direct B/S rule specification for power users.
- *
- * Call Resolve() to convert semantic parameters into raw CA parameters for the generator.
+ * Designer-facing cellular automata cave parameters: a visual preset plus openness, smoothness and scale,
+ * with an advanced mode that takes a raw B/S rule instead. Resolve() turns these into generator parameters.
  */
 USTRUCT(BlueprintType)
 struct PROCEDURALGEOMETRY_API FCellularAutomataConfig
 {
 	GENERATED_BODY()
-
-	// --- Core semantic parameters (designer-facing) ---
 
 	UPROPERTY(EditAnywhere,
 		BlueprintReadWrite,
@@ -111,8 +96,6 @@ struct PROCEDURALGEOMETRY_API FCellularAutomataConfig
 		Category = "Cave Generation",
 		meta = (ToolTip = "If true, the center region is always kept even if below MinRegionSize."))
 	bool bKeepCenterRegion = true;
-
-	// --- Advanced override (power-user mode) ---
 
 	UPROPERTY(EditAnywhere,
 		BlueprintReadWrite,
@@ -160,8 +143,6 @@ struct PROCEDURALGEOMETRY_API FCellularAutomataConfig
 			ToolTip = "Regions with fewer cells than this are culled (unless center region is kept)."))
 	int32 AdvancedMinRegionSize = 20;
 
-	// --- Corridor carving ---
-
 	UPROPERTY(EditAnywhere,
 		BlueprintReadWrite,
 		Category = "Cave Generation|Corridors",
@@ -174,6 +155,6 @@ struct PROCEDURALGEOMETRY_API FCellularAutomataConfig
 		meta = (ClampMin = 1, ClampMax = 5, ToolTip = "Width of carved corridors in grid cells."))
 	int32 CorridorWidth = 2;
 
-	/** Resolves semantic parameters into raw CA parameters for the generator. Pure function, no side effects. */
+	/** Resolves semantic parameters into raw CA parameters for the generator. */
 	FCellularAutomataResolvedParams Resolve() const;
 };

@@ -70,16 +70,14 @@ protected:
 private:
 	bool bCenterSet = false;
 
-	/** Set when InitializeRandomStream had to invent a seed; cleared by SetSeed. Not a UPROPERTY: it describes this
-	 *  instance's provenance, and copying it off the class default object would say the wrong thing. */
+	/** Set when InitializeRandomStream had to invent a seed; cleared by SetSeed. Not a UPROPERTY: it describes
+	 *  this instance's provenance, which must not be copied off the class default object. */
 	bool bSeedSubstituted = false;
 
 public:
 	/**
-	 * Smallest cell size a raster generator will run at, and the single owner of that floor. Below it the
-	 * cell count for any usable location blows past the grid budget, so SetGridSize raises the request to
-	 * this value; callers that clamp their own request must clamp against this constant or their log line
-	 * reports a resolution the generator never used.
+	 * Smallest cell size a raster generator will run at, and the single owner of that floor: SetGridSize raises
+	 * any smaller request to this value, so callers that clamp their own request must clamp against it too.
 	 */
 	static constexpr int32 MinGridCellSize = 10;
 
@@ -104,17 +102,16 @@ protected:
 	void InitializeRandomStream();
 
 	/**
-	 * Reports a seed this generator invented for itself. Called where the diagram is built rather than where the
-	 * stream is seeded, because generators seed in their constructor too and a construction is not yet a layout.
+	 * Reports a seed this generator invented for itself. Called where the diagram is built, not where the stream
+	 * is seeded, because generators also seed in their constructor and a construction is not yet a layout.
 	 */
 	void WarnIfSeedSubstituted() const;
 
 	FVector2D		 ClampToBounds(const FVector2D& Point) const;
 	FLayoutDiagram2D ConvertGridToDiagram(const TArray<bool>& Grid, int32 GridWidth, int32 GridHeight) const;
 
-	/** BFS flood-fill over a boolean grid. Populates OutRegionIds and OutRegions, and identifies which
-	 *  region contains the cell (CenterX, CenterY) via OutCenterRegionId (-1 if that cell is a wall).
-	 * Used by CA and DrunkardWalk generators. */
+	/** BFS flood-fill over a boolean grid. OutCenterRegionId is the region containing (CenterX, CenterY),
+	 *  or -1 when that cell is a wall. */
 	static void FloodFillRegions(const TArray<bool>& Grid,
 		int32										 GridWidth,
 		int32										 GridHeight,

@@ -3,20 +3,9 @@
 #include "CoreMinimal.h"
 
 /**
- * Distributes Total count across OutCounts proportionally to Weights.
- *
- * Rules:
- *   - If Total <= 0 or Weights is empty, OutCounts is filled with zeros.
- *   - If all weights are zero, distributes equal shares (integer division per type;
- *     last element absorbs the remainder so the sum is exactly Total).
- *   - Otherwise, distributes proportionally using round-to-nearest; last element
- *     absorbs the rounding remainder, guaranteeing sum(OutCounts) == Total exactly.
- *   - All output counts are >= 0.
- *
- * OutCounts is resized to Weights.Num() on return.
- *
- * Used by FDrunkardWalkConfig::ResolveForTotal().
- * Defined as an inline free function to avoid a translation-unit dependency.
+ * Distributes Total across OutCounts proportionally to Weights, resizing OutCounts to Weights.Num().
+ * All-zero weights give equal shares. The last element absorbs the rounding remainder, so sum(OutCounts)
+ * is exactly Total and every count is >= 0.
  */
 inline void ProceduralGeometry_DistributeCountsByWeight(TArray<int32>& OutCounts, const TArray<int32>& Weights, int32 Total)
 {
@@ -30,7 +19,6 @@ inline void ProceduralGeometry_DistributeCountsByWeight(TArray<int32>& OutCounts
 
 	int32 AllocatedSoFar = 0;
 
-	// Compute total weight.
 	int32 TotalWeight = 0;
 	for (int32 W : Weights)
 	{
@@ -39,8 +27,7 @@ inline void ProceduralGeometry_DistributeCountsByWeight(TArray<int32>& OutCounts
 
 	if (TotalWeight > 0)
 	{
-		// Proportional distribution: round-to-nearest for all types except the last.
-		// The last type absorbs the rounding remainder so sum == Total exactly.
+		// Round-to-nearest for every type except the last, which absorbs the remainder.
 		const float Scale = static_cast<float>(Total) / static_cast<float>(TotalWeight);
 		for (int32 i = 0; i < Num - 1; ++i)
 		{
@@ -51,8 +38,7 @@ inline void ProceduralGeometry_DistributeCountsByWeight(TArray<int32>& OutCounts
 	}
 	else
 	{
-		// All weights zero — distribute equally (integer division per type).
-		// Last type absorbs the remainder.
+		// All weights zero: equal integer shares, with the last type absorbing the remainder.
 		const int32 PerType = Total / Num;
 		for (int32 i = 0; i < Num - 1; ++i)
 		{
@@ -61,28 +47,13 @@ inline void ProceduralGeometry_DistributeCountsByWeight(TArray<int32>& OutCounts
 		}
 	}
 
-	// Last element absorbs remainder to guarantee sum(OutCounts) == Total.
 	OutCounts[Num - 1] = FMath::Max(0, Total - AllocatedSoFar);
 }
 
 /**
- * Pool-aware weighted distribution with per-type minimum guarantees and maximum caps.
- *
- * Algorithm:
- *   1. Assigns each type its mandatory Min count.
- *   2. If sum(Mins) >= Budget, scales Mins down proportionally so sum(OutCounts) == Budget.
- *   3. Otherwise distributes the remaining budget (Budget - sum(Mins)) proportionally by
- *      Weight, respecting each type's Max cap (Max == 0 means uncapped). The last eligible
- *      type absorbs the rounding remainder (within its cap).
- *
- * All four arrays must have the same length (Weights.Num()).
- * OutCounts is resized to Weights.Num() on return.
- * sum(OutCounts) == Budget when possible; may be less if all caps are hit before Budget
- * is fully distributed.
- *
- * Used by FDrunkardWalkConfig::ResolveForTotal()
- * to implement the two-phase room-count distribution (mandatory minimums first, then
- * weight-proportional fill up to optional per-type maximums).
+ * Pool-aware weighted distribution: every type gets its Min first, then the remaining budget is spread by
+ * Weight within each type's Max cap (Max == 0 means uncapped). All four arrays share Weights.Num() length,
+ * and OutCounts is resized to it. sum(OutCounts) == Budget unless every cap is hit first.
  */
 inline void ProceduralGeometry_DistributePoolByWeight(
 	TArray<int32>& OutCounts, const TArray<int32>& Weights, const TArray<int32>& Mins, const TArray<int32>& Maxes, int32 Budget)
@@ -95,7 +66,6 @@ inline void ProceduralGeometry_DistributePoolByWeight(
 		return;
 	}
 
-	// Step 1: assign mandatory minimums.
 	int32 TotalMin = 0;
 	for (int32 i = 0; i < Num; ++i)
 	{
@@ -105,8 +75,7 @@ inline void ProceduralGeometry_DistributePoolByWeight(
 
 	if (TotalMin >= Budget)
 	{
-		// Mins already fill (or exceed) the budget — scale them down proportionally so
-		// sum(OutCounts) == Budget, then clamp each to its Max cap.
+		// Mins already fill the budget: scale them down proportionally, then clamp each to its Max cap.
 		TArray<int32> MinWeights;
 		MinWeights.SetNumZeroed(Num);
 		for (int32 i = 0; i < Num; ++i)
@@ -125,10 +94,9 @@ inline void ProceduralGeometry_DistributePoolByWeight(
 		return;
 	}
 
-	// Step 2: distribute the remaining budget by Weight, respecting per-type Max caps.
 	const int32 Remaining = Budget - TotalMin;
 
-	// Per-type headroom = room between current count and cap (0 cap → effectively unlimited).
+	// Headroom is the room between the current count and the cap; a cap of 0 means unlimited.
 	TArray<int32> Headroom;
 	Headroom.SetNumUninitialized(Num);
 	for (int32 i = 0; i < Num; ++i)
@@ -137,7 +105,6 @@ inline void ProceduralGeometry_DistributePoolByWeight(
 		Headroom[i] = (MaxI <= 0) ? (Remaining + 1) : FMath::Max(0, MaxI - OutCounts[i]);
 	}
 
-	// Eligible weights: types with positive weight AND positive headroom.
 	TArray<int32> EligWeights;
 	EligWeights.SetNumZeroed(Num);
 	int32 TotalEligWeight = 0;
@@ -152,7 +119,7 @@ inline void ProceduralGeometry_DistributePoolByWeight(
 
 	if (TotalEligWeight <= 0)
 	{
-		// No eligible types with positive weight — distribute equally among types with headroom.
+		// No positive weight anywhere: distribute equally among the types that still have headroom.
 		int32 EligCount = 0;
 		for (int32 i = 0; i < Num; ++i)
 		{
@@ -185,7 +152,7 @@ inline void ProceduralGeometry_DistributePoolByWeight(
 		return;
 	}
 
-	// Find the last eligible index (it absorbs the rounding remainder).
+	// The last eligible index absorbs the rounding remainder.
 	int32 LastEligIdx = INDEX_NONE;
 	for (int32 i = Num - 1; i >= 0; --i)
 	{
@@ -215,7 +182,6 @@ inline void ProceduralGeometry_DistributePoolByWeight(
 		Allocated += Add;
 	}
 
-	// Last eligible absorbs remainder (capped at its headroom).
 	const int32 LastAdd = FMath::Clamp(Remaining - Allocated, 0, Headroom[LastEligIdx]);
 	OutCounts[LastEligIdx] += LastAdd;
 }

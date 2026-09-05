@@ -4,7 +4,6 @@
 
 namespace
 {
-	/** Preset data for a single ECaveStyle entry. */
 	struct FCaveStylePreset
 	{
 		TArray<int32> BirthRule;
@@ -12,7 +11,6 @@ namespace
 		float		  BaseFillProbability;
 	};
 
-	/** Returns the preset B/S rules and base fill probability for the given cave style. */
 	const FCaveStylePreset& GetCaveStylePreset(ECaveStyle Style)
 	{
 		static const FCaveStylePreset OpenChambers = { { 5, 6, 7, 8 }, { 4, 5, 6, 7, 8 }, 0.40f };
@@ -38,14 +36,12 @@ namespace
 		}
 	}
 
-	/** Preset data for a single ECaveRegionScale entry. */
 	struct FCaveRegionScalePreset
 	{
 		int32 GridDensityMultiplier;
 		int32 MinRegionSize;
 	};
 
-	/** Returns the grid density and min region size for the given region scale. */
 	FCaveRegionScalePreset GetRegionScalePreset(ECaveRegionScale Scale)
 	{
 		switch (Scale)
@@ -65,16 +61,7 @@ namespace
 
 } // namespace
 
-/**
- * Parses a digit group (e.g., "678") into an array of neighbor counts.
- * Validates that each character is a digit 0-8, with no duplicates.
- *
- * @param Digits     The digit characters to parse
- * @param GroupName  Human-readable name for error messages (e.g., "birth" or "survival")
- * @param OutArray   Output array to populate with parsed digits
- * @param OutError   Populated with error description if parsing fails
- * @return           true if parsing succeeded, false on error
- */
+/** Parses a digit group such as "678" into neighbor counts, rejecting anything outside 0-8 and any duplicate. */
 static bool ParseDigitGroup(const FString& Digits, const TCHAR* GroupName, TArray<int32>& OutArray, FString& OutError)
 {
 	TSet<int32> Seen;
@@ -112,7 +99,7 @@ FCARuleParseResult ParseBSRuleNotation(const FString& RuleString)
 {
 	FCARuleParseResult Result;
 
-	// Strip ALL whitespace (leading, trailing, and internal)
+	// Internal whitespace is stripped too, not just the ends.
 	FString Cleaned;
 	Cleaned.Reserve(RuleString.Len());
 	for (const TCHAR Char : RuleString)
@@ -123,24 +110,22 @@ FCARuleParseResult ParseBSRuleNotation(const FString& RuleString)
 		}
 	}
 
-	// Empty string is valid — means "use defaults"
+	// An empty string is valid and means "use defaults".
 	if (Cleaned.IsEmpty())
 	{
 		UE_LOG(LogRoguelikeGeometry, Verbose, TEXT("[CAConfig] ParseBSRuleNotation: empty input, caller should use defaults"));
 		return Result;
 	}
 
-	// Convert to uppercase for case-insensitive parsing
+	// Uppercased so the rest of the parse can be case-sensitive.
 	Cleaned.ToUpperInline();
 
-	// Must start with 'B'
 	if (Cleaned.Len() == 0 || Cleaned[0] != TEXT('B'))
 	{
 		Result.ErrorMessage = TEXT("Rule must start with 'B'");
 		return Result;
 	}
 
-	// Find '/S' separator
 	const int32 SeparatorIndex = Cleaned.Find(TEXT("/S"), ESearchCase::CaseSensitive, ESearchDir::FromStart, 1);
 	if (SeparatorIndex == INDEX_NONE)
 	{
@@ -148,11 +133,10 @@ FCARuleParseResult ParseBSRuleNotation(const FString& RuleString)
 		return Result;
 	}
 
-	// Extract digit groups
-	const FString BirthDigits = Cleaned.Mid(1, SeparatorIndex - 1); // Between 'B' and '/'
-	const FString SurvivalDigits = Cleaned.Mid(SeparatorIndex + 2); // After '/S'
+	const FString BirthDigits = Cleaned.Mid(1, SeparatorIndex - 1);
+	const FString SurvivalDigits = Cleaned.Mid(SeparatorIndex + 2);
 
-	// Empty digit groups are invalid — use empty string for defaults instead
+	// An empty group is an error; the way to ask for defaults is an empty rule string.
 	if (BirthDigits.IsEmpty())
 	{
 		Result.ErrorMessage = TEXT("Birth rule must contain at least one digit");
@@ -164,7 +148,6 @@ FCARuleParseResult ParseBSRuleNotation(const FString& RuleString)
 		return Result;
 	}
 
-	// Parse birth digits
 	if (!ParseDigitGroup(BirthDigits, TEXT("birth"), Result.BirthRule, Result.ErrorMessage))
 	{
 		Result.BirthRule.Empty();
@@ -172,7 +155,6 @@ FCARuleParseResult ParseBSRuleNotation(const FString& RuleString)
 		return Result;
 	}
 
-	// Parse survival digits
 	if (!ParseDigitGroup(SurvivalDigits, TEXT("survival"), Result.SurvivalRule, Result.ErrorMessage))
 	{
 		Result.BirthRule.Empty();
@@ -233,10 +215,7 @@ FCellularAutomataResolvedParams FCellularAutomataConfig::Resolve() const
 		Params.BirthRule = StylePreset.BirthRule;
 		Params.SurvivalRule = StylePreset.SurvivalRule;
 
-		// Modulate fill probability based on Openness:
-		// At Openness=0.0, fill increases by 0.15 (more walls)
-		// At Openness=0.5, fill is unchanged (base value)
-		// At Openness=1.0, fill decreases by 0.15 (more open)
+		// Openness shifts fill by +/-0.15 around the preset base: 0 = more walls, 0.5 = base, 1 = more open.
 		Params.FillProbability = FMath::Clamp(StylePreset.BaseFillProbability + (0.5f - Openness) * 0.30f, 0.1f, 0.9f);
 
 		Params.Iterations = Smoothness;

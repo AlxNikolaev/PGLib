@@ -5,10 +5,8 @@
 #include "CellularAutomataGenerator2D.generated.h"
 
 /**
- * Debug/visualization data from the cellular automata generation pipeline.
- * NOT a stable production API — use Generate() for production callers.
- * This struct exposes raw intermediate state for visualization and testing.
- * Fields and layout may change between tasks without backward compatibility guarantees.
+ * Raw intermediate state of the cellular automata pipeline, for visualization and testing. Production
+ * callers use Generate() instead; this layout carries no compatibility guarantee.
  */
 struct PROCEDURALGEOMETRY_API FCellularAutomataGridData
 {
@@ -21,7 +19,7 @@ struct PROCEDURALGEOMETRY_API FCellularAutomataGridData
 	int32					  GridHeight;
 	float					  CellSize;
 	bool					  bDegradedResolution = false; // true when cell size was enlarged to fit the cell budget
-	FLayoutDiagram2D		  Diagram;					   // The final merged diagram (existing output)
+	FLayoutDiagram2D		  Diagram;					   // Final merged diagram
 };
 
 UCLASS()
@@ -39,13 +37,11 @@ class PROCEDURALGEOMETRY_API UCellularAutomataGenerator2D final : public ULayout
 public:
 	UCellularAutomataGenerator2D();
 
-	// Covariant base class overrides
 	virtual UCellularAutomataGenerator2D* SetBounds(const FBox2D& InBounds) override;
 	virtual UCellularAutomataGenerator2D* SetSeed(const FString& InSeed) override;
 	virtual UCellularAutomataGenerator2D* SetGridSize(int32 InSize) override;
 	virtual UCellularAutomataGenerator2D* SetCenter(const FVector2D& InCenter) override;
 
-	// Generator-specific config
 	UCellularAutomataGenerator2D* SetFillProbability(float InProbability);
 	UCellularAutomataGenerator2D* SetIterations(int32 InIterations);
 	UCellularAutomataGenerator2D* SetBirthRule(const TArray<int32>& InRule);
@@ -53,29 +49,19 @@ public:
 	UCellularAutomataGenerator2D* SetMinRegionSize(int32 InSize);
 	UCellularAutomataGenerator2D* SetKeepCenterRegion(bool bKeep);
 
-	// Generation
 	virtual FLayoutDiagram2D Generate() override;
 
 	/** Returns the full intermediate grid data including the final diagram. For visualization and testing only. */
 	FCellularAutomataGridData GenerateWithGridData();
 
 	/**
-	 * Carves corridors between disconnected surviving regions in the grid.
-	 * Modifies Grid and RegionIds in place. Does not recompute Diagram — caller must call RebuildDiagram() afterward.
-	 *
-	 * @param GridData      The grid data to modify (from GenerateWithGridData()).
-	 * @param Probability   Per-pair probability of carving a corridor (0 = never, 1 = always).
-	 * @param Width         Width of the carved corridor in grid cells.
-	 * @param InRandomStream Random stream for probabilistic decisions.
+	 * Carves corridors between disconnected surviving regions, modifying Grid and RegionIds in place.
+	 * Probability applies per region pair and Width is in grid cells. Diagram is left stale, so the caller
+	 * must run RebuildDiagram() afterwards.
 	 */
 	static void CarveCorridors(FCellularAutomataGridData& GridData, float Probability, int32 Width, FRandomStream& InRandomStream);
 
-	/**
-	 * Rebuilds GridData.Diagram from the current Grid/RegionIds/Regions state.
-	 * Call after CarveCorridors() to produce a valid diagram reflecting the modified grid.
-	 *
-	 * @param GridData The grid data whose Diagram field will be regenerated.
-	 */
+	/** Rebuilds GridData.Diagram from the current Grid/RegionIds/Regions state. */
 	void RebuildDiagram(FCellularAutomataGridData& GridData);
 
 private:

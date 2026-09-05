@@ -24,7 +24,7 @@ class PROCEDURALGEOMETRY_API ADrunkardWalk2DVisualizer : public AActor
 	FBox2D Bounds;
 
 	/** Non-empty by default: an empty seed makes the generator invent a fresh one on every construction, so the
-	 *  preview would redraw a different dungeon on every property tweak and the overlay would name no seed at all. */
+	 *  preview would redraw a different dungeon on every property tweak. */
 	UPROPERTY(EditInstanceOnly)
 	FString Seed = TEXT("Preview");
 
@@ -33,8 +33,6 @@ class PROCEDURALGEOMETRY_API ADrunkardWalk2DVisualizer : public AActor
 
 	UPROPERTY(EditInstanceOnly, meta = (ToolTip = "Dungeon generation parameters. Resolved into raw DW values on construction."))
 	FDrunkardWalkConfig Config;
-
-	// --- Visualization layer toggles ---
 
 	UPROPERTY(EditInstanceOnly, Category = "Visualization Layers", meta = (ToolTip = "Wall/floor cell fill."))
 	bool bShowGridCells = true;

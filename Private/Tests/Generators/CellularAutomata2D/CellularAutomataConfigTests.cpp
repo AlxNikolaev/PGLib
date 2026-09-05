@@ -3,7 +3,6 @@
 
 #if WITH_DEV_AUTOMATION_TESTS
 
-// Test 1: Default-constructed config resolves to NaturalCaves preset values
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FCellularAutomataConfigDefaultResolveTest, "ProceduralGeometry.CellularAutomataConfig.DefaultResolve", DefaultTestFlags)
 
@@ -41,7 +40,6 @@ bool FCellularAutomataConfigDefaultResolveTest::RunTest(const FString& Parameter
 	return true;
 }
 
-// Test 2: All 5 ECaveStyle presets resolve to correct B/S rules and base fill probability
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FCellularAutomataConfigAllStylePresetsTest, "ProceduralGeometry.CellularAutomataConfig.AllStylePresets", DefaultTestFlags)
 
@@ -91,29 +89,24 @@ bool FCellularAutomataConfigAllStylePresetsTest::RunTest(const FString& Paramete
 	return true;
 }
 
-// Test 3: Openness slider adjusts fill probability correctly
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FCellularAutomataConfigOpennessTest, "ProceduralGeometry.CellularAutomataConfig.OpennessModulatesFillProbability", DefaultTestFlags)
 
 bool FCellularAutomataConfigOpennessTest::RunTest(const FString& Parameters)
 {
-	// NaturalCaves has base fill 0.45
 	FCellularAutomataConfig Config;
 	Config.CaveStyle = ECaveStyle::NaturalCaves;
 
-	// Openness=0.0 -> fill = 0.45 + (0.5 - 0.0) * 0.30 = 0.45 + 0.15 = 0.60
+	// Fill = style base + (0.5 - Openness) * 0.30, clamped to [0.1, 0.9].
 	Config.Openness = 0.0f;
 	TestEqual("Openness=0 fill", Config.Resolve().FillProbability, 0.60f, 0.01f);
 
-	// Openness=0.5 -> fill = 0.45 + 0.0 = 0.45 (no change)
 	Config.Openness = 0.5f;
 	TestEqual("Openness=0.5 fill", Config.Resolve().FillProbability, 0.45f, 0.01f);
 
-	// Openness=1.0 -> fill = 0.45 + (0.5 - 1.0) * 0.30 = 0.45 - 0.15 = 0.30
 	Config.Openness = 1.0f;
 	TestEqual("Openness=1.0 fill", Config.Resolve().FillProbability, 0.30f, 0.01f);
 
-	// Verify clamping: TightTunnels base fill 0.55, Openness=0.0 -> 0.55 + 0.15 = 0.70 (within [0.1, 0.9])
 	Config.CaveStyle = ECaveStyle::TightTunnels;
 	Config.Openness = 0.0f;
 	TestEqual("TightTunnels Openness=0 fill", Config.Resolve().FillProbability, 0.70f, 0.01f);
@@ -121,7 +114,6 @@ bool FCellularAutomataConfigOpennessTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// Test 4: Smoothness value passes through directly as Iterations
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FCellularAutomataConfigSmoothnessTest, "ProceduralGeometry.CellularAutomataConfig.SmoothnessMapsToIterations", DefaultTestFlags)
 
@@ -141,7 +133,6 @@ bool FCellularAutomataConfigSmoothnessTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// Test 5: All ECaveRegionScale presets resolve to correct values
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FCellularAutomataConfigRegionScaleTest, "ProceduralGeometry.CellularAutomataConfig.AllRegionScalePresets", DefaultTestFlags)
 
@@ -176,7 +167,6 @@ bool FCellularAutomataConfigRegionScaleTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// Test 6: Advanced override bypasses semantic parameters
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FCellularAutomataConfigAdvancedOverrideTest, "ProceduralGeometry.CellularAutomataConfig.AdvancedOverrideBypassesSemantic", DefaultTestFlags)
 
@@ -194,7 +184,6 @@ bool FCellularAutomataConfigAdvancedOverrideTest::RunTest(const FString& Paramet
 
 	FCellularAutomataResolvedParams Params = Config.Resolve();
 
-	// Birth/survival should come from advanced strings, NOT from OpenChambers preset
 	TestEqual("BirthRule count", Params.BirthRule.Num(), 2);
 	if (Params.BirthRule.Num() == 2)
 	{
@@ -217,13 +206,11 @@ bool FCellularAutomataConfigAdvancedOverrideTest::RunTest(const FString& Paramet
 	return true;
 }
 
-// Test 7: Resolve integration tests with AdvancedRuleNotation
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FCellularAutomataConfigResolveRuleNotationTest, "ProceduralGeometry.CellularAutomataConfig.ResolveAdvancedRuleNotation", DefaultTestFlags)
 
 bool FCellularAutomataConfigResolveRuleNotationTest::RunTest(const FString& Parameters)
 {
-	// Valid notation resolves correctly
 	{
 		FCellularAutomataConfig Config;
 		Config.bUseAdvancedOverride = true;
@@ -249,7 +236,6 @@ bool FCellularAutomataConfigResolveRuleNotationTest::RunTest(const FString& Para
 		TestEqual("Valid: Iterations", Params.Iterations, 8);
 	}
 
-	// Invalid notation falls back to defaults
 	{
 		FCellularAutomataConfig Config;
 		Config.bUseAdvancedOverride = true;
@@ -277,7 +263,6 @@ bool FCellularAutomataConfigResolveRuleNotationTest::RunTest(const FString& Para
 		TestEqual("Invalid: Iterations still from advanced", Params.Iterations, 8);
 	}
 
-	// Empty notation falls back to defaults
 	{
 		FCellularAutomataConfig Config;
 		Config.bUseAdvancedOverride = true;
@@ -304,13 +289,11 @@ bool FCellularAutomataConfigResolveRuleNotationTest::RunTest(const FString& Para
 	return true;
 }
 
-// Test 10: ParseBSRuleNotation valid inputs — direct parser tests
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FCellularAutomataConfigParserValidTest, "ProceduralGeometry.CellularAutomataConfig.ParseBSRuleNotation_ValidInputs", DefaultTestFlags)
 
 bool FCellularAutomataConfigParserValidTest::RunTest(const FString& Parameters)
 {
-	// Standard valid input
 	{
 		FCARuleParseResult Result = ParseBSRuleNotation(TEXT("B678/S345"));
 		TestTrue("B678/S345 valid", Result.IsValid());
@@ -330,7 +313,6 @@ bool FCellularAutomataConfigParserValidTest::RunTest(const FString& Parameters)
 		}
 	}
 
-	// Case-insensitive
 	{
 		FCARuleParseResult Result = ParseBSRuleNotation(TEXT("b678/s345"));
 		TestTrue("b678/s345 valid", Result.IsValid());
@@ -338,7 +320,6 @@ bool FCellularAutomataConfigParserValidTest::RunTest(const FString& Parameters)
 		TestEqual("lowercase survival count", Result.SurvivalRule.Num(), 3);
 	}
 
-	// Edge: zero is a valid digit
 	{
 		FCARuleParseResult Result = ParseBSRuleNotation(TEXT("B0/S0"));
 		TestTrue("B0/S0 valid", Result.IsValid());
@@ -354,7 +335,6 @@ bool FCellularAutomataConfigParserValidTest::RunTest(const FString& Parameters)
 		}
 	}
 
-	// Empty string: valid, both arrays empty
 	{
 		FCARuleParseResult Result = ParseBSRuleNotation(TEXT(""));
 		TestTrue("empty valid", Result.IsValid());
@@ -362,7 +342,6 @@ bool FCellularAutomataConfigParserValidTest::RunTest(const FString& Parameters)
 		TestEqual("empty survival count", Result.SurvivalRule.Num(), 0);
 	}
 
-	// All whitespace stripped (leading, trailing, internal)
 	{
 		FCARuleParseResult Result = ParseBSRuleNotation(TEXT(" B 6 7 8 / S 3 4 5 "));
 		TestTrue("whitespace stripped valid", Result.IsValid());
@@ -382,7 +361,6 @@ bool FCellularAutomataConfigParserValidTest::RunTest(const FString& Parameters)
 		}
 	}
 
-	// All valid digits
 	{
 		FCARuleParseResult Result = ParseBSRuleNotation(TEXT("B12345678/S012345678"));
 		TestTrue("all digits valid", Result.IsValid());
@@ -393,13 +371,11 @@ bool FCellularAutomataConfigParserValidTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// Test 11: ParseBSRuleNotation invalid inputs — direct parser tests
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FCellularAutomataConfigParserInvalidTest, "ProceduralGeometry.CellularAutomataConfig.ParseBSRuleNotation_InvalidInputs", DefaultTestFlags)
 
 bool FCellularAutomataConfigParserInvalidTest::RunTest(const FString& Parameters)
 {
-	// Missing B prefix
 	{
 		FCARuleParseResult Result = ParseBSRuleNotation(TEXT("678/S345"));
 		TestFalse("no B prefix: invalid", Result.IsValid());
@@ -408,14 +384,12 @@ bool FCellularAutomataConfigParserInvalidTest::RunTest(const FString& Parameters
 		TestEqual("no B prefix: survival empty", Result.SurvivalRule.Num(), 0);
 	}
 
-	// Missing / separator
 	{
 		FCARuleParseResult Result = ParseBSRuleNotation(TEXT("B678S345"));
 		TestFalse("no separator: invalid", Result.IsValid());
 		TestTrue("no separator: has error", !Result.ErrorMessage.IsEmpty());
 	}
 
-	// Digit 9 in birth
 	{
 		FCARuleParseResult Result = ParseBSRuleNotation(TEXT("B679/S345"));
 		TestFalse("9 in birth: invalid", Result.IsValid());
@@ -423,7 +397,6 @@ bool FCellularAutomataConfigParserInvalidTest::RunTest(const FString& Parameters
 		TestEqual("9 in birth: birth empty", Result.BirthRule.Num(), 0);
 	}
 
-	// Digit 9 in survival
 	{
 		FCARuleParseResult Result = ParseBSRuleNotation(TEXT("B678/S349"));
 		TestFalse("9 in survival: invalid", Result.IsValid());
@@ -431,63 +404,54 @@ bool FCellularAutomataConfigParserInvalidTest::RunTest(const FString& Parameters
 		TestEqual("9 in survival: survival empty", Result.SurvivalRule.Num(), 0);
 	}
 
-	// Duplicate in birth
 	{
 		FCARuleParseResult Result = ParseBSRuleNotation(TEXT("B668/S345"));
 		TestFalse("dup birth: invalid", Result.IsValid());
 		TestTrue("dup birth: has error", !Result.ErrorMessage.IsEmpty());
 	}
 
-	// Duplicate in survival
 	{
 		FCARuleParseResult Result = ParseBSRuleNotation(TEXT("B678/S335"));
 		TestFalse("dup survival: invalid", Result.IsValid());
 		TestTrue("dup survival: has error", !Result.ErrorMessage.IsEmpty());
 	}
 
-	// Invalid char in birth
 	{
 		FCARuleParseResult Result = ParseBSRuleNotation(TEXT("B6x8/S345"));
 		TestFalse("invalid char birth: invalid", Result.IsValid());
 		TestTrue("invalid char birth: has error", !Result.ErrorMessage.IsEmpty());
 	}
 
-	// Invalid char in survival
 	{
 		FCARuleParseResult Result = ParseBSRuleNotation(TEXT("B678/S3a5"));
 		TestFalse("invalid char survival: invalid", Result.IsValid());
 		TestTrue("invalid char survival: has error", !Result.ErrorMessage.IsEmpty());
 	}
 
-	// No /S section
 	{
 		FCARuleParseResult Result = ParseBSRuleNotation(TEXT("B678"));
 		TestFalse("no /S: invalid", Result.IsValid());
 		TestTrue("no /S: has error", !Result.ErrorMessage.IsEmpty());
 	}
 
-	// No B section (starts with /)
 	{
 		FCARuleParseResult Result = ParseBSRuleNotation(TEXT("/S345"));
 		TestFalse("no B: invalid", Result.IsValid());
 		TestTrue("no B: has error", !Result.ErrorMessage.IsEmpty());
 	}
 
-	// B/S — empty digit groups (both)
 	{
 		FCARuleParseResult Result = ParseBSRuleNotation(TEXT("B/S"));
 		TestFalse("B/S: invalid", Result.IsValid());
 		TestTrue("B/S: has error", !Result.ErrorMessage.IsEmpty());
 	}
 
-	// B/S345 — empty birth digit group
 	{
 		FCARuleParseResult Result = ParseBSRuleNotation(TEXT("B/S345"));
 		TestFalse("B/S345: invalid", Result.IsValid());
 		TestTrue("B/S345: has error", !Result.ErrorMessage.IsEmpty());
 	}
 
-	// B678/S — empty survival digit group
 	{
 		FCARuleParseResult Result = ParseBSRuleNotation(TEXT("B678/S"));
 		TestFalse("B678/S: invalid", Result.IsValid());
@@ -497,7 +461,6 @@ bool FCellularAutomataConfigParserInvalidTest::RunTest(const FString& Parameters
 	return true;
 }
 
-// Test 8: bKeepCenterRegion passes through in both modes
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FCellularAutomataConfigKeepCenterTest, "ProceduralGeometry.CellularAutomataConfig.KeepCenterRegionPassthrough", DefaultTestFlags)
 
@@ -505,27 +468,22 @@ bool FCellularAutomataConfigKeepCenterTest::RunTest(const FString& Parameters)
 {
 	FCellularAutomataConfig Config;
 
-	// Semantic mode: set false
 	Config.bKeepCenterRegion = false;
 	TestFalse("Semantic mode: bKeepCenterRegion=false", Config.Resolve().bKeepCenterRegion);
 
-	// Semantic mode: set true
 	Config.bKeepCenterRegion = true;
 	TestTrue("Semantic mode: bKeepCenterRegion=true", Config.Resolve().bKeepCenterRegion);
 
-	// Advanced mode: set true
 	Config.bUseAdvancedOverride = true;
 	Config.bKeepCenterRegion = true;
 	TestTrue("Advanced mode: bKeepCenterRegion=true", Config.Resolve().bKeepCenterRegion);
 
-	// Advanced mode: set false
 	Config.bKeepCenterRegion = false;
 	TestFalse("Advanced mode: bKeepCenterRegion=false", Config.Resolve().bKeepCenterRegion);
 
 	return true;
 }
 
-// Test 9: Defensive clamping on advanced override values
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FCellularAutomataConfigBoundsValidationTest, "ProceduralGeometry.CellularAutomataConfig.AdvancedOverrideBoundsValidation", DefaultTestFlags)
 
@@ -534,12 +492,10 @@ bool FCellularAutomataConfigBoundsValidationTest::RunTest(const FString& Paramet
 	FCellularAutomataConfig Config;
 	Config.bUseAdvancedOverride = true;
 
-	// GridDensityMultiplier=0 should clamp to 1
 	Config.AdvancedGridDensityMultiplier = 0;
 	Config.AdvancedMinRegionSize = 20;
 	TestEqual("GridDensity=0 clamped to 1", Config.Resolve().GridDensityMultiplier, 1);
 
-	// MinRegionSize=0 should clamp to 1
 	Config.AdvancedGridDensityMultiplier = 10;
 	Config.AdvancedMinRegionSize = 0;
 	TestEqual("MinRegionSize=0 clamped to 1", Config.Resolve().MinRegionSize, 1);
@@ -547,4 +503,4 @@ bool FCellularAutomataConfigBoundsValidationTest::RunTest(const FString& Paramet
 	return true;
 }
 
-#endif // WITH_DEV_AUTOMATION_TESTS
+#endif

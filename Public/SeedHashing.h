@@ -6,8 +6,7 @@ namespace PGSeed
 {
 	/**
 	 * Case-sensitive, stable seed-string hash. GetTypeHash(FString) is a case-insensitive Strihash and
-	 * collides distinct seeds that differ only in case (e.g. "Cave01" / "cave01"), so seeded generation
-	 * must hash through FCrc::StrCrc32 over the raw TCHAR data instead.
+	 * collides seeds that differ only in case, so seeded generation hashes through FCrc::StrCrc32 instead.
 	 */
 	FORCEINLINE uint32 HashSeedString(const FString& Seed)
 	{

@@ -4,11 +4,8 @@
 #include "DrunkardWalkConfig.generated.h"
 
 /**
- * A single room type for room-and-corridor generation.
- * Weight sizes the type's contribution to the placement queue: an absolute instance count under Resolve(),
- * a relative share of a caller-supplied budget under ResolveForTotal().
- * Footprint is expressed in grid cells. Callers may extend this struct with an opaque
- * per-type payload (e.g. a soft reference to type-specific data) without changing the generator.
+ * A single room type for room-and-corridor generation. Weight is an absolute instance count under Resolve()
+ * and a relative share of the caller's budget under ResolveForTotal(); footprints are in grid cells.
  */
 USTRUCT(BlueprintType)
 struct PROCEDURALGEOMETRY_API FRoomTypeConfig
@@ -48,8 +45,8 @@ struct PROCEDURALGEOMETRY_API FRoomTypeConfig
 };
 
 /**
- * Resolved DW parameters ready for consumption by UDrunkardWalkGenerator2D.
- * Plain C++ struct -- NOT a USTRUCT. Return type of FDrunkardWalkConfig::Resolve().
+ * Resolved DW parameters for UDrunkardWalkGenerator2D. Deliberately not a USTRUCT, and defined here because
+ * it is the return type of FDrunkardWalkConfig::Resolve() that other modules must see.
  */
 struct PROCEDURALGEOMETRY_API FDrunkardWalkResolvedParams
 {
@@ -68,14 +65,9 @@ struct PROCEDURALGEOMETRY_API FDrunkardWalkResolvedParams
 };
 
 /**
- * Room-and-corridor dungeon generation parameters.
- *
- * The generator starts in a room, walks a self-avoiding corridor of randomized length, then places
- * the next room from the queue (built from RoomTypes x Weight), picks a fresh exit side, and repeats.
- * It ignores any input bounds — the walk's own geometry defines the extents. Two primary knobs are
- * the grid cell size (set on the generator) and the room queue described here.
- *
- * Call Resolve() to validate/clamp into raw DW parameters for the generator.
+ * Room-and-corridor dungeon generation parameters. The generator alternates rooms from the queue with
+ * self-avoiding corridors and ignores any input bounds: the walk's own geometry defines the extents.
+ * Resolve() validates and clamps these into raw DW parameters.
  */
 USTRUCT(BlueprintType)
 struct PROCEDURALGEOMETRY_API FDrunkardWalkConfig
@@ -162,13 +154,12 @@ struct PROCEDURALGEOMETRY_API FDrunkardWalkConfig
 				"Probability that the next room grows from a random earlier room instead of the most recent one. 0 = a single winding path, 1 = a highly branching tree."))
 	float BranchProbability = 0.0f;
 
-	/** Validates and clamps semantic parameters into raw DW parameters for the generator. Pure function, no side effects. */
+	/** Validates and clamps semantic parameters into raw DW parameters for the generator. */
 	FDrunkardWalkResolvedParams Resolve() const;
 
 	/**
-	 * Like Resolve(), but distributes exactly TotalRooms rooms across types proportionally to their Weight,
-	 * which here is a relative share rather than an absolute count. This is the preferred entry point when the
-	 * total room count is driven by Location Size on the level graph node.
+	 * Like Resolve(), but distributes exactly TotalRooms across types proportionally to their Weight, which
+	 * here is a relative share. Used when the room count is driven by Location Size on the level graph node.
 	 */
 	FDrunkardWalkResolvedParams ResolveForTotal(int32 TotalRooms) const;
 };
