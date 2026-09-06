@@ -1,5 +1,5 @@
 ﻿#include "Generators/Voronoi2D/VoronoiGenerator2D.h"
-#if ENABLE_DRAW_DEBUG
+#if UE_ENABLE_DEBUG_DRAWING
 	#include "DrawDebugHelpers.h"
 #endif
 #include "GeometryUtils/GeometryFunctionLibrary.h"
@@ -85,7 +85,7 @@ bool FVoronoiCell2D::ContainsPoint(const FVector2D& Point) const
 	return FGeometryUtils::PointInPolygon(Vertices, Point);
 }
 
-#if ENABLE_DRAW_DEBUG
+#if UE_ENABLE_DEBUG_DRAWING
 void FVoronoiDiagram2D::DrawDebug(const UWorld* World, const float Duration, const float ZHeight) const
 {
 	if (!World)

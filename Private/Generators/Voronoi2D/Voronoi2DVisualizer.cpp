@@ -3,6 +3,9 @@
 #include "Generators/Voronoi2D/Voronoi2DVisualizer.h"
 
 #include "Generators/Voronoi2D/VoronoiGenerator2D.h"
+#if UE_ENABLE_DEBUG_DRAWING
+	#include "DrawDebugHelpers.h"
+#endif
 
 AVoronoi2DVisualizer::AVoronoi2DVisualizer()
 {
@@ -24,7 +27,7 @@ void AVoronoi2DVisualizer::OnConstruction(const FTransform& Transform)
 		return;
 	}
 
-#if ENABLE_DRAW_DEBUG
+#if UE_ENABLE_DEBUG_DRAWING
 	const auto Layout = Generator->SetBounds(Bounds)->SetSeed(Seed)->GenerateRandomSites(NumSites, bUsePoissonDisc);
 
 	FlushPersistentDebugLines(GetWorld());

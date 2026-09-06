@@ -1,6 +1,9 @@
 ﻿#pragma once
 
 #include "CoreMinimal.h"
+// The debug-draw guard below must test UE_ENABLE_DEBUG_DRAWING, owned here, and not ENABLE_DRAW_DEBUG: only
+// DrawDebugHelpers.h defines the latter, so any translation unit lacking it would compile the declaration away.
+#include "EngineDefines.h"
 #include "VoronoiGenerator2D.generated.h"
 
 class FVoronoiSiteIndex;
@@ -68,7 +71,7 @@ struct PROCEDURALGEOMETRY_API FVoronoiDiagram2D
 	UPROPERTY()
 	FString Seed;
 
-#if ENABLE_DRAW_DEBUG
+#if UE_ENABLE_DEBUG_DRAWING
 	void DrawDebug(const UWorld* World, float Duration = 5.0f, float ZHeight = 0.0f) const;
 #endif
 	int32 FindCellContainingPoint(const FVector2D& Point) const;
