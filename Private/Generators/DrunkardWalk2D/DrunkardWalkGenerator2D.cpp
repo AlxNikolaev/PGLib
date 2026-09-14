@@ -1,4 +1,5 @@
 #include "Generators/DrunkardWalk2D/DrunkardWalkGenerator2D.h"
+#include "SelectionRules.h"
 
 #include "GridBudget.h"
 #include "ProceduralGeometry.h"
@@ -96,7 +97,7 @@ UDrunkardWalkGenerator2D* UDrunkardWalkGenerator2D::SetCenter(const FVector2D& I
 	return this;
 }
 
-UDrunkardWalkGenerator2D* UDrunkardWalkGenerator2D::SetRoomTypes(const TArray<FRoomTypeConfig>& InRoomTypes)
+UDrunkardWalkGenerator2D* UDrunkardWalkGenerator2D::SetResolvedRoomTypes(const TArray<FResolvedRoomType>& InRoomTypes)
 {
 	RoomTypes = InRoomTypes;
 	return this;
@@ -388,7 +389,8 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 
 		for (int32 k = 0; k < Len; ++k)
 		{
-			if (k > 0 && CorridorTurnProbability > 0.0f && StepsSinceTurn >= MinSegment && RandomStream.FRand() < CorridorTurnProbability)
+			if (k > 0 && CorridorTurnProbability > 0.0f && StepsSinceTurn >= MinSegment
+				&& VariatSelection::RollChance(CorridorTurnProbability, RandomStream))
 			{
 				Dir = TurnDir(Dir, RandomStream.FRand() < 0.5f);
 				StepsSinceTurn = 0;
@@ -459,7 +461,8 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 				EndBand = Band;
 			}
 
-			if (bCollectForks && k > 0 && k < Len - 1 && CorridorBranchProbability > 0.0f && RandomStream.FRand() < CorridorBranchProbability)
+			if (bCollectForks && k > 0 && k < Len - 1 && CorridorBranchProbability > 0.0f
+				&& VariatSelection::RollChance(CorridorBranchProbability, RandomStream))
 			{
 				// Seed clear of this band, so a fork starts beside the parent instead of inside it.
 				const FIntPoint ForkDir = TurnDir(Dir, RandomStream.FRand() < 0.5f);
@@ -568,7 +571,7 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 	{
 		// Choose which open room to grow from: a random one when branching, else the most recent (DFS path).
 		int32 SourceIdx;
-		if (BranchProbability > 0.0f && OpenRooms.Num() > 1 && RandomStream.FRand() < BranchProbability)
+		if (BranchProbability > 0.0f && OpenRooms.Num() > 1 && VariatSelection::RollChance(BranchProbability, RandomStream))
 		{
 			SourceIdx = RandomStream.RandRange(0, OpenRooms.Num() - 1);
 		}
@@ -1001,13 +1004,13 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 	return Result;
 }
 
-TArray<int32> UDrunkardWalkGenerator2D::BuildRoomQueue(const TArray<FRoomTypeConfig>& RoomTypes, bool bShuffle, FRandomStream& RandomStream)
+TArray<int32> UDrunkardWalkGenerator2D::BuildRoomQueue(const TArray<FResolvedRoomType>& RoomTypes, bool bShuffle, FRandomStream& RandomStream)
 {
-	// Expand each type by its Weight (resolved absolute count after Resolve()/ResolveForTotal()).
+	// Expand explicitly resolved room counts; authored selection weights never enter this stage.
 	TArray<int32> Queue;
 	for (int32 TypeIdx = 0; TypeIdx < RoomTypes.Num(); ++TypeIdx)
 	{
-		const int32 Count = FMath::Max(0, RoomTypes[TypeIdx].Weight);
+		const int32 Count = FMath::Max(0, RoomTypes[TypeIdx].ResolvedCount);
 		for (int32 i = 0; i < Count; ++i)
 		{
 			Queue.Add(TypeIdx);

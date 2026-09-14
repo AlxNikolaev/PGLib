@@ -5,6 +5,7 @@ public class ProceduralGeometry : ModuleRules
     public ProceduralGeometry(ReadOnlyTargetRules target) : base(target)
     {
         PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
+		PublicDependencyModuleNames.Add("VariatCore");
 
         // Disable unity builds — this module has many small files with file-scoped
         // symbols (test flags, log categories) that collide under unity grouping.

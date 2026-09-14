@@ -53,18 +53,18 @@ class PROCEDURALGEOMETRY_API UDrunkardWalkGenerator2D final : public ULayoutGene
 {
 	GENERATED_BODY()
 
-	TArray<FRoomTypeConfig> RoomTypes;
-	int32					CorridorLengthMin;
-	int32					CorridorLengthMax;
-	int32					CorridorWidthMin;
-	int32					CorridorWidthMax;
-	float					CorridorTurnProbability;
-	float					CorridorBranchProbability;
-	int32					RoomBorderMargin;
-	int32					WallThickness;
-	int32					MaxPlacementAttemptsPerExit;
-	bool					bShuffleRoomOrder;
-	float					BranchProbability;
+	TArray<FResolvedRoomType> RoomTypes;
+	int32					  CorridorLengthMin;
+	int32					  CorridorLengthMax;
+	int32					  CorridorWidthMin;
+	int32					  CorridorWidthMax;
+	float					  CorridorTurnProbability;
+	float					  CorridorBranchProbability;
+	int32					  RoomBorderMargin;
+	int32					  WallThickness;
+	int32					  MaxPlacementAttemptsPerExit;
+	bool					  bShuffleRoomOrder;
+	float					  BranchProbability;
 
 public:
 	UDrunkardWalkGenerator2D();
@@ -74,7 +74,7 @@ public:
 	virtual UDrunkardWalkGenerator2D* SetGridSize(int32 InSize) override;
 	virtual UDrunkardWalkGenerator2D* SetCenter(const FVector2D& InCenter) override;
 
-	UDrunkardWalkGenerator2D* SetRoomTypes(const TArray<FRoomTypeConfig>& InRoomTypes);
+	UDrunkardWalkGenerator2D* SetResolvedRoomTypes(const TArray<FResolvedRoomType>& InRoomTypes);
 	UDrunkardWalkGenerator2D* SetCorridorLengthRange(int32 InMin, int32 InMax);
 
 	/** Sets a fixed corridor width (min == max == InWidth). */
@@ -112,8 +112,8 @@ private:
 	FDrunkardWalkGridData GenerateInternal();
 
 	/**
-	 * Expands RoomTypes into a flat queue of type indices (one entry per room, count = Weight) and optionally
+	 * Expands RoomTypes into a flat queue of type indices (one entry per room, count = ResolvedCount) and optionally
 	 * shuffles it with Fisher-Yates so the placement order varies per seed.
 	 */
-	static TArray<int32> BuildRoomQueue(const TArray<FRoomTypeConfig>& RoomTypes, bool bShuffle, FRandomStream& RandomStream);
+	static TArray<int32> BuildRoomQueue(const TArray<FResolvedRoomType>& RoomTypes, bool bShuffle, FRandomStream& RandomStream);
 };

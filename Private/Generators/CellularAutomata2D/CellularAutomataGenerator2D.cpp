@@ -1,4 +1,5 @@
 #include "Generators/CellularAutomata2D/CellularAutomataGenerator2D.h"
+#include "SelectionRules.h"
 
 #include "GridBudget.h"
 #include "ProceduralGeometry.h"
@@ -421,7 +422,7 @@ FCellularAutomataGridData UCellularAutomataGenerator2D::GenerateInternal()
 			{
 				continue;
 			}
-			Grid[Y * GWidth + X] = (RandomStream.FRand() >= FillProbability);
+			Grid[Y * GWidth + X] = (!VariatSelection::RollChance(FillProbability, RandomStream));
 		}
 	}
 
@@ -641,7 +642,7 @@ void UCellularAutomataGenerator2D::CarveCorridors(FCellularAutomataGridData& Gri
 				continue;
 			}
 
-			if (InRandomStream.FRand() > Probability)
+			if (!VariatSelection::RollChance(Probability, InRandomStream))
 			{
 				continue;
 			}

@@ -34,6 +34,10 @@ class PROCEDURALGEOMETRY_API ADrunkardWalk2DVisualizer : public AActor
 	UPROPERTY(EditInstanceOnly, meta = (ToolTip = "Dungeon generation parameters. Resolved into raw DW values on construction."))
 	FDrunkardWalkConfig Config;
 
+	/** Explicit budget, resolved by the same allocator used in runtime locations. */
+	UPROPERTY(EditInstanceOnly, Category = "Visualization", meta = (ClampMin = "0"))
+	int32 TotalRooms = 8;
+
 	UPROPERTY(EditInstanceOnly, Category = "Visualization Layers", meta = (ToolTip = "Wall/floor cell fill."))
 	bool bShowGridCells = true;
 

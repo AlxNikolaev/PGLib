@@ -16,13 +16,13 @@ namespace
 		Gen->SetSeed(Seed);
 		Gen->SetGridSize(100);
 
-		FRoomTypeConfig RoomType;
+		FResolvedRoomType RoomType;
 		RoomType.Tag = FName(TEXT("Test"));
 		RoomType.FootprintWidthCells = FootprintCells;
 		RoomType.FootprintHeightCells = FootprintCells;
-		RoomType.Weight = RoomCount;
+		RoomType.ResolvedCount = RoomCount;
 
-		Gen->SetRoomTypes({ RoomType });
+		Gen->SetResolvedRoomTypes({ RoomType });
 		return Gen;
 	}
 } // namespace
@@ -282,7 +282,7 @@ namespace
 			T.Tag = FName(*FString::Printf(TEXT("Type%d"), i));
 			T.FootprintWidthCells = 4;
 			T.FootprintHeightCells = 4;
-			T.Weight = Weights[i];
+			T.SelectionWeight = Weights[i];
 			Config.RoomTypes.Add(T);
 		}
 		return Config;
@@ -292,9 +292,9 @@ namespace
 	int32 SumDWCounts(const FDrunkardWalkResolvedParams& Params)
 	{
 		int32 Sum = 0;
-		for (const FRoomTypeConfig& RT : Params.RoomTypes)
+		for (const FResolvedRoomType& RT : Params.RoomTypes)
 		{
-			Sum += RT.Weight;
+			Sum += RT.ResolvedCount;
 		}
 		return Sum;
 	}
@@ -307,9 +307,9 @@ bool FDWConfigResolveForTotalZeroTest::RunTest(const FString& Parameters)
 	FDrunkardWalkConfig				  Config = MakeDWConfig({ 3, 1 });
 	const FDrunkardWalkResolvedParams Params = Config.ResolveForTotal(0);
 
-	for (const FRoomTypeConfig& RT : Params.RoomTypes)
+	for (const FResolvedRoomType& RT : Params.RoomTypes)
 	{
-		TestEqual("ResolveForTotal_Zero: every Weight == 0", RT.Weight, 0);
+		TestEqual("ResolveForTotal_Zero: every Weight == 0", RT.ResolvedCount, 0);
 	}
 	return true;
 }
@@ -325,7 +325,7 @@ bool FDWConfigResolveForTotalSingleTypeTest::RunTest(const FString& Parameters)
 	TestEqual("ResolveForTotal_SingleType: one room type", Params.RoomTypes.Num(), 1);
 	if (Params.RoomTypes.Num() == 1)
 	{
-		TestEqual("ResolveForTotal_SingleType: sole type gets all rooms", Params.RoomTypes[0].Weight, 7);
+		TestEqual("ResolveForTotal_SingleType: sole type gets all rooms", Params.RoomTypes[0].ResolvedCount, 7);
 	}
 	return true;
 }
@@ -341,9 +341,9 @@ bool FDWConfigResolveForTotalSumEqualWeightsTest::RunTest(const FString& Paramet
 	const FDrunkardWalkResolvedParams Params = Config.ResolveForTotal(Total);
 
 	TestEqual("ResolveForTotal_SumEqualWeights: sum == Total", SumDWCounts(Params), Total);
-	for (const FRoomTypeConfig& RT : Params.RoomTypes)
+	for (const FResolvedRoomType& RT : Params.RoomTypes)
 	{
-		TestTrue("ResolveForTotal_SumEqualWeights: all counts >= 0", RT.Weight >= 0);
+		TestTrue("ResolveForTotal_SumEqualWeights: all counts >= 0", RT.ResolvedCount >= 0);
 	}
 	return true;
 }
@@ -361,7 +361,7 @@ bool FDWConfigResolveForTotalWeightedTest::RunTest(const FString& Parameters)
 	TestEqual("ResolveForTotal_Weighted: sum == 8", SumDWCounts(Params), 8);
 	if (Params.RoomTypes.Num() == 2)
 	{
-		TestTrue("ResolveForTotal_Weighted: heavier type > lighter type", Params.RoomTypes[0].Weight > Params.RoomTypes[1].Weight);
+		TestTrue("ResolveForTotal_Weighted: heavier type > lighter type", Params.RoomTypes[0].ResolvedCount > Params.RoomTypes[1].ResolvedCount);
 	}
 	return true;
 }
@@ -376,9 +376,9 @@ bool FDWConfigResolveForTotalOvercountGuardTest::RunTest(const FString& Paramete
 	const FDrunkardWalkResolvedParams Params = Config.ResolveForTotal(Total);
 
 	TestEqual("ResolveForTotal_OvercountGuard: sum == 2", SumDWCounts(Params), Total);
-	for (const FRoomTypeConfig& RT : Params.RoomTypes)
+	for (const FResolvedRoomType& RT : Params.RoomTypes)
 	{
-		TestTrue("ResolveForTotal_OvercountGuard: no negative counts", RT.Weight >= 0);
+		TestTrue("ResolveForTotal_OvercountGuard: no negative counts", RT.ResolvedCount >= 0);
 	}
 	return true;
 }
@@ -419,16 +419,16 @@ bool FDWConfigResolveForTotalMinRespectedTest::RunTest(const FString& Parameters
 		T.Tag = FName(*FString::Printf(TEXT("Type%d"), i));
 		T.FootprintWidthCells = 4;
 		T.FootprintHeightCells = 4;
-		T.Weight = 1;
-		T.Min = 2;
+		T.SelectionWeight = 1;
+		T.MinCount = 2;
 		Config.RoomTypes.Add(T);
 	}
 	const FDrunkardWalkResolvedParams Params = Config.ResolveForTotal(10);
 
 	TestEqual("ResolveForTotal_MinRespected: sum == 10", SumDWCounts(Params), 10);
-	for (const FRoomTypeConfig& RT : Params.RoomTypes)
+	for (const FResolvedRoomType& RT : Params.RoomTypes)
 	{
-		TestTrue("ResolveForTotal_MinRespected: each type >= Min(2)", RT.Weight >= 2);
+		TestTrue("ResolveForTotal_MinRespected: each type >= Min(2)", RT.ResolvedCount >= 2);
 	}
 	return true;
 }
@@ -445,15 +445,16 @@ bool FDWConfigResolveForTotalMaxRespectedTest::RunTest(const FString& Parameters
 		T0.Tag = FName(TEXT("Capped"));
 		T0.FootprintWidthCells = 4;
 		T0.FootprintHeightCells = 4;
-		T0.Weight = 3;
-		T0.Max = 4;
+		T0.SelectionWeight = 3;
+		T0.MaxCount = 4;
+		T0.bLimitCount = (4) != 0;
 		Config.RoomTypes.Add(T0);
 
 		FRoomTypeConfig T1;
 		T1.Tag = FName(TEXT("Uncapped"));
 		T1.FootprintWidthCells = 4;
 		T1.FootprintHeightCells = 4;
-		T1.Weight = 1;
+		T1.SelectionWeight = 1;
 		Config.RoomTypes.Add(T1);
 	}
 	const FDrunkardWalkResolvedParams Params = Config.ResolveForTotal(10);
@@ -462,7 +463,7 @@ bool FDWConfigResolveForTotalMaxRespectedTest::RunTest(const FString& Parameters
 	TestEqual("ResolveForTotal_MaxRespected: sum == 10", SumDWCounts(Params), 10);
 	if (Params.RoomTypes.Num() == 2)
 	{
-		TestTrue("ResolveForTotal_MaxRespected: capped type <= Max(4)", Params.RoomTypes[0].Weight <= 4);
+		TestTrue("ResolveForTotal_MaxRespected: capped type <= Max(4)", Params.RoomTypes[0].ResolvedCount <= 4);
 	}
 	return true;
 }
@@ -884,15 +885,15 @@ bool FDrunkardWalkSubstitutedSeedTest::RunTest(const FString& Parameters)
 	AddExpectedMessagePlain(
 		TEXT("was substituted and is carried on the diagram"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, 0);
 
-	FRoomTypeConfig RoomType;
+	FResolvedRoomType RoomType;
 	RoomType.Tag = FName(TEXT("Test"));
 	RoomType.FootprintWidthCells = 4;
 	RoomType.FootprintHeightCells = 4;
-	RoomType.Weight = 3;
+	RoomType.ResolvedCount = 3;
 
 	UDrunkardWalkGenerator2D* Unseeded = NewObject<UDrunkardWalkGenerator2D>();
 	Unseeded->SetGridSize(100);
-	Unseeded->SetRoomTypes({ RoomType });
+	Unseeded->SetResolvedRoomTypes({ RoomType });
 
 	const FDrunkardWalkGridData Data = Unseeded->GenerateWithGridData();
 	const FString				Substituted = Data.Diagram.Seed;
@@ -905,7 +906,7 @@ bool FDrunkardWalkSubstitutedSeedTest::RunTest(const FString& Parameters)
 	UDrunkardWalkGenerator2D* Replay = NewObject<UDrunkardWalkGenerator2D>();
 	Replay->SetSeed(Substituted);
 	Replay->SetGridSize(100);
-	Replay->SetRoomTypes({ RoomType });
+	Replay->SetResolvedRoomTypes({ RoomType });
 
 	const FDrunkardWalkGridData Replayed = Replay->GenerateWithGridData();
 
@@ -937,15 +938,15 @@ bool FDWConfigMinOnlyRoomTypeTest::RunTest(const FString& Parameters)
 		Mandatory.Tag = FName(TEXT("Boss"));
 		Mandatory.FootprintWidthCells = 4;
 		Mandatory.FootprintHeightCells = 4;
-		Mandatory.Weight = 0;
-		Mandatory.Min = 2;
+		Mandatory.SelectionWeight = 0;
+		Mandatory.MinCount = 2;
 		Config.RoomTypes.Add(Mandatory);
 
 		FRoomTypeConfig Filler;
 		Filler.Tag = FName(TEXT("Normal"));
 		Filler.FootprintWidthCells = 4;
 		Filler.FootprintHeightCells = 4;
-		Filler.Weight = 5;
+		Filler.SelectionWeight = 5;
 		Config.RoomTypes.Add(Filler);
 	}
 
@@ -956,8 +957,8 @@ bool FDWConfigMinOnlyRoomTypeTest::RunTest(const FString& Parameters)
 		return false;
 	}
 
-	TestEqual(TEXT("MinOnlyRoomType: the mandatory type receives exactly its Min"), Params.RoomTypes[0].Weight, 2);
-	TestEqual(TEXT("MinOnlyRoomType: the weighted type absorbs the rest"), Params.RoomTypes[1].Weight, 8);
+	TestEqual(TEXT("MinOnlyRoomType: the mandatory type receives exactly its Min"), Params.RoomTypes[0].ResolvedCount, 2);
+	TestEqual(TEXT("MinOnlyRoomType: the weighted type absorbs the rest"), Params.RoomTypes[1].ResolvedCount, 8);
 	TestEqual(TEXT("MinOnlyRoomType: sum == 10"), SumDWCounts(Params), 10);
 
 	return true;
@@ -975,16 +976,16 @@ bool FDWConfigAllMinOnlyRoomTypesTest::RunTest(const FString& Parameters)
 		Boss.Tag = FName(TEXT("Boss"));
 		Boss.FootprintWidthCells = 4;
 		Boss.FootprintHeightCells = 4;
-		Boss.Weight = 0;
-		Boss.Min = 1;
+		Boss.SelectionWeight = 0;
+		Boss.MinCount = 1;
 		Config.RoomTypes.Add(Boss);
 
 		FRoomTypeConfig Vault;
 		Vault.Tag = FName(TEXT("Vault"));
 		Vault.FootprintWidthCells = 4;
 		Vault.FootprintHeightCells = 4;
-		Vault.Weight = 0;
-		Vault.Min = 2;
+		Vault.SelectionWeight = 0;
+		Vault.MinCount = 2;
 		Config.RoomTypes.Add(Vault);
 	}
 
@@ -995,13 +996,13 @@ bool FDWConfigAllMinOnlyRoomTypesTest::RunTest(const FString& Parameters)
 		return false;
 	}
 
-	TestEqual(TEXT("AllMinOnly: Boss receives exactly its Min"), Params.RoomTypes[0].Weight, 1);
-	TestEqual(TEXT("AllMinOnly: Vault receives exactly its Min"), Params.RoomTypes[1].Weight, 2);
+	TestEqual(TEXT("AllMinOnly: Boss receives exactly its Min"), Params.RoomTypes[0].ResolvedCount, 1);
+	TestEqual(TEXT("AllMinOnly: Vault receives exactly its Min"), Params.RoomTypes[1].ResolvedCount, 2);
 	TestEqual(TEXT("AllMinOnly: the unclaimed budget is not distributed"), SumDWCounts(Params), 3);
 
-	// Minimums that overrun the budget still have to fit inside it.
+	// Impossible minimums are reported, never silently scaled.
 	const FDrunkardWalkResolvedParams Squeezed = Config.ResolveForTotal(2);
-	TestEqual(TEXT("AllMinOnly: minimums over budget are scaled into it"), SumDWCounts(Squeezed), 2);
+	TestEqual(TEXT("AllMinOnly: impossible minimums produce no fabricated partial allocation"), SumDWCounts(Squeezed), 0);
 
 	return true;
 }

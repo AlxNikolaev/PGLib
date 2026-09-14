@@ -1,4 +1,4 @@
-﻿#include "Generators/DrunkardWalk2D/DrunkardWalk2DVisualizer.h"
+#include "Generators/DrunkardWalk2D/DrunkardWalk2DVisualizer.h"
 
 #include "DrawDebugHelpers.h"
 #include "Generators/DrunkardWalk2D/DrunkardWalkGenerator2D.h"
@@ -55,7 +55,7 @@ void ADrunkardWalk2DVisualizer::OnConstruction(const FTransform& Transform)
 		return;
 	}
 
-	FDrunkardWalkResolvedParams Params = Config.Resolve();
+	FDrunkardWalkResolvedParams Params = Config.ResolveForTotal(TotalRooms);
 
 	UDrunkardWalkGenerator2D* Generator = NewObject<UDrunkardWalkGenerator2D>();
 	Generator->SetBounds(Bounds)->SetSeed(Seed)->SetGridSize(GridSize)->SetCenter(Bounds.GetCenter())->ApplyResolvedParams(Params);
@@ -287,11 +287,11 @@ void ADrunkardWalk2DVisualizer::OnConstruction(const FTransform& Transform)
 		DrawLine(FString::Printf(
 			TEXT("Floor: %d (%.1f%%) | Wall: %d (%.1f%%) | Room: %d (%.1f%%)"), FloorCount, FloorPct, WallCount, WallPct, RoomCount, RoomPct));
 
-		DrawLine(FString::Printf(TEXT("Regions: %d | Rooms: %d/%d | Corridors: %d"),
-			GridData.Regions.Num(),
-			GridData.PlacedRooms.Num(),
-			GridData.RequestedRoomCount,
-			GridData.WalkerPaths.Num()));
+		DrawLine(FString::Printf(
+			TEXT("Rooms requested: %d | selected: %d | placed: %d"), TotalRooms, GridData.RequestedRoomCount, GridData.PlacedRooms.Num()));
+		DrawLine(FString::Printf(TEXT("Regions: %d | Corridors: %d"), GridData.Regions.Num(), GridData.WalkerPaths.Num()));
+		if (GridData.PlacedRooms.Num() < GridData.RequestedRoomCount)
+			DrawLine(TEXT("Some selected rooms could not fit within the geometry and placement-attempt budget."));
 
 		DrawLine(FString::Printf(TEXT("Generation: %.2f ms"), GenerationTimeMs));
 

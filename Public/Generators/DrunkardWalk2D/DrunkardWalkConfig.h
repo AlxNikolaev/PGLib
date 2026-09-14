@@ -1,14 +1,14 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "SelectionRules.h"
 #include "DrunkardWalkConfig.generated.h"
 
 /**
- * A single room type for room-and-corridor generation. Weight is an absolute instance count under Resolve()
- * and a relative share of the caller's budget under ResolveForTotal(); footprints are in grid cells.
+ * Authoring rule for a room type. SelectionWeight is always a relative share; footprints are in grid cells.
  */
 USTRUCT(BlueprintType)
-struct PROCEDURALGEOMETRY_API FRoomTypeConfig
+struct PROCEDURALGEOMETRY_API FRoomTypeConfig : public FWeightedPoolRangeEntry
 {
 	GENERATED_BODY()
 
@@ -20,48 +20,43 @@ struct PROCEDURALGEOMETRY_API FRoomTypeConfig
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Room Type", meta = (ClampMin = 1, ToolTip = "Room footprint height in grid cells."))
 	int32 FootprintHeightCells = 4;
+};
 
-	UPROPERTY(EditAnywhere,
-		BlueprintReadWrite,
-		Category = "Room Type",
-		meta = (ClampMin = 1,
-			ToolTip =
-				"Relative weight for this type when distributing a total room budget across types (ResolveForTotal). Higher values mean proportionally more rooms. Equal weights give equal shares."))
-	int32 Weight = 1;
+template <> struct TStructOpsTypeTraits<FRoomTypeConfig> : TStructOpsTypeTraitsBase2<FRoomTypeConfig>
+{
+	enum
+	{
+		WithPostSerialize = true
+	};
+};
 
-	UPROPERTY(EditAnywhere,
-		BlueprintReadWrite,
-		Category = "Room Type",
-		meta = (ClampMin = 0,
-			ToolTip =
-				"Minimum rooms of this type guaranteed each time a total room budget is distributed (ResolveForTotal). Mandatory minimums are filled before weight-based distribution. 0 = no guarantee."))
-	int32 Min = 0;
-
-	UPROPERTY(EditAnywhere,
-		BlueprintReadWrite,
-		Category = "Room Type",
-		meta = (ClampMin = 0, ToolTip = "Maximum rooms of this type allowed when distributing a total room budget (ResolveForTotal). 0 = uncapped."))
-	int32 Max = 0;
+/** Generator input: resolved quantities, with no selection weights or quotas. */
+struct FResolvedRoomType
+{
+	FName Tag;
+	int32 FootprintWidthCells = 4;
+	int32 FootprintHeightCells = 4;
+	int32 ResolvedCount = 0;
 };
 
 /**
  * Resolved DW parameters for UDrunkardWalkGenerator2D. Deliberately not a USTRUCT, and defined here because
- * it is the return type of FDrunkardWalkConfig::Resolve() that other modules must see.
+ * it is the return type of FDrunkardWalkConfig::ResolveForTotal() that other modules must see.
  */
 struct PROCEDURALGEOMETRY_API FDrunkardWalkResolvedParams
 {
-	TArray<FRoomTypeConfig> RoomTypes;
-	int32					CorridorLengthMin = 3;
-	int32					CorridorLengthMax = 8;
-	int32					CorridorWidthMin = 1;
-	int32					CorridorWidthMax = 1;
-	float					CorridorTurnProbability = 0.0f;
-	float					CorridorBranchProbability = 0.0f;
-	int32					RoomBorderMargin = 1;
-	int32					WallThickness = 1;
-	int32					MaxPlacementAttemptsPerExit = 8;
-	bool					bShuffleRoomOrder = true;
-	float					BranchProbability = 0.0f;
+	TArray<FResolvedRoomType> RoomTypes;
+	int32					  CorridorLengthMin = 3;
+	int32					  CorridorLengthMax = 8;
+	int32					  CorridorWidthMin = 1;
+	int32					  CorridorWidthMax = 1;
+	float					  CorridorTurnProbability = 0.0f;
+	float					  CorridorBranchProbability = 0.0f;
+	int32					  RoomBorderMargin = 1;
+	int32					  WallThickness = 1;
+	int32					  MaxPlacementAttemptsPerExit = 8;
+	bool					  bShuffleRoomOrder = true;
+	float					  BranchProbability = 0.0f;
 };
 
 /**
@@ -77,8 +72,7 @@ struct PROCEDURALGEOMETRY_API FDrunkardWalkConfig
 	UPROPERTY(EditAnywhere,
 		BlueprintReadWrite,
 		Category = "Dungeon Generation",
-		meta = (ToolTip =
-					"Room types to place. Each type's Weight sizes its share of the generation queue. Under the runtime path (ResolveForTotal) Weight is a relative share of the rolled total, not an absolute room count."))
+		meta = (ToolTip = "Room types and quotas. Relative selection weights distribute the total room budget; they are never room counts."))
 	TArray<FRoomTypeConfig> RoomTypes;
 
 	UPROPERTY(EditAnywhere,
@@ -154,12 +148,9 @@ struct PROCEDURALGEOMETRY_API FDrunkardWalkConfig
 				"Probability that the next room grows from a random earlier room instead of the most recent one. 0 = a single winding path, 1 = a highly branching tree."))
 	float BranchProbability = 0.0f;
 
-	/** Validates and clamps semantic parameters into raw DW parameters for the generator. */
-	FDrunkardWalkResolvedParams Resolve() const;
-
 	/**
-	 * Like Resolve(), but distributes exactly TotalRooms across types proportionally to their Weight, which
-	 * here is a relative share. Used when the room count is driven by Location Size on the level graph node.
+	 * Validates the pool and allocates TotalRooms by SelectionWeight after reserving minima, respecting enabled caps.
+	 * Authoring weights are not rewritten. Invalid budgets produce an explicit error and no selected rooms.
 	 */
 	FDrunkardWalkResolvedParams ResolveForTotal(int32 TotalRooms) const;
 };
