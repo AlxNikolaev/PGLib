@@ -1,4 +1,4 @@
-﻿#include "Generators/CellularAutomata2D/CellularAutomata2DVisualizer.h"
+#include "Generators/CellularAutomata2D/CellularAutomata2DVisualizer.h"
 
 #include "DrawDebugHelpers.h"
 #include "Generators/CellularAutomata2D/CellularAutomataGenerator2D.h"
@@ -8,7 +8,7 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogCAVisualizer, Log, All);
 
-namespace
+namespace CellularAutomata2DVisualizerPrivate
 {
 	const FLinearColor WallLinearColor(0.016f, 0.016f, 0.018f);
 
@@ -44,7 +44,7 @@ namespace
 		const FString ScaleName = UEnum::GetDisplayValueAsText(Config.RegionScale).ToString();
 		return FString::Printf(TEXT("%s | Openness=%.2f | Smoothness=%d | %s"), *StyleName, Config.Openness, Config.Smoothness, *ScaleName);
 	}
-} // namespace
+} // namespace CellularAutomata2DVisualizerPrivate
 
 ACellularAutomata2DVisualizer::ACellularAutomata2DVisualizer()
 {
@@ -159,7 +159,10 @@ void ACellularAutomata2DVisualizer::OnConstruction(const FTransform& Transform)
 			TArray<int32>	Triangles = { 0, 2, 1, 0, 3, 2 };
 			TArray<FVector> Normals = { FVector::UpVector, FVector::UpVector, FVector::UpVector, FVector::UpVector };
 			TArray<FVector2D>		 UVs = { FVector2D(0, 0), FVector2D(1, 0), FVector2D(1, 1), FVector2D(0, 1) };
-			TArray<FLinearColor>	 Colors = { WallLinearColor, WallLinearColor, WallLinearColor, WallLinearColor };
+			TArray<FLinearColor>	 Colors = { CellularAutomata2DVisualizerPrivate::WallLinearColor,
+					CellularAutomata2DVisualizerPrivate::WallLinearColor,
+					CellularAutomata2DVisualizerPrivate::WallLinearColor,
+					CellularAutomata2DVisualizerPrivate::WallLinearColor };
 			TArray<FProcMeshTangent> Tangents;
 
 			GridMeshComponent->CreateMeshSection_LinearColor(SectionIndex, Vertices, Triangles, Normals, UVs, Colors, Tangents, true);
@@ -185,11 +188,11 @@ void ACellularAutomata2DVisualizer::OnConstruction(const FTransform& Transform)
 			FLinearColor RegionColor;
 			if (bShowRegionColors)
 			{
-				RegionColor = GetRegionLinearColor(RegionId);
+				RegionColor = CellularAutomata2DVisualizerPrivate::GetRegionLinearColor(RegionId);
 			}
 			else
 			{
-				RegionColor = DefaultFloorLinearColor;
+				RegionColor = CellularAutomata2DVisualizerPrivate::DefaultFloorLinearColor;
 			}
 
 			UE_LOG(LogCAVisualizer,
@@ -215,7 +218,7 @@ void ACellularAutomata2DVisualizer::OnConstruction(const FTransform& Transform)
 					continue;
 				}
 
-				const FLinearColor CulledColor = GetCulledRegionLinearColor(RegionId);
+				const FLinearColor CulledColor = CellularAutomata2DVisualizerPrivate::GetCulledRegionLinearColor(RegionId);
 				ProcGen_BuildCellMeshSection(
 					GridMeshComponent, DebugMaterial, SectionIndex, GridData.Regions[RegionId], CS, LocalBounds.Min, CulledColor, 1.0f);
 				++SectionIndex;
@@ -239,13 +242,27 @@ void ACellularAutomata2DVisualizer::OnConstruction(const FTransform& Transform)
 		for (int32 X = 0; X <= GridData.GridWidth; ++X)
 		{
 			const float PosX = MinX + X * CS;
-			DrawDebugLine(GetWorld(), FVector(PosX, MinY, 2.0f), FVector(PosX, MaxY, 2.0f), GridLineColor, true, -1.f, 0, 0.5f);
+			DrawDebugLine(GetWorld(),
+				FVector(PosX, MinY, 2.0f),
+				FVector(PosX, MaxY, 2.0f),
+				CellularAutomata2DVisualizerPrivate::GridLineColor,
+				true,
+				-1.f,
+				0,
+				0.5f);
 		}
 
 		for (int32 Y = 0; Y <= GridData.GridHeight; ++Y)
 		{
 			const float PosY = MinY + Y * CS;
-			DrawDebugLine(GetWorld(), FVector(MinX, PosY, 2.0f), FVector(MaxX, PosY, 2.0f), GridLineColor, true, -1.f, 0, 0.5f);
+			DrawDebugLine(GetWorld(),
+				FVector(MinX, PosY, 2.0f),
+				FVector(MaxX, PosY, 2.0f),
+				CellularAutomata2DVisualizerPrivate::GridLineColor,
+				true,
+				-1.f,
+				0,
+				0.5f);
 		}
 	}
 
@@ -367,7 +384,7 @@ void ACellularAutomata2DVisualizer::OnConstruction(const FTransform& Transform)
 
 		DrawLine(FString::Printf(TEXT("Generation: %.2f ms"), GenerationTimeMs));
 
-		DrawLine(FString::Printf(TEXT("Config: %s"), *BuildConfigSummary(CaveConfig)));
+		DrawLine(FString::Printf(TEXT("Config: %s"), *CellularAutomata2DVisualizerPrivate::BuildConfigSummary(CaveConfig)));
 
 		DrawLine(FString::Printf(TEXT("Seed: \"%s\""), *Seed));
 

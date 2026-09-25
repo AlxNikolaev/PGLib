@@ -7,7 +7,7 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogDWVisualizer, Log, All);
 
-namespace
+namespace DrunkardWalk2DVisualizerPrivate
 {
 	const FLinearColor WallLinearColor(0.016f, 0.016f, 0.018f);
 
@@ -29,7 +29,7 @@ namespace
 		const float Hue = FMath::Fmod(WalkerIndex * 0.618033988749895f, 1.0f) * 360.0f;
 		return FLinearColor(Hue, 0.9f, 1.0f).HSVToLinearRGB();
 	}
-} // namespace
+} // namespace DrunkardWalk2DVisualizerPrivate
 
 ADrunkardWalk2DVisualizer::ADrunkardWalk2DVisualizer()
 {
@@ -117,7 +117,14 @@ void ADrunkardWalk2DVisualizer::OnConstruction(const FTransform& Transform)
 			}
 			if (WallCells.Num() > 0)
 			{
-				ProcGen_BuildCellMeshSection(GridMeshComponent, DebugMaterial, SectionIndex, WallCells, CS, LocalBounds.Min, WallLinearColor, 0.0f);
+				ProcGen_BuildCellMeshSection(GridMeshComponent,
+					DebugMaterial,
+					SectionIndex,
+					WallCells,
+					CS,
+					LocalBounds.Min,
+					DrunkardWalk2DVisualizerPrivate::WallLinearColor,
+					0.0f);
 				++SectionIndex;
 			}
 		}
@@ -133,8 +140,14 @@ void ADrunkardWalk2DVisualizer::OnConstruction(const FTransform& Transform)
 			}
 			if (CorridorCells.Num() > 0)
 			{
-				ProcGen_BuildCellMeshSection(
-					GridMeshComponent, DebugMaterial, SectionIndex, CorridorCells, CS, LocalBounds.Min, CorridorLinearColor, 1.0f);
+				ProcGen_BuildCellMeshSection(GridMeshComponent,
+					DebugMaterial,
+					SectionIndex,
+					CorridorCells,
+					CS,
+					LocalBounds.Min,
+					DrunkardWalk2DVisualizerPrivate::CorridorLinearColor,
+					1.0f);
 				++SectionIndex;
 			}
 		}
@@ -153,10 +166,11 @@ void ADrunkardWalk2DVisualizer::OnConstruction(const FTransform& Transform)
 			}
 
 			// With highlights off, rooms take the corridor color so the layout reads as one undifferentiated floor.
-			FLinearColor RoomColor = CorridorLinearColor;
+			FLinearColor RoomColor = DrunkardWalk2DVisualizerPrivate::CorridorLinearColor;
 			if (bShowRoomHighlights)
 			{
-				RoomColor = bShowRegionColors ? GetRoomDistinctColor(RoomId) : DWDefaultFloorLinearColor;
+				RoomColor = bShowRegionColors ? DrunkardWalk2DVisualizerPrivate::GetRoomDistinctColor(RoomId)
+											  : DrunkardWalk2DVisualizerPrivate::DWDefaultFloorLinearColor;
 			}
 			ProcGen_BuildCellMeshSection(GridMeshComponent, DebugMaterial, SectionIndex, RoomCells, CS, LocalBounds.Min, RoomColor, 1.5f);
 			++SectionIndex;
@@ -175,13 +189,27 @@ void ADrunkardWalk2DVisualizer::OnConstruction(const FTransform& Transform)
 		for (int32 X = 0; X <= GridData.GridWidth; ++X)
 		{
 			const float PosX = MinX + X * CS;
-			DrawDebugLine(GetWorld(), FVector(PosX, MinY, 2.0f), FVector(PosX, MaxY, 2.0f), GridLineColor, true, -1.f, 0, 0.5f);
+			DrawDebugLine(GetWorld(),
+				FVector(PosX, MinY, 2.0f),
+				FVector(PosX, MaxY, 2.0f),
+				DrunkardWalk2DVisualizerPrivate::GridLineColor,
+				true,
+				-1.f,
+				0,
+				0.5f);
 		}
 
 		for (int32 Y = 0; Y <= GridData.GridHeight; ++Y)
 		{
 			const float PosY = MinY + Y * CS;
-			DrawDebugLine(GetWorld(), FVector(MinX, PosY, 2.0f), FVector(MaxX, PosY, 2.0f), GridLineColor, true, -1.f, 0, 0.5f);
+			DrawDebugLine(GetWorld(),
+				FVector(MinX, PosY, 2.0f),
+				FVector(MaxX, PosY, 2.0f),
+				DrunkardWalk2DVisualizerPrivate::GridLineColor,
+				true,
+				-1.f,
+				0,
+				0.5f);
 		}
 	}
 
@@ -190,7 +218,7 @@ void ADrunkardWalk2DVisualizer::OnConstruction(const FTransform& Transform)
 		for (int32 WalkerIdx = 0; WalkerIdx < GridData.WalkerPaths.Num(); ++WalkerIdx)
 		{
 			const TArray<FIntPoint>& Path = GridData.WalkerPaths[WalkerIdx];
-			const FColor			 PathColor = GetWalkerLinearColor(WalkerIdx).ToFColor(true);
+			const FColor			 PathColor = DrunkardWalk2DVisualizerPrivate::GetWalkerLinearColor(WalkerIdx).ToFColor(true);
 
 			for (int32 i = 0; i + 1 < Path.Num(); ++i)
 			{
