@@ -1,6 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
-
-#pragma once
+﻿#pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
@@ -18,9 +16,6 @@ class PROCEDURALGEOMETRY_API AVoronoi2DVisualizer : public AActor
 
 	UPROPERTY(EditInstanceOnly)
 	bool bUsePoissonDisc = false;
-
-	UPROPERTY(EditInstanceOnly)
-	bool bGenerateRandSites = true;
 
 	UPROPERTY(EditInstanceOnly)
 	int32 NumSites = 10;
