@@ -80,51 +80,34 @@ bool FGeometryUtils::ClipPolygonByHalfPlane(
 	FVector2D Prev = OutPolygon.Last();
 	double	  PrevSide = FVector2D::DotProduct(Prev - PlanePoint, PlaneNormal);
 
-	auto SafeAlpha = [](double InPrevSide, double InCurrSide) -> double {
-		double Denominator = InPrevSide - InCurrSide;
-		if (FMath::Abs(Denominator) < UE_DOUBLE_KINDA_SMALL_NUMBER)
-		{
-			return 0.5;
-		}
-		return InPrevSide / Denominator;
+	// An alpha tolerance grows with the edge length and can discard centimetres on large
+	// diagram bounds. Deduplicate only physically coincident positions after computing the cut.
+	constexpr double CoincidentDistance = 1.e-8;
+	auto			 AppendDistinct = [&](const FVector2D& Point) {
+		if (Scratch.IsEmpty() || FVector2D::DistSquared(Scratch.Last(), Point) > FMath::Square(CoincidentDistance))
+			Scratch.Add(Point);
 	};
-
-	// A crossing that lands on an edge endpoint must be emitted once: that endpoint is already appended in its own
-	// right, so the interpolated copy is a zero-length edge. The guard is on Alpha because Alpha is scale-free.
-	constexpr double CoincidentAlpha = UE_DOUBLE_KINDA_SMALL_NUMBER;
 
 	for (const FVector2D& Curr : OutPolygon)
 	{
 		double CurrSide = FVector2D::DotProduct(Curr - PlanePoint, PlaneNormal);
 
-		if (PrevSide <= 0.0 && CurrSide <= 0.0)
+		if ((PrevSide <= 0.0) != (CurrSide <= 0.0))
 		{
-			Scratch.Add(Curr);
+			// Opposite side classifications guarantee a nonzero denominator, even for a
+			// shallow crossing. A midpoint fallback would move the intersection off the plane.
+			const double Alpha = PrevSide / (PrevSide - CurrSide);
+			AppendDistinct(FMath::Lerp(Prev, Curr, Alpha));
 		}
-		else if (PrevSide <= 0.0 && CurrSide > 0.0)
-		{
-			// Alpha lies in [0,1) here, so only the Prev end can coincide.
-			double Alpha = SafeAlpha(PrevSide, CurrSide);
-			if (Alpha > CoincidentAlpha)
-			{
-				Scratch.Add(FMath::Lerp(Prev, Curr, Alpha));
-			}
-		}
-		else if (PrevSide > 0.0 && CurrSide <= 0.0)
-		{
-			// Alpha lies in (0,1] here, so only the Curr end can coincide.
-			double Alpha = SafeAlpha(PrevSide, CurrSide);
-			if (Alpha < 1.0 - CoincidentAlpha)
-			{
-				Scratch.Add(FMath::Lerp(Prev, Curr, Alpha));
-			}
-			Scratch.Add(Curr);
-		}
+		if (CurrSide <= 0.0)
+			AppendDistinct(Curr);
 
 		Prev = Curr;
 		PrevSide = CurrSide;
 	}
 
+	if (Scratch.Num() > 1 && FVector2D::DistSquared(Scratch[0], Scratch.Last()) <= FMath::Square(CoincidentDistance))
+		Scratch.Pop(EAllowShrinking::No);
 	Swap(OutPolygon, Scratch);
 	return OutPolygon.Num() >= 3;
 }

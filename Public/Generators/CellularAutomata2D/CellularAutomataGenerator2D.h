@@ -5,8 +5,9 @@
 #include "CellularAutomataGenerator2D.generated.h"
 
 /**
- * Raw intermediate state of the cellular automata pipeline, for visualization and testing. Production
- * callers use Generate() instead; this layout carries no compatibility guarantee.
+ * Full state of the cellular automata pipeline. Production API: the runtime cave cluster generator carves and rebuilds it
+ * when corridor carving is on and builds its diagram at CellSize. Under the compatibility contract: Grid, RegionIds, Regions, SurvivingRegions,
+ * GridWidth, GridHeight, CellSize, bDegradedResolution and Diagram. CenterRegionId carries no compatibility guarantee.
  */
 struct PROCEDURALGEOMETRY_API FCellularAutomataGridData
 {
@@ -51,17 +52,24 @@ public:
 
 	virtual FLayoutDiagram2D Generate() override;
 
-	/** Returns the full intermediate grid data including the final diagram. For visualization and testing only. */
+	/**
+	 * Production API: runs the pipeline and returns the grid data with the final diagram, the effective (possibly
+	 * coarsened) CellSize and bDegradedResolution. The runtime cave generator needs it for both and for corridor carving.
+	 */
 	FCellularAutomataGridData GenerateWithGridData();
 
 	/**
-	 * Carves corridors between disconnected surviving regions, modifying Grid and RegionIds in place.
-	 * Probability applies per region pair and Width is in grid cells. Diagram is left stale, so the caller
-	 * must run RebuildDiagram() afterwards.
+	 * Rolls Probability independently for every pair of surviving regions the diagram does not list as neighbours (pairs
+	 * touching one wall cell are skipped) and carves a straight corridor between the closest floor cells of each winning pair,
+	 * modifying Grid and RegionIds in place. No connectivity guarantee at any probability. Width is in grid cells and stamps
+	 * a square brush 2*floor(Width/2)+1 cells on a side; the outer grid ring stays wall. Diagram is left stale: run RebuildDiagram().
 	 */
 	static void CarveCorridors(FCellularAutomataGridData& GridData, float Probability, int32 Width, FRandomStream& InRandomStream);
 
-	/** Rebuilds GridData.Diagram from the current Grid/RegionIds/Regions state. */
+	/**
+	 * Re-floods RegionIds, Regions and CenterRegionId from Grid and rebuilds Diagram at GridData.CellSize.
+	 * SurvivingRegions keeps its pre-rebuild labelling.
+	 */
 	void RebuildDiagram(FCellularAutomataGridData& GridData);
 
 private:

@@ -114,12 +114,14 @@ namespace VoronoiUtils
 
 #if WITH_DEV_AUTOMATION_TESTS
 	/**
-	 * Half-plane clips the cell build has performed on the calling thread since the last reset, which is what
-	 * the pruning tests assert on instead of a timing. Per-thread because the substrate build runs the cell
-	 * build from ParallelFor workers, where a shared counter would serialise them.
+	 * Clips performed by builds initiated on the calling thread since reset, including all relaxation passes.
+	 * Independent per-cell worker counters are joined and aggregated on that caller, with no shared worker increment.
 	 */
 	PROCEDURALGEOMETRY_API void	 ResetHalfPlaneClipCount();
 	PROCEDURALGEOMETRY_API int64 GetHalfPlaneClipCount();
+	/** Exercises the production adjacency predicate on explicit cells; optionally reproduces the old3x3 omission.
+	 * Test-only, resets neighbors and mutates only the supplied value; no generation/seed/UObject state. */
+	PROCEDURALGEOMETRY_API void BuildNeighborsForTest(FVoronoiDiagram2D& Diagram, bool bIncludeTwoBucketRing);
 #endif
 } // namespace VoronoiUtils
 
@@ -139,6 +141,12 @@ class PROCEDURALGEOMETRY_API UVoronoiGenerator2D final : public UObject
 	float MinSiteDistance;
 	int32 RelaxationIterations;
 
+	// Opt-in nearby preclips; legacy callers retain their original clipping order.
+	bool bSpatialClipOrder = false;
+#if WITH_DEV_AUTOMATION_TESTS
+	bool bSerialCellsForTest = false;
+#endif
+
 public:
 	UVoronoiGenerator2D();
 
@@ -146,6 +154,15 @@ public:
 	UVoronoiGenerator2D* SetSeed(const FString& InSeed);
 	UVoronoiGenerator2D* SetMinSiteDistance(float Distance);
 	UVoronoiGenerator2D* SetRelaxationIterations(int32 Iterations);
+
+	/** Preclip nearby bucket shells, then complete with the normal provably safe radius pruning.
+	 * Improves dense ordered grids; changes floating-point clip order, so callers opt in explicitly. */
+	UVoronoiGenerator2D* SetSpatialClipOrder(bool bEnabled);
+#if WITH_DEV_AUTOMATION_TESTS
+	/** Holds the same per-cell algorithm to a single thread for exact serial/parallel fixtures.
+	 * Test-only per-instance option; set before generation, never concurrently with its build. */
+	void SetSerialCellsForTest(bool bSerial) { bSerialCellsForTest = bSerial; }
+#endif
 
 	FVoronoiDiagram2D GenerateFromSites(const TArray<FVector2D>& SiteLocations) const;
 	FVoronoiDiagram2D GenerateRandomSites(int32 NumSites, bool bUsePoissonDisc = false);
@@ -164,11 +181,19 @@ private:
 	void ComputeVoronoiCells(const TArray<FVector2D>& Sites, FVoronoiDiagram2D& OutDiagram, bool bComputeNeighbors = true) const;
 
 	/**
-	 * Clips the cell of AllSites[SiteIndex] against the bisectors of the other sites, in ascending site order.
+	 * Clips the cell against all relevant bisectors, with optional local preclips before ascending completion.
 	 * A non-null Index skips the sites whose bisector provably cannot touch the working polygon; the sequence
 	 * of clips that do happen, and therefore the resulting vertex list, is the same either way.
 	 */
-	void ComputeCellForSite(FVoronoiCell2D& OutCell, int32 SiteIndex, const TArray<FVector2D>& AllSites, const FVoronoiSiteIndex* Index) const;
+	void ComputeCellForSite(FVoronoiCell2D& OutCell,
+		int32								SiteIndex,
+		const TArray<FVector2D>&			AllSites,
+		const FVoronoiSiteIndex*			Index
+#if WITH_DEV_AUTOMATION_TESTS
+		,
+		int64& ClipCount
+#endif
+	) const;
 
 	void RelaxSites(TArray<FVector2D>& Sites);
 };

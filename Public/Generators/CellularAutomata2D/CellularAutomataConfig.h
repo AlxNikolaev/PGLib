@@ -11,7 +11,8 @@ enum class ECaveStyle : uint8
 	NaturalCaves UMETA(DisplayName = "Natural Caves", ToolTip = "Organic caverns with smooth walls. Good general-purpose cave style."),
 	DenseCaverns UMETA(DisplayName = "Dense Caverns", ToolTip = "Moderate density with connected chambers. Balanced layout."),
 	TightTunnels UMETA(DisplayName = "Tight Tunnels", ToolTip = "Narrow passages with maze-like connectivity."),
-	SwissCheese	 UMETA(DisplayName = "Swiss Cheese", ToolTip = "Many small isolated pockets. Use with corridor carving to reconnect regions."),
+	SwissCheese	 UMETA(DisplayName = "Swiss Cheese",
+		 ToolTip = "Many small isolated pockets. Corridor carving can link some of them but does not guarantee every pocket is reachable."),
 };
 
 /** Controls grid cell density and minimum region size for cave generation. */
@@ -146,13 +147,19 @@ struct PROCEDURALGEOMETRY_API FCellularAutomataConfig
 	UPROPERTY(EditAnywhere,
 		BlueprintReadWrite,
 		Category = "Cave Generation|Corridors",
-		meta = (ClampMin = 0.0, ClampMax = 1.0, ToolTip = "Probability of carving corridors between disconnected regions. 0 = off."))
+		meta = (ClampMin = 0.0,
+			ClampMax = 1.0,
+			ToolTip =
+				"Chance, rolled separately for each pair of surviving regions, that a straight corridor joins the pair's closest floor cells. Pairs already listed as neighbours, including regions separated by one wall cell, are skipped; no value guarantees a connected cave. 0 = off."))
 	float CorridorProbability = 0.0f;
 
 	UPROPERTY(EditAnywhere,
 		BlueprintReadWrite,
 		Category = "Cave Generation|Corridors",
-		meta = (ClampMin = 1, ClampMax = 5, ToolTip = "Width of carved corridors in grid cells."))
+		meta = (ClampMin = 1,
+			ClampMax = 5,
+			ToolTip =
+				"Carved corridor width in grid cells, rounded up to an odd number: the brush is 2 * floor(Width / 2) + 1 cells, so 2 carves 3."))
 	int32 CorridorWidth = 2;
 
 	/** Resolves semantic parameters into raw CA parameters for the generator. */

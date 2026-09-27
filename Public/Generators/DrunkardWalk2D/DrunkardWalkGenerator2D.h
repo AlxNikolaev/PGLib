@@ -24,8 +24,9 @@ struct PROCEDURALGEOMETRY_API FDrunkardWalkPlacedRoom
 };
 
 /**
- * Raw intermediate state of the drunkard walk pipeline, for visualization and testing. Production callers
- * use Generate() instead; this layout carries no compatibility guarantee.
+ * Full state of the drunkard walk pipeline. Production API: the runtime dungeon cluster generator builds its diagram at
+ * CellSize. Under the compatibility contract: CellSize, bDegradedResolution and Diagram; the remaining fields are
+ * visualization and test diagnostics without that guarantee.
  */
 struct PROCEDURALGEOMETRY_API FDrunkardWalkGridData
 {
@@ -104,7 +105,10 @@ public:
 
 	virtual FLayoutDiagram2D Generate() override;
 
-	/** Returns full intermediate grid data including placed rooms and regions. For visualization/testing only. */
+	/**
+	 * Production API: runs the pipeline and returns the grid data with the final diagram, the effective (possibly
+	 * coarsened) CellSize and bDegradedResolution, which the runtime dungeon generator needs; Generate() reports neither.
+	 */
 	FDrunkardWalkGridData GenerateWithGridData();
 
 private:

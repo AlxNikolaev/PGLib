@@ -577,3 +577,93 @@ bool FVoronoiSiteIndexDegenerateTest::RunTest(const FString& Parameters)
 }
 
 #endif
+
+#if WITH_DEV_AUTOMATION_TESTS
+// Kept separate from parallel equivalence: this is a pre-existing broad-phase false negative.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVoronoiTwoBucketAdjacencyTest, "ProceduralGeometry.Voronoi.Adjacency.TwoBucketCoincidenceCoverage", DefaultTestFlags)
+bool FVoronoiTwoBucketAdjacencyTest::RunTest(const FString&)
+{
+	FVoronoiDiagram2D Diagram;
+	Diagram.Bounds = VoroIndexTest::TestBounds();
+	const double T = VoronoiUtils::ComputeAdjacencyTolerance(Diagram.Bounds);
+	auto		 Add = [&](TArray<FVector2D> Points) {
+		FVoronoiCell2D Cell(Points);
+		Cell.bIsValid = true;
+		Cell.CellIndex = Diagram.Cells.Num();
+		Diagram.Cells.Add(MoveTemp(Cell));
+	};
+	// Round(.24/.5)=0, Round(1.23/.5)=2, while the actual distance .99T is strictly less than T.
+	Add({ FVector2D(-3 * T, 0), FVector2D(.24 * T, 0), FVector2D(.24 * T, 10 * T), FVector2D(-3 * T, 10 * T) });
+	Add({ FVector2D(1.23 * T, 0), FVector2D(4 * T, 0), FVector2D(4 * T, 10 * T), FVector2D(1.23 * T, 10 * T) });
+	// A single coincident corner must still not qualify as an edge after candidate broadening.
+	Add({ FVector2D(.24 * T, 0), FVector2D(-4 * T, -3 * T), FVector2D(-3 * T, -4 * T) });
+	FVector2D Start, End;
+	TestTrue(TEXT("Independent existing shared-edge predicate recognizes the edge"),
+		VoronoiUtils::GetSharedEdge(Diagram.Cells[0].Vertices, Diagram.Cells[1].Vertices, T, Start, End));
+	VoronoiUtils::BuildNeighborsForTest(Diagram, false);
+	TestFalse(TEXT("Original3x3 broad phase misses this valid pair"), Diagram.Cells[0].Neighbors.Contains(1));
+	VoronoiUtils::BuildNeighborsForTest(Diagram, true);
+	TestTrue(TEXT("Outer ring supplies the exact missing pair reciprocally"),
+		Diagram.Cells[0].Neighbors.Contains(1) && Diagram.Cells[1].Neighbors.Contains(0));
+	TestFalse(TEXT("Corner contact remains excluded by unchanged predicate"), Diagram.Cells[0].Neighbors.Contains(2));
+	TestTrue(TEXT("New adjacency still agrees with edge retrieval"), Diagram.GetSharedEdge(0, 1, Start, End));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVoronoiParallelCellsTest, "ProceduralGeometry.Voronoi.ParallelCells.ExactPolygonsNeighborsAndCounters", DefaultTestFlags)
+bool FVoronoiParallelCellsTest::RunTest(const FString&)
+{
+	const auto Bounds = VoroIndexTest::TestBounds();
+	for (int32 Pruning : { 0, 1 })
+	{
+		VoroIndexTest::FScopedPruning	PruningScope(Pruning);
+		const TArray<TArray<FVector2D>> Cases = { VoroIndexTest::MakeUniformSites(Bounds, 128, 71),
+			VoroIndexTest::MakeJitteredLattice(Bounds, 144, 92),
+			VoroIndexTest::MakeClusteredSites(Bounds, 128, 53) };
+		for (const auto& Sites : Cases)
+			for (bool SpatialOrder : { false, true })
+			{
+				auto Build = [&](bool Serial) {
+					auto* Generator = NewObject<UVoronoiGenerator2D>();
+					Generator->SetBounds(Bounds)->SetSeed(TEXT("ParallelCellsExact"))->SetSpatialClipOrder(SpatialOrder);
+					Generator->SetSerialCellsForTest(Serial);
+					return Generator->GenerateFromSites(Sites);
+				};
+				VoronoiUtils::ResetHalfPlaneClipCount();
+				const auto	Serial = Build(true);
+				const int64 SerialClips = VoronoiUtils::GetHalfPlaneClipCount();
+				VoronoiUtils::ResetHalfPlaneClipCount();
+				const auto	Parallel = Build(false);
+				const int64 ParallelClips = VoronoiUtils::GetHalfPlaneClipCount();
+				VoroIndexTest::DiagramsMatch(*this, TEXT("serial/parallel"), Serial, Parallel);
+				TestTrue(TEXT("Real clipping exercised"), SerialClips > 0);
+				TestEqual(TEXT("Joined per-cell diagnostics include every worker clip"), ParallelClips, SerialClips);
+				AddInfo(FString::Printf(TEXT("Parallel cell equivalence: pruning=%d spatialOrder=%d sites=%d clips=%lld"),
+					Pruning,
+					int32(SpatialOrder),
+					Sites.Num(),
+					ParallelClips));
+			}
+		auto Relax = [&](bool Serial) {
+			auto* Generator = NewObject<UVoronoiGenerator2D>();
+			Generator->SetSerialCellsForTest(Serial);
+			return Generator->SetBounds(Bounds)
+				->SetSeed(TEXT("ParallelRelaxed"))
+				->SetMinSiteDistance(120.f)
+				->SetRelaxationIterations(2)
+				->GenerateRelaxed(96);
+		};
+		VoronoiUtils::ResetHalfPlaneClipCount();
+		const auto	Serial = Relax(true);
+		const int64 SerialClips = VoronoiUtils::GetHalfPlaneClipCount();
+		VoronoiUtils::ResetHalfPlaneClipCount();
+		const auto	Parallel = Relax(false);
+		const int64 ParallelClips = VoronoiUtils::GetHalfPlaneClipCount();
+		VoroIndexTest::DiagramsMatch(*this, TEXT("serial/parallel relaxed"), Serial, Parallel);
+		TestEqual(TEXT("Relaxation pass clip totals preserved"), ParallelClips, SerialClips);
+	}
+	return true;
+}
+#endif

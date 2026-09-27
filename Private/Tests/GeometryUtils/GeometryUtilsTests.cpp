@@ -187,7 +187,7 @@ bool FClipNearTangentialTest::RunTest(const FString& Parameters)
 	// The two bottom vertices straddle Y=0 by ~1e-12, so the clip plane is near-tangential to that edge.
 	TArray<FVector2D> Polygon = { FVector2D(0, 1e-12), FVector2D(100, -1e-12), FVector2D(100, 100), FVector2D(0, 100) };
 
-	// Kept side Y ≤ 0, so SafeAlpha fires on the edge between the two near-zero vertices.
+	// Kept side Y <= 0 crosses the edge between the two near-zero vertices.
 	bool bResult = FGeometryUtils::ClipPolygonByHalfPlane(Polygon, FVector2D(0, 0), FVector2D(0, 1));
 
 	// A valid polygon is not required here, only the absence of NaN/Inf.
@@ -261,6 +261,29 @@ bool FClipPlaneCoincidentVertexTest::RunTest(const FString& Parameters)
 		TestEqual("Degenerate sliver: exactly the two plane-coincident corners remain", Polygon.Num(), 2);
 	}
 
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FClipPhysicalIntersectionTest, "ProceduralGeometry.GeometryUtils.Clip.PhysicalIntersectionPrecision", DefaultTestFlags)
+bool FClipPhysicalIntersectionTest::RunTest(const FString& Parameters)
+{
+	// A 0.5 cm retained strip on 125000 cm bounds must not disappear because its
+	// intersection alpha is below 1e-4. Both entering and leaving crossings are required.
+	TArray<FVector2D> Polygon{ { 0., 0. }, { 125000., 0. }, { 125000., 100. }, { 0., 100. } };
+	TestTrue(TEXT("Small physical cut survives large source edges"), FGeometryUtils::ClipPolygonByHalfPlane(Polygon, { .5, 0. }, { 1., 0. }));
+	TestEqual(TEXT("Thin retained rectangle has four distinct corners"), Polygon.Num(), 4);
+	TestTrue(TEXT("Bottom intersection remains on the cutting plane"),
+		Polygon.ContainsByPredicate([](FVector2D P) { return P.Equals(FVector2D(.5, 0.), 1.e-8); }));
+	TestTrue(TEXT("Top intersection remains on the cutting plane"),
+		Polygon.ContainsByPredicate([](FVector2D P) { return P.Equals(FVector2D(.5, 100.), 1.e-8); }));
+
+	// Opposite signed distances can have a tiny difference. Their true ratio is 1/3,
+	// while a midpoint fallback would put the long-edge intersection 166 cm off target.
+	Polygon = { { 0., -1.e-6 }, { 1000., 2.e-6 }, { 1000., 100. }, { 0., 100. } };
+	TestTrue(TEXT("Shallow crossing keeps its precise ratio"), FGeometryUtils::ClipPolygonByHalfPlane(Polygon, { 0., 0. }, { 0., 1. }));
+	TestTrue(TEXT("Shallow edge intersects at one third, not its midpoint"),
+		Polygon.ContainsByPredicate([](FVector2D P) { return P.Equals(FVector2D(1000. / 3., 0.), 1.e-8); }));
 	return true;
 }
 
