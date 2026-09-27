@@ -187,8 +187,10 @@ int64 VoronoiUtils::GetHalfPlaneClipCount()
 static TAutoConsoleVariable<int32> CVarVoronoiSpatialPruning(TEXT("r.ProcGen.Voronoi.SpatialPruning"),
 	1,
 	TEXT("Voronoi cell build: 1 = skip the bisectors that provably cannot cut the cell, 0 = clip against every ")
-		TEXT("site. Both paths produce the same diagram; 0 exists so the automation suite can prove that. Takes ")
-			TEXT("effect on the next generation, and only where levels are generated, so it is not a client switch."),
+		TEXT("site. Pruned and exhaustive paths are identical in the default ascending clip order. Spatial clip order ")
+			TEXT("needs a valid site index (pruning enabled and at least MinSitesForSpatialPruning, currently 64, sites); ")
+				TEXT("changing index availability can change its floating-point vertices. Takes effect on the next generation ")
+					TEXT("only where levels are generated, so it is not a client switch."),
 	ECVF_Cheat | ECVF_RenderThreadSafe);
 
 float FVoronoiCell2D::GetArea() const
@@ -562,8 +564,10 @@ void UVoronoiGenerator2D::ComputeVoronoiCells(const TArray<FVector2D>& Sites, FV
 
 // The cell is the bounds box clipped by the bisector against every other site. A site farther than 2R from a working
 // polygon of radius R cannot cut it, so skipping it drops a provable no-op and leaves the clips performed, their order
-// and every vertex bit-for-bit identical to the exhaustive path. Deciding from the final cell radius would prune far
-// more, but a clip that only grazes an intermediate polygon still moves the vertices later clips intersect against.
+// and every vertex bit-for-bit identical to the exhaustive path in the default ascending clip order. Spatial preclips
+// require a valid index (pruning enabled and at least MinSitesForSpatialPruning, currently 64, sites); changing index
+// availability can change their floating-point vertices. Deciding from the final cell radius would prune far more,
+// but a clip that grazes an intermediate polygon still moves the vertices later clips intersect against.
 void UVoronoiGenerator2D::ComputeCellForSite(FVoronoiCell2D& OutCell,
 	int32													 SiteIndex,
 	const TArray<FVector2D>&								 AllSites,

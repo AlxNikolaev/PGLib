@@ -106,12 +106,13 @@ namespace VoroIndexTest
 		return Sites;
 	}
 
-	static FVoronoiDiagram2D BuildDiagram(const FBox2D& Bounds, const TArray<FVector2D>& Sites, const int32 PruningValue)
+	static FVoronoiDiagram2D BuildDiagram(
+		const FBox2D& Bounds, const TArray<FVector2D>& Sites, const int32 PruningValue, const bool bSpatialOrder = false)
 	{
 		const FScopedPruning Pruning(PruningValue);
 
 		UVoronoiGenerator2D* Generator = NewObject<UVoronoiGenerator2D>();
-		Generator->SetBounds(Bounds)->SetSeed(TEXT("SpatialIndexEquivalence"));
+		Generator->SetBounds(Bounds)->SetSeed(TEXT("SpatialIndexEquivalence"))->SetSpatialClipOrder(bSpatialOrder);
 		return Generator->GenerateFromSites(Sites);
 	}
 
@@ -233,8 +234,8 @@ namespace VoroIndexTest
 	}
 } // namespace VoroIndexTest
 
-// The spatially pruned cell build must produce the same diagram as the exhaustive one, not an equivalent-looking
-// one; this is the guard that lets pruning default to on.
+// In default ascending clip order, the pruned cell build must match the exhaustive one exactly;
+// spatial clip order has a separate repeat-determinism contract under the same indexed configuration.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVoronoiPrunedMatchesFullScanTest, "ProceduralGeometry.Voronoi.PrunedMatchesFullScan", DefaultTestFlags)
 
 bool FVoronoiPrunedMatchesFullScanTest::RunTest(const FString& Parameters)
@@ -283,6 +284,56 @@ bool FVoronoiPrunedMatchesFullScanTest::RunTest(const FString& Parameters)
 		}
 	}
 
+	return true;
+}
+
+// Spatial ordering repeats exactly with the same indexed configuration; legacy ascending order retains pruning equivalence.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVoronoiSpatialClipOrderDeterministicTest, "ProceduralGeometry.Voronoi.SpatialClipOrderDeterministic", DefaultTestFlags)
+
+bool FVoronoiSpatialClipOrderDeterministicTest::RunTest(const FString& Parameters)
+{
+	const FBox2D						Bounds = VoroIndexTest::TestBounds();
+	const VoroIndexTest::FScopedPruning IndexedPruning(1);
+	if (!TestNotNull(TEXT("Spatial pruning console variable exists"), IndexedPruning.CVar))
+		return false;
+	TestEqual(TEXT("Indexed spatial configuration enables pruning"), IndexedPruning.CVar->GetInt(), 1);
+	for (const int32 Count : { 64, 256 })
+	{
+		const TArray<FVector2D> Sites = VoroIndexTest::MakeJitteredLattice(Bounds, Count, 8321 + Count);
+		FVoronoiSiteIndex		Index;
+		Index.Build(Sites, Bounds);
+		if (!TestTrue(TEXT("Fixture has at least 64 sites and a valid spatial index"), Sites.Num() >= 64 && Index.IsValid()))
+			return false;
+		const FString			Label = FString::Printf(TEXT("indexed spatial repeat N=%d"), Count);
+		const FVoronoiDiagram2D First = VoroIndexTest::BuildDiagram(Bounds, Sites, 1, true);
+		const FVoronoiDiagram2D Second = VoroIndexTest::BuildDiagram(Bounds, Sites, 1, true);
+		TestEqual(TEXT("Spatial build produced one cell per input site"), First.Cells.Num(), Sites.Num());
+		int32 ValidCells = 0;
+		int32 AdjacencyEntries = 0;
+		for (const FVoronoiCell2D& Cell : First.Cells)
+		{
+			if (!Cell.bIsValid)
+				continue;
+			++ValidCells;
+			TestTrue(TEXT("Valid spatial cell has polygon vertices"), Cell.Vertices.Num() >= 3);
+			for (const FVector2D& Vertex : Cell.Vertices)
+				TestTrue(TEXT("Spatial vertices are finite"), FMath::IsFinite(Vertex.X) && FMath::IsFinite(Vertex.Y));
+			for (const int32 Neighbor : Cell.Neighbors)
+			{
+				++AdjacencyEntries;
+				TestTrue(TEXT("Spatial adjacency names another existing cell"), First.Cells.IsValidIndex(Neighbor) && Neighbor != Cell.CellIndex);
+			}
+		}
+		TestTrue(TEXT("Spatial build has nonzero valid cells"), ValidCells > 0);
+		TestTrue(TEXT("Spatial build has nonzero adjacency"), AdjacencyEntries > 0);
+		if (!VoroIndexTest::DiagramsMatch(*this, Label, First, Second))
+			return false;
+		const FVoronoiDiagram2D Exhaustive = VoroIndexTest::BuildDiagram(Bounds, Sites, 0);
+		const FVoronoiDiagram2D Pruned = VoroIndexTest::BuildDiagram(Bounds, Sites, 1);
+		if (!VoroIndexTest::DiagramsMatch(*this, TEXT("default ascending pruning equivalence"), Exhaustive, Pruned))
+			return false;
+	}
 	return true;
 }
 

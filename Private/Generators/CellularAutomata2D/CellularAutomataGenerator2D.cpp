@@ -348,7 +348,7 @@ FCellularAutomataGridData UCellularAutomataGenerator2D::GenerateInternal()
 	InitializeRandomStream();
 
 	UE_LOG(LogRoguelikeGeometry,
-		Log,
+		Verbose,
 		TEXT("[CA] Generate() — Bounds=(%.1f,%.1f)-(%.1f,%.1f) GridSize=%d Seed='%s' FillProb=%.2f Iterations=%d MinRegion=%d KeepCenter=%s"),
 		Bounds.Min.X,
 		Bounds.Min.Y,
@@ -366,7 +366,8 @@ FCellularAutomataGridData UCellularAutomataGenerator2D::GenerateInternal()
 
 	if (BoundsWidth <= 0.0f || BoundsHeight <= 0.0f)
 	{
-		UE_LOG(LogRoguelikeGeometry, Warning, TEXT("[CA] Invalid bounds (%.1fx%.1f) — nothing to generate."), BoundsWidth, BoundsHeight);
+		UE_LOG(
+			LogRoguelikeGeometry, Warning, TEXT("seed=%s [CA] Invalid bounds (%.1fx%.1f) — nothing to generate."), *Seed, BoundsWidth, BoundsHeight);
 		FCellularAutomataGridData EmptyResult;
 		EmptyResult.CenterRegionId = -1;
 		EmptyResult.GridWidth = 0;
@@ -394,7 +395,8 @@ FCellularAutomataGridData UCellularAutomataGenerator2D::GenerateInternal()
 		const int32 DegradedHeight = FMath::CeilToInt(BoundsHeight / static_cast<float>(EffectiveGridSize));
 		UE_LOG(LogRoguelikeGeometry,
 			Warning,
-			TEXT("[CA] Cell budget exceeded: GridSize %d would produce >%lld cells; degrading to GridSize %d (%dx%d)."),
+			TEXT("seed=%s [CA] Cell budget exceeded: GridSize %d would produce >%lld cells; degrading to GridSize %d (%dx%d)."),
+			*Seed,
 			GridSize,
 			PGGrid::MaxGridCells,
 			EffectiveGridSize,
@@ -407,7 +409,7 @@ FCellularAutomataGridData UCellularAutomataGenerator2D::GenerateInternal()
 	const int32 GWidth = FMath::CeilToInt(BoundsWidth / CellSizeVal);
 	const int32 GHeight = FMath::CeilToInt(BoundsHeight / CellSizeVal);
 
-	UE_LOG(LogRoguelikeGeometry, Log, TEXT("[CA] Grid dimensions: %dx%d (%d total cells)"), GWidth, GHeight, GWidth * GHeight);
+	UE_LOG(LogRoguelikeGeometry, Verbose, TEXT("seed=%s [CA] Grid dimensions: %dx%d (%d total cells)"), *Seed, GWidth, GHeight, GWidth * GHeight);
 
 	const int32 TotalCells = GWidth * GHeight;
 
@@ -463,6 +465,7 @@ FCellularAutomataGridData UCellularAutomataGenerator2D::GenerateInternal()
 		Swap(Grid, NewGrid);
 	}
 
+	if (UE_LOG_ACTIVE(LogRoguelikeGeometry, Verbose))
 	{
 		int32 FloorCount = 0;
 		for (bool bIsFloor : Grid)
@@ -473,8 +476,9 @@ FCellularAutomataGridData UCellularAutomataGenerator2D::GenerateInternal()
 			}
 		}
 		UE_LOG(LogRoguelikeGeometry,
-			Log,
-			TEXT("[CA] After %d iterations: %d floor cells (%.1f%% of grid)"),
+			Verbose,
+			TEXT("seed=%s [CA] After %d iterations: %d floor cells (%.1f%% of grid)"),
+			*Seed,
 			Iterations,
 			FloorCount,
 			100.0f * FloorCount / TotalCells);
@@ -488,7 +492,7 @@ FCellularAutomataGridData UCellularAutomataGenerator2D::GenerateInternal()
 
 	FloodFillRegions(Grid, GWidth, GHeight, CenterX, CenterY, RegionIds, Regions, CenterRegionId);
 
-	UE_LOG(LogRoguelikeGeometry, Log, TEXT("[CA] Flood-fill found %d regions, center region=%d"), Regions.Num(), CenterRegionId);
+	UE_LOG(LogRoguelikeGeometry, Verbose, TEXT("seed=%s [CA] Flood-fill found %d regions, center region=%d"), *Seed, Regions.Num(), CenterRegionId);
 
 	// When the exact center cell is a wall, fall back to the nearest region so culling has a target to preserve.
 	if (bKeepCenterRegion && CenterRegionId < 0 && Regions.Num() > 0)
@@ -510,7 +514,11 @@ FCellularAutomataGridData UCellularAutomataGenerator2D::GenerateInternal()
 			}
 		}
 		CenterRegionId = BestRegion;
-		UE_LOG(LogRoguelikeGeometry, Log, TEXT("[CA] Center cell is wall — KeepCenterRegion fallback to nearest region %d"), CenterRegionId);
+		UE_LOG(LogRoguelikeGeometry,
+			Verbose,
+			TEXT("seed=%s [CA] Center cell is wall — KeepCenterRegion fallback to nearest region %d"),
+			*Seed,
+			CenterRegionId);
 	}
 
 	TArray<bool> SurvivingRegions;
@@ -536,8 +544,9 @@ FCellularAutomataGridData UCellularAutomataGenerator2D::GenerateInternal()
 	}
 
 	UE_LOG(LogRoguelikeGeometry,
-		Log,
-		TEXT("[CA] Culled %d regions below MinRegionSize=%d, %d surviving"),
+		Verbose,
+		TEXT("seed=%s [CA] Culled %d regions below MinRegionSize=%d, %d surviving"),
+		*Seed,
 		CulledCount,
 		MinRegionSize,
 		Regions.Num() - CulledCount);
@@ -545,7 +554,14 @@ FCellularAutomataGridData UCellularAutomataGenerator2D::GenerateInternal()
 	FLayoutDiagram2D Diagram = BuildDiagramFromRegions(Grid, RegionIds, Regions, CenterRegionId, GWidth, GHeight, CellSizeVal);
 
 	const double ElapsedMs = (FPlatformTime::Seconds() - StartTime) * 1000.0;
-	UE_LOG(LogRoguelikeGeometry, Log, TEXT("[CA] Generate() complete: %d cells in %.2fms"), Diagram.Cells.Num(), ElapsedMs);
+	UE_LOG(LogRoguelikeGeometry,
+		Log,
+		TEXT("seed=%s cellSize=%g degraded=%d [CA] Generate() complete: %d cells in %.2fms"),
+		*Seed,
+		double(CellSizeVal),
+		bDegradedResolution,
+		Diagram.Cells.Num(),
+		ElapsedMs);
 
 	FCellularAutomataGridData Result;
 	Result.Grid = MoveTemp(Grid);
@@ -566,7 +582,7 @@ void UCellularAutomataGenerator2D::CarveCorridors(FCellularAutomataGridData& Gri
 {
 	if (Probability <= 0.0f)
 	{
-		UE_LOG(LogRoguelikeGeometry, Verbose, TEXT("[CA] CarveCorridors: probability=0, skipping"));
+		UE_LOG(LogRoguelikeGeometry, Verbose, TEXT("streamSeed=%d [CA] CarveCorridors: probability=0, skipping"), InRandomStream.GetInitialSeed());
 		return;
 	}
 
@@ -583,7 +599,10 @@ void UCellularAutomataGenerator2D::CarveCorridors(FCellularAutomataGridData& Gri
 
 	if (SurvivingIds.Num() < 2)
 	{
-		UE_LOG(LogRoguelikeGeometry, Verbose, TEXT("[CA] CarveCorridors: fewer than 2 surviving regions, nothing to connect"));
+		UE_LOG(LogRoguelikeGeometry,
+			Verbose,
+			TEXT("streamSeed=%d [CA] CarveCorridors: fewer than 2 surviving regions, nothing to connect"),
+			InRandomStream.GetInitialSeed());
 		return;
 	}
 
@@ -726,8 +745,9 @@ void UCellularAutomataGenerator2D::CarveCorridors(FCellularAutomataGridData& Gri
 	}
 
 	UE_LOG(LogRoguelikeGeometry,
-		Log,
-		TEXT("[CA] CarveCorridors: carved %d corridors (probability=%.2f, width=%d)"),
+		Verbose,
+		TEXT("streamSeed=%d [CA] CarveCorridors: carved %d corridors (probability=%.2f, width=%d)"),
+		InRandomStream.GetInitialSeed(),
 		CorridorsCarved,
 		Probability,
 		Width);
@@ -737,7 +757,8 @@ void UCellularAutomataGenerator2D::RebuildDiagram(FCellularAutomataGridData& Gri
 {
 	UE_LOG(LogRoguelikeGeometry,
 		Verbose,
-		TEXT("[CA] RebuildDiagram: rebuilding diagram from modified grid (%dx%d)"),
+		TEXT("seed=%s [CA] RebuildDiagram: rebuilding diagram from modified grid (%dx%d)"),
+		*Seed,
 		GridData.GridWidth,
 		GridData.GridHeight);
 
@@ -754,7 +775,7 @@ void UCellularAutomataGenerator2D::RebuildDiagram(FCellularAutomataGridData& Gri
 	GridData.Diagram = BuildDiagramFromRegions(
 		GridData.Grid, GridData.RegionIds, GridData.Regions, GridData.CenterRegionId, GridData.GridWidth, GridData.GridHeight, GridData.CellSize);
 
-	UE_LOG(LogRoguelikeGeometry, Log, TEXT("[CA] RebuildDiagram: produced %d cells"), GridData.Diagram.Cells.Num());
+	UE_LOG(LogRoguelikeGeometry, Verbose, TEXT("seed=%s [CA] RebuildDiagram: produced %d cells"), *Seed, GridData.Diagram.Cells.Num());
 }
 
 FLayoutDiagram2D UCellularAutomataGenerator2D::BuildDiagramFromRegions(const TArray<bool>& Grid,
@@ -781,11 +802,11 @@ FLayoutDiagram2D UCellularAutomataGenerator2D::BuildDiagramFromRegions(const TAr
 		}
 	}
 
-	UE_LOG(LogRoguelikeGeometry, Log, TEXT("[CA] BuildDiagramFromRegions: %d surviving regions"), SurvivingRegionIds.Num());
+	UE_LOG(LogRoguelikeGeometry, Verbose, TEXT("seed=%s [CA] BuildDiagramFromRegions: %d surviving regions"), *Seed, SurvivingRegionIds.Num());
 
 	if (SurvivingRegionIds.Num() == 0)
 	{
-		UE_LOG(LogRoguelikeGeometry, Warning, TEXT("[CA] No surviving regions — returning empty diagram"));
+		UE_LOG(LogRoguelikeGeometry, Warning, TEXT("seed=%s [CA] No surviving regions — returning empty diagram"), *Seed);
 		return FLayoutDiagram2D();
 	}
 
@@ -804,8 +825,13 @@ FLayoutDiagram2D UCellularAutomataGenerator2D::BuildDiagramFromRegions(const TAr
 		Cell.CellIndex = i;
 		Cell.Vertices = TraceBoundaryPolygon(Region, RegionIds, RegionId, InGridWidth, InGridHeight, CellSize);
 
-		UE_LOG(
-			LogRoguelikeGeometry, Verbose, TEXT("[CA] Region %d: %d grid cells, %d boundary vertices"), RegionId, Region.Num(), Cell.Vertices.Num());
+		UE_LOG(LogRoguelikeGeometry,
+			Verbose,
+			TEXT("seed=%s [CA] Region %d: %d grid cells, %d boundary vertices"),
+			*Seed,
+			RegionId,
+			Region.Num(),
+			Cell.Vertices.Num());
 
 		FVector2D CenterSum = FVector2D::ZeroVector;
 
@@ -1080,7 +1106,9 @@ TArray<FVector2D> UCellularAutomataGenerator2D::TraceBoundaryPolygon(
 	{
 		UE_LOG(LogRoguelikeGeometry,
 			Warning,
-			TEXT("[CA] Region %d traced a degenerate boundary (%d vertices); it keeps its diagram cell but contributes no footprint polygon."),
+			TEXT(
+				"seed=%s [CA] Region %d traced a degenerate boundary (%d vertices); it keeps its diagram cell but contributes no footprint polygon."),
+			*Seed,
 			RegionId,
 			Result.Num());
 		return TArray<FVector2D>();

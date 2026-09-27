@@ -204,7 +204,7 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 	const int32	  RequestedRoomCount = Queue.Num();
 
 	UE_LOG(LogRoguelikeGeometry,
-		Log,
+		Verbose,
 		TEXT("[DW] Generate() — GridSize=%d Seed='%s' RoomTypes=%d RequestedRooms=%d CorridorLen=[%d,%d] Width=[%d,%d] Turn=%.2f CorridorBranch=%.2f "
 			 "Border=%d Wall=%d Attempts=%d Shuffle=%s Branch=%.2f"),
 		GridSize,
@@ -237,7 +237,7 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 
 	if (RequestedRoomCount == 0)
 	{
-		UE_LOG(LogRoguelikeGeometry, Warning, TEXT("[DW] No room types with positive count — nothing to generate."));
+		UE_LOG(LogRoguelikeGeometry, Warning, TEXT("seed=%s [DW] No room types with positive count — nothing to generate."), *Seed);
 		return MakeEmptyResult();
 	}
 
@@ -754,16 +754,19 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 	{
 		UE_LOG(LogRoguelikeGeometry,
 			Warning,
-			TEXT("[DW] Placement shortfall: placed %d / %d rooms (open set exhausted, %d unplaced)."),
+			TEXT("seed=%s [DW] Placement shortfall: placed %d / %d rooms (open set exhausted, %d unplaced)."),
+			*Seed,
 			PlacedCount,
 			RequestedRoomCount,
 			RequestedRoomCount - PlacedCount);
 	}
 
 	UE_LOG(LogRoguelikeGeometry,
-		Log,
-		TEXT("[DW] Stats: traceCalls=%d turns=%d forkSeeds=%d forksPlaced=%d | rejects: selfTouch=%d roomFit=%d clearance=%d | backtracks=%d | "
-			 "corridors=%d"),
+		Verbose,
+		TEXT(
+			"seed=%s [DW] Stats: traceCalls=%d turns=%d forkSeeds=%d forksPlaced=%d | rejects: selfTouch=%d roomFit=%d clearance=%d | backtracks=%d | "
+			"corridors=%d"),
+		*Seed,
 		StatTraceCalls,
 		StatTurns,
 		StatForkSeeds,
@@ -794,7 +797,7 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 
 	if (CellTypeMap.Num() == 0)
 	{
-		UE_LOG(LogRoguelikeGeometry, Warning, TEXT("[DW] No floor cells produced — nothing to generate."));
+		UE_LOG(LogRoguelikeGeometry, Warning, TEXT("seed=%s [DW] No floor cells produced — nothing to generate."), *Seed);
 		return MakeEmptyResult();
 	}
 
@@ -849,7 +852,8 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 
 			UE_LOG(LogRoguelikeGeometry,
 				Warning,
-				TEXT("[DW] Cell budget exceeded: %lldx%lld would exceed %lld cells; degrading by %dx (CellSize=%.1f)."),
+				TEXT("seed=%s [DW] Cell budget exceeded: %lldx%lld would exceed %lld cells; degrading by %dx (CellSize=%.1f)."),
+				*Seed,
 				RawWidth,
 				RawHeight,
 				PGGrid::MaxGridCells,
@@ -863,11 +867,11 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 	const int32		GWidth = (MaxExtent.X - MinExtent.X + 1) + 2 * Pad;
 	const int32		GHeight = (MaxExtent.Y - MinExtent.Y + 1) + 2 * Pad;
 
-	UE_LOG(LogRoguelikeGeometry, Log, TEXT("[DW] Grid dimensions: %dx%d (%d total cells)"), GWidth, GHeight, GWidth * GHeight);
+	UE_LOG(LogRoguelikeGeometry, Verbose, TEXT("seed=%s [DW] Grid dimensions: %dx%d (%d total cells)"), *Seed, GWidth, GHeight, GWidth * GHeight);
 
 	if (GWidth <= 0 || GHeight <= 0)
 	{
-		UE_LOG(LogRoguelikeGeometry, Error, TEXT("[DW] Invalid grid dimensions: %dx%d"), GWidth, GHeight);
+		UE_LOG(LogRoguelikeGeometry, Error, TEXT("seed=%s [DW] Invalid grid dimensions: %dx%d"), *Seed, GWidth, GHeight);
 		return MakeEmptyResult();
 	}
 
@@ -960,8 +964,9 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 	FloodFillRegions(Grid, GWidth, GHeight, CenterX, CenterY, RegionIds, Regions, CenterRegionId);
 
 	UE_LOG(LogRoguelikeGeometry,
-		Log,
-		TEXT("[DW] Walk complete: %d/%d rooms placed, %d corridor segments, %d floor cells, %d regions, center region=%d"),
+		Verbose,
+		TEXT("seed=%s [DW] Walk complete: %d/%d rooms placed, %d corridor segments, %d floor cells, %d regions, center region=%d"),
+		*Seed,
 		PlacedCount,
 		RequestedRoomCount,
 		CorridorPolylines.Num(),
@@ -980,7 +985,14 @@ FDrunkardWalkGridData UDrunkardWalkGenerator2D::GenerateInternal()
 	Bounds = SavedBounds;
 
 	const double ElapsedMs = (FPlatformTime::Seconds() - StartTime) * 1000.0;
-	UE_LOG(LogRoguelikeGeometry, Log, TEXT("[DW] Generate() complete: %d cells in %.2fms"), Diagram.Cells.Num(), ElapsedMs);
+	UE_LOG(LogRoguelikeGeometry,
+		Log,
+		TEXT("seed=%s cellSize=%g degraded=%d [DW] Generate() complete: %d cells in %.2fms"),
+		*Seed,
+		double(CellSizeVal),
+		bDegradedResolution,
+		Diagram.Cells.Num(),
+		ElapsedMs);
 
 	FDrunkardWalkGridData Result;
 	Result.Grid = MoveTemp(Grid);

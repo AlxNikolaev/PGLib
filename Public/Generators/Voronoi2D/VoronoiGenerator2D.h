@@ -155,8 +155,8 @@ public:
 	UVoronoiGenerator2D* SetMinSiteDistance(float Distance);
 	UVoronoiGenerator2D* SetRelaxationIterations(int32 Iterations);
 
-	/** Preclip nearby bucket shells, then complete with the normal provably safe radius pruning.
-	 * Improves dense ordered grids; changes floating-point clip order, so callers opt in explicitly. */
+	/** Opt into nearby preclips when a valid index exists: pruning enabled and at least MinSitesForSpatialPruning (currently 64) sites.
+	 * Improves dense ordered grids; index availability changes floating-point clip order and can change vertices. */
 	UVoronoiGenerator2D* SetSpatialClipOrder(bool bEnabled);
 #if WITH_DEV_AUTOMATION_TESTS
 	/** Holds the same per-cell algorithm to a single thread for exact serial/parallel fixtures.
@@ -182,8 +182,9 @@ private:
 
 	/**
 	 * Clips the cell against all relevant bisectors, with optional local preclips before ascending completion.
-	 * A non-null Index skips the sites whose bisector provably cannot touch the working polygon; the sequence
-	 * of clips that do happen, and therefore the resulting vertex list, is the same either way.
+	 * With default ascending clip order, a non-null Index skips only proven no-ops, preserving exact vertices.
+	 * Spatial preclips need a valid index (pruning enabled and at least MinSitesForSpatialPruning, currently 64, sites);
+	 * changing index availability can change the floating-point vertex list when spatial clip order is enabled.
 	 */
 	void ComputeCellForSite(FVoronoiCell2D& OutCell,
 		int32								SiteIndex,
