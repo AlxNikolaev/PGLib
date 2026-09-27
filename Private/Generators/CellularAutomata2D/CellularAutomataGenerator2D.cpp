@@ -414,7 +414,53 @@ FCellularAutomataGridData UCellularAutomataGenerator2D::GenerateInternal()
 	const int32 TotalCells = GWidth * GHeight;
 
 	TArray<bool> Grid;
-	Grid.Init(false, TotalCells);
+	BuildInitialGrid(Grid, GWidth, GHeight);
+
+	ApplyRules(Grid, GWidth, GHeight, TotalCells);
+
+	TArray<int32>			  RegionIds;
+	TArray<TArray<FIntPoint>> Regions;
+	int32					  CenterRegionId = -1;
+	const int32				  CenterX = GWidth / 2;
+	const int32				  CenterY = GHeight / 2;
+
+	FloodFillRegions(Grid, GWidth, GHeight, CenterX, CenterY, RegionIds, Regions, CenterRegionId);
+
+	UE_LOG(LogRoguelikeGeometry, Verbose, TEXT("seed=%s [CA] Flood-fill found %d regions, center region=%d"), *Seed, Regions.Num(), CenterRegionId);
+
+	TArray<bool> SurvivingRegions;
+	CullRegions(Grid, Regions, CenterRegionId, SurvivingRegions, GWidth, CenterX, CenterY, CellSizeVal);
+
+	FLayoutDiagram2D Diagram = BuildDiagramFromRegions(Grid, RegionIds, Regions, CenterRegionId, GWidth, GHeight, CellSizeVal);
+
+	const double ElapsedMs = (FPlatformTime::Seconds() - StartTime) * 1000.0;
+	UE_LOG(LogRoguelikeGeometry,
+		Log,
+		TEXT("seed=%s cellSize=%g degraded=%d [CA] Generate() complete: %d cells in %.2fms"),
+		*Seed,
+		double(CellSizeVal),
+		bDegradedResolution,
+		Diagram.Cells.Num(),
+		ElapsedMs);
+
+	FCellularAutomataGridData Result;
+	Result.Grid = MoveTemp(Grid);
+	Result.RegionIds = MoveTemp(RegionIds);
+	Result.Regions = MoveTemp(Regions);
+	Result.SurvivingRegions = MoveTemp(SurvivingRegions);
+	Result.CenterRegionId = CenterRegionId;
+	Result.GridWidth = GWidth;
+	Result.GridHeight = GHeight;
+	Result.CellSize = CellSizeVal;
+	Result.bDegradedResolution = bDegradedResolution;
+	Result.Diagram = MoveTemp(Diagram);
+
+	return Result;
+}
+
+void UCellularAutomataGenerator2D::BuildInitialGrid(TArray<bool>& Grid, int32 GWidth, int32 GHeight)
+{
+	Grid.Init(false, GWidth * GHeight);
 
 	for (int32 Y = 0; Y < GHeight; ++Y)
 	{
@@ -427,7 +473,10 @@ FCellularAutomataGridData UCellularAutomataGenerator2D::GenerateInternal()
 			Grid[Y * GWidth + X] = (!VariatSelection::RollChance(FillProbability, RandomStream));
 		}
 	}
+}
 
+void UCellularAutomataGenerator2D::ApplyRules(TArray<bool>& Grid, int32 GWidth, int32 GHeight, int32 TotalCells) const
+{
 	const uint16 BirthMask = RuleToBitmask(BirthRule);
 	const uint16 SurvivalMask = RuleToBitmask(SurvivalRule);
 
@@ -483,17 +532,17 @@ FCellularAutomataGridData UCellularAutomataGenerator2D::GenerateInternal()
 			FloorCount,
 			100.0f * FloorCount / TotalCells);
 	}
+}
 
-	TArray<int32>			  RegionIds;
-	TArray<TArray<FIntPoint>> Regions;
-	int32					  CenterRegionId = -1;
-	const int32				  CenterX = GWidth / 2;
-	const int32				  CenterY = GHeight / 2;
-
-	FloodFillRegions(Grid, GWidth, GHeight, CenterX, CenterY, RegionIds, Regions, CenterRegionId);
-
-	UE_LOG(LogRoguelikeGeometry, Verbose, TEXT("seed=%s [CA] Flood-fill found %d regions, center region=%d"), *Seed, Regions.Num(), CenterRegionId);
-
+void UCellularAutomataGenerator2D::CullRegions(TArray<bool>& Grid,
+	const TArray<TArray<FIntPoint>>&						 Regions,
+	int32&													 CenterRegionId,
+	TArray<bool>&											 SurvivingRegions,
+	int32													 GWidth,
+	int32													 CenterX,
+	int32													 CenterY,
+	float													 CellSizeVal) const
+{
 	// When the exact center cell is a wall, fall back to the nearest region so culling has a target to preserve.
 	if (bKeepCenterRegion && CenterRegionId < 0 && Regions.Num() > 0)
 	{
@@ -521,7 +570,6 @@ FCellularAutomataGridData UCellularAutomataGenerator2D::GenerateInternal()
 			CenterRegionId);
 	}
 
-	TArray<bool> SurvivingRegions;
 	SurvivingRegions.Init(true, Regions.Num());
 
 	int32 CulledCount = 0;
@@ -550,33 +598,65 @@ FCellularAutomataGridData UCellularAutomataGenerator2D::GenerateInternal()
 		CulledCount,
 		MinRegionSize,
 		Regions.Num() - CulledCount);
-
-	FLayoutDiagram2D Diagram = BuildDiagramFromRegions(Grid, RegionIds, Regions, CenterRegionId, GWidth, GHeight, CellSizeVal);
-
-	const double ElapsedMs = (FPlatformTime::Seconds() - StartTime) * 1000.0;
-	UE_LOG(LogRoguelikeGeometry,
-		Log,
-		TEXT("seed=%s cellSize=%g degraded=%d [CA] Generate() complete: %d cells in %.2fms"),
-		*Seed,
-		double(CellSizeVal),
-		bDegradedResolution,
-		Diagram.Cells.Num(),
-		ElapsedMs);
-
-	FCellularAutomataGridData Result;
-	Result.Grid = MoveTemp(Grid);
-	Result.RegionIds = MoveTemp(RegionIds);
-	Result.Regions = MoveTemp(Regions);
-	Result.SurvivingRegions = MoveTemp(SurvivingRegions);
-	Result.CenterRegionId = CenterRegionId;
-	Result.GridWidth = GWidth;
-	Result.GridHeight = GHeight;
-	Result.CellSize = CellSizeVal;
-	Result.bDegradedResolution = bDegradedResolution;
-	Result.Diagram = MoveTemp(Diagram);
-
-	return Result;
 }
+
+namespace CellularAutomataGenerator2DStages
+{
+	/** Carves one accepted pair with the original square brush and outer-ring exclusion. */
+	void StampCorridor(FCellularAutomataGridData& GridData, int32 RegionIdA, FIntPoint BestA, FIntPoint BestB, int32 Width)
+	{
+		const int32 HalfWidth = Width / 2;
+
+		// Bresenham line from BestA to BestB.
+		int32		X0 = BestA.X, Y0 = BestA.Y;
+		int32		X1 = BestB.X, Y1 = BestB.Y;
+		const int32 DX = FMath::Abs(X1 - X0);
+		const int32 DY = -FMath::Abs(Y1 - Y0);
+		const int32 SX = X0 < X1 ? 1 : -1;
+		const int32 SY = Y0 < Y1 ? 1 : -1;
+		int32		Err = DX + DY;
+
+		while (true)
+		{
+			for (int32 OffY = -HalfWidth; OffY <= HalfWidth; ++OffY)
+			{
+				for (int32 OffX = -HalfWidth; OffX <= HalfWidth; ++OffX)
+				{
+					const int32 CX = X0 + OffX;
+					const int32 CY = Y0 + OffY;
+
+					// The outermost ring stays wall.
+					if (CX > 0 && CX < GridData.GridWidth - 1 && CY > 0 && CY < GridData.GridHeight - 1)
+					{
+						const int32 Idx = CY * GridData.GridWidth + CX;
+						if (!GridData.Grid[Idx])
+						{
+							GridData.Grid[Idx] = true;
+							GridData.RegionIds[Idx] = RegionIdA;
+						}
+					}
+				}
+			}
+
+			if (X0 == X1 && Y0 == Y1)
+			{
+				break;
+			}
+
+			const int32 E2 = 2 * Err;
+			if (E2 >= DY)
+			{
+				Err += DY;
+				X0 += SX;
+			}
+			if (E2 <= DX)
+			{
+				Err += DX;
+				Y0 += SY;
+			}
+		}
+	}
+} // namespace CellularAutomataGenerator2DStages
 
 void UCellularAutomataGenerator2D::CarveCorridors(FCellularAutomataGridData& GridData, float Probability, int32 Width, FRandomStream& InRandomStream)
 {
@@ -689,56 +769,7 @@ void UCellularAutomataGenerator2D::CarveCorridors(FCellularAutomataGridData& Gri
 				}
 			}
 
-			const int32 HalfWidth = Width / 2;
-
-			// Bresenham line from BestA to BestB.
-			int32		X0 = BestA.X, Y0 = BestA.Y;
-			int32		X1 = BestB.X, Y1 = BestB.Y;
-			const int32 DX = FMath::Abs(X1 - X0);
-			const int32 DY = -FMath::Abs(Y1 - Y0);
-			const int32 SX = X0 < X1 ? 1 : -1;
-			const int32 SY = Y0 < Y1 ? 1 : -1;
-			int32		Err = DX + DY;
-
-			while (true)
-			{
-				for (int32 OffY = -HalfWidth; OffY <= HalfWidth; ++OffY)
-				{
-					for (int32 OffX = -HalfWidth; OffX <= HalfWidth; ++OffX)
-					{
-						const int32 CX = X0 + OffX;
-						const int32 CY = Y0 + OffY;
-
-						// The outermost ring stays wall.
-						if (CX > 0 && CX < GridData.GridWidth - 1 && CY > 0 && CY < GridData.GridHeight - 1)
-						{
-							const int32 Idx = CY * GridData.GridWidth + CX;
-							if (!GridData.Grid[Idx])
-							{
-								GridData.Grid[Idx] = true;
-								GridData.RegionIds[Idx] = RegionIdA;
-							}
-						}
-					}
-				}
-
-				if (X0 == X1 && Y0 == Y1)
-				{
-					break;
-				}
-
-				const int32 E2 = 2 * Err;
-				if (E2 >= DY)
-				{
-					Err += DY;
-					X0 += SX;
-				}
-				if (E2 <= DX)
-				{
-					Err += DX;
-					Y0 += SY;
-				}
-			}
+			CellularAutomataGenerator2DStages::StampCorridor(GridData, RegionIdA, BestA, BestB, Width);
 
 			++CorridorsCarved;
 		}
@@ -913,8 +944,8 @@ FLayoutDiagram2D UCellularAutomataGenerator2D::BuildDiagramFromRegions(const TAr
 	return Diagram;
 }
 
-TArray<FVector2D> UCellularAutomataGenerator2D::TraceBoundaryPolygon(
-	const TArray<FIntPoint>& Region, const TArray<int32>& RegionIds, int32 RegionId, int32 InGridWidth, int32 InGridHeight, float InCellSize) const
+TArray<TPair<FIntPoint, FIntPoint>> UCellularAutomataGenerator2D::CollectBoundaryEdges(
+	const TArray<FIntPoint>& Region, const TArray<int32>& RegionIds, int32 RegionId, int32 InGridWidth, int32 InGridHeight)
 {
 	// Directed boundary edges in grid corner coordinates, counter-clockwise with the interior on the left. A region can
 	// pinch to a single corner, so a corner may carry more than one outgoing edge.
@@ -984,6 +1015,11 @@ TArray<FVector2D> UCellularAutomataGenerator2D::TraceBoundaryPolygon(
 		return A.Value.Y < B.Value.Y;
 	});
 
+	return Edges;
+}
+
+TArray<TArray<FIntPoint>> UCellularAutomataGenerator2D::TraceBoundaryLoops(const TArray<TPair<FIntPoint, FIntPoint>>& Edges)
+{
 	TMap<FIntPoint, TArray<int32, TInlineAllocator<2>>> OutgoingByCorner;
 	for (int32 EdgeIdx = 0; EdgeIdx < Edges.Num(); ++EdgeIdx)
 	{
@@ -1080,6 +1116,15 @@ TArray<FVector2D> UCellularAutomataGenerator2D::TraceBoundaryPolygon(
 			Loops.Add(MoveTemp(Loop));
 		}
 	}
+
+	return Loops;
+}
+
+TArray<FVector2D> UCellularAutomataGenerator2D::TraceBoundaryPolygon(
+	const TArray<FIntPoint>& Region, const TArray<int32>& RegionIds, int32 RegionId, int32 InGridWidth, int32 InGridHeight, float InCellSize) const
+{
+	const auto Edges = CollectBoundaryEdges(Region, RegionIds, RegionId, InGridWidth, InGridHeight);
+	const auto Loops = TraceBoundaryLoops(Edges);
 
 	TArray<FVector2D> Result;
 

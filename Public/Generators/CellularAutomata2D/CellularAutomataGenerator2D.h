@@ -76,6 +76,32 @@ private:
 	/** Core generation pipeline shared by Generate() and GenerateWithGridData(). */
 	FCellularAutomataGridData GenerateInternal();
 
+	/** Initializes the seeded floor mask in row-major order.
+	 * Requires validated dimensions; consumes the original probability draws. */
+	void BuildInitialGrid(TArray<bool>& Grid, int32 GWidth, int32 GHeight);
+	/** Applies authored CA masks to the initialized grid.
+	 * Runs in place without consuming further RNG. */
+	void ApplyRules(TArray<bool>& Grid, int32 GWidth, int32 GHeight, int32 TotalCells) const;
+	/** Selects a center fallback and culls undersized regions in their original order.
+	 * Requires flood-filled regions and writes the
+	 * surviving-region mask. */
+	void CullRegions(TArray<bool>&		 Grid,
+		const TArray<TArray<FIntPoint>>& Regions,
+		int32&							 CenterRegionId,
+		TArray<bool>&					 SurvivingRegions,
+		int32							 GWidth,
+		int32							 CenterX,
+		int32							 CenterY,
+		float							 CellSizeVal) const;
+	/** Collects sorted directed boundary edges for one flood-filled region.
+	 * Region and grid inputs must agree; the returned order is
+	 * deterministic. */
+	static TArray<TPair<FIntPoint, FIntPoint>> CollectBoundaryEdges(
+		const TArray<FIntPoint>& Region, const TArray<int32>& RegionIds, int32 RegionId, int32 InGridWidth, int32 InGridHeight);
+	/** Walks sorted directed edges through pinched corners.
+	 * Requires edge sorting; returns closed loops without hash-order dependence. */
+	static TArray<TArray<FIntPoint>> TraceBoundaryLoops(const TArray<TPair<FIntPoint, FIntPoint>>& Edges);
+
 	static uint16 RuleToBitmask(const TArray<int32>& Rule);
 	int32		  CountWallNeighbors(const TArray<bool>& Grid, int32 X, int32 Y, int32 GridWidth, int32 GridHeight) const;
 

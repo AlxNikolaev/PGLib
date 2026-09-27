@@ -5,6 +5,11 @@
 #include "Generators/LayoutGenerator.h"
 #include "DrunkardWalkGenerator2D.generated.h"
 
+namespace DrunkardWalk2DPrivate
+{
+	struct FRunState;
+}
+
 /** Cell type constants for DrunkardWalk grid cells. */
 namespace EDrunkardWalkCellType
 {
@@ -112,6 +117,8 @@ public:
 	FDrunkardWalkGridData GenerateWithGridData();
 
 private:
+	friend struct DrunkardWalk2DPrivate::FRunState;
+
 	/** Core generation pipeline shared by Generate() and GenerateWithGridData(). */
 	FDrunkardWalkGridData GenerateInternal();
 
