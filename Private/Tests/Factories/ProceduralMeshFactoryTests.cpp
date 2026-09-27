@@ -4,7 +4,7 @@
 // translation units and a plain name would collide.
 
 #include "Factories/ProceduralMeshFactory.h"
-#include "../ProceduralGeometryTestFlags.h"
+#include "../ProceduralGeometryTestTypes.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
 

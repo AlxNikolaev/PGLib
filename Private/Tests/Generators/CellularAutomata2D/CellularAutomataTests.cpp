@@ -1,8 +1,7 @@
 #include "Generators/CellularAutomata2D/CellularAutomataGenerator2D.h"
 #include "Generators/CellularAutomata2D/CellularAutomataConfig.h"
 #include "GridBudget.h"
-#include "../../PGStructuralHash.h"
-#include "../../ProceduralGeometryTestFlags.h"
+#include "../../ProceduralGeometryTestTypes.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
 

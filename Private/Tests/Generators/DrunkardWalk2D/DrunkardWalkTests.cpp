@@ -3,7 +3,7 @@
 #include "Generators/DrunkardWalk2D/DrunkardWalkGenerator2D.h"
 #include "Generators/DrunkardWalk2D/DrunkardWalkConfig.h"
 #include "GridBudget.h"
-#include "../../ProceduralGeometryTestFlags.h"
+#include "../../ProceduralGeometryTestTypes.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
 

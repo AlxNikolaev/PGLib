@@ -1,10 +1,9 @@
-﻿#include "Voro2DTests.h"
+﻿#include "VoronoiTestTypes.h"
 #include "Generators/Voronoi2D/VoronoiGenerator2D.h"
 
 #include "ProceduralGeometry.h"
 #include "UObject/UnrealType.h"
-#include "../../PGStructuralHash.h"
-#include "../../ProceduralGeometryTestFlags.h"
+#include "../../ProceduralGeometryTestTypes.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
 

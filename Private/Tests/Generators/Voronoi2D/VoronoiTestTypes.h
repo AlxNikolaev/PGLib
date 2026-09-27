@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Engine/EngineTypes.h"
+#include "Misc/AutomationTest.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
 
