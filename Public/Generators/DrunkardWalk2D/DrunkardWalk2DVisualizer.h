@@ -12,6 +12,10 @@ class PROCEDURALGEOMETRY_API ADrunkardWalk2DVisualizer : public AActor
 {
 	GENERATED_BODY()
 
+#if WITH_DEV_AUTOMATION_TESTS && WITH_EDITOR
+	friend class FVariatSelectionBudgetMetadataTest;
+#endif
+
 	UPROPERTY(VisibleAnywhere)
 	UProceduralMeshComponent* GridMeshComponent;
 
@@ -31,7 +35,8 @@ class PROCEDURALGEOMETRY_API ADrunkardWalk2DVisualizer : public AActor
 	UPROPERTY(EditInstanceOnly, meta = (ClampMin = 10))
 	int32 GridSize = 100;
 
-	UPROPERTY(EditInstanceOnly, meta = (ToolTip = "Dungeon generation parameters. Resolved into raw DW values on construction."))
+	UPROPERTY(EditInstanceOnly,
+		meta = (ToolTip = "Dungeon generation parameters. Resolved into raw DW values on construction.", SelectionBudgetMin = "TotalRooms"))
 	FDrunkardWalkConfig Config;
 
 	/** Explicit budget, resolved by the same allocator used in runtime locations. */
