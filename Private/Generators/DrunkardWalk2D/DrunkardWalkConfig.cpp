@@ -1,6 +1,6 @@
 #include "Generators/DrunkardWalk2D/DrunkardWalkConfig.h"
 
-#include "Generators/WeightedDistribute.h"
+#include "SelectionRules.h"
 #include "ProceduralGeometry.h"
 
 FDrunkardWalkResolvedParams FDrunkardWalkConfig::ResolveForTotal(int32 TotalRooms) const
