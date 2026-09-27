@@ -1,5 +1,3 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
-
 #include "Generators/Voronoi2D/Voronoi2DVisualizer.h"
 
 #include "Generators/Voronoi2D/VoronoiGenerator2D.h"
