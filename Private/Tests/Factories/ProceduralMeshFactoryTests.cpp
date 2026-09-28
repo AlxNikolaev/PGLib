@@ -1,4 +1,3 @@
-// Fill out your copyright notice in the Description page of Project Settings.
 //
 // Helpers carry a file-specific prefix rather than an anonymous namespace: unity builds can merge these test
 // translation units and a plain name would collide.

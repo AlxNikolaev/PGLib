@@ -5,7 +5,7 @@
 
 #if WITH_DEV_AUTOMATION_TESTS
 
-namespace
+namespace CellularAutomataTestsPrivate
 {
 	/**
 	 * Hand-built blobs separated by walls, so the disconnected pairs the corridor tests need are a property of the
@@ -64,7 +64,7 @@ namespace
 		}
 		return Count;
 	}
-} // namespace
+} // namespace CellularAutomataTestsPrivate
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCellularAutomataDefaultGenerateTest, "ProceduralGeometry.CellularAutomata.DefaultGenerate", DefaultTestFlags)
 
@@ -311,14 +311,14 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FCellularAutomataCarveCorridorsTest::RunTest(const FString& Parameters)
 {
 	// Two blobs with no shared boundary and no diagram adjacency: the disconnected pair exists by construction.
-	FCellularAutomataGridData GridData = CACorridorRef_MakeTwoBlobGrid();
+	FCellularAutomataGridData GridData = CellularAutomataTestsPrivate::CACorridorRef_MakeTwoBlobGrid();
 
-	const int32 FloorBefore = CACorridorRef_CountFloor(GridData);
+	const int32 FloorBefore = CellularAutomataTestsPrivate::CACorridorRef_CountFloor(GridData);
 
 	FRandomStream CorridorStream(42);
 	UCellularAutomataGenerator2D::CarveCorridors(GridData, 1.0f, 2, CorridorStream);
 
-	TestTrue(TEXT("Carving added floor cells"), CACorridorRef_CountFloor(GridData) > FloorBefore);
+	TestTrue(TEXT("Carving added floor cells"), CellularAutomataTestsPrivate::CACorridorRef_CountFloor(GridData) > FloorBefore);
 
 	for (int32 Index = 0; Index < GridData.Grid.Num(); ++Index)
 	{
@@ -345,7 +345,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FCellularAutomataCarveCorridorsNoOpTest::RunTest(const FString& Parameters)
 {
-	const FCellularAutomataGridData Source = CACorridorRef_MakeTwoBlobGrid();
+	const FCellularAutomataGridData Source = CellularAutomataTestsPrivate::CACorridorRef_MakeTwoBlobGrid();
 
 	FCellularAutomataGridData ZeroProbability = Source;
 	FRandomStream			  ZeroStream(42);
@@ -369,7 +369,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FCellularAutomataCarveCorridorsAllConnectedTest::RunTest(const FString& Parameters)
 {
 	// Same two blobs recorded as diagram neighbours: CarveCorridors reads connectivity off the diagram.
-	FCellularAutomataGridData Connected = CACorridorRef_MakeTwoBlobGrid();
+	FCellularAutomataGridData Connected = CellularAutomataTestsPrivate::CACorridorRef_MakeTwoBlobGrid();
 	Connected.Diagram.Cells[0].Neighbors = { 1 };
 	Connected.Diagram.Cells[1].Neighbors = { 0 };
 
@@ -381,7 +381,7 @@ bool FCellularAutomataCarveCorridorsAllConnectedTest::RunTest(const FString& Par
 	TestTrue(TEXT("Grid unchanged when the pair is already connected"), Connected.Grid == GridBeforeCarve);
 
 	// Control: without the adjacency the identical grid does carve, so the no-op above is the adjacency skip.
-	FCellularAutomataGridData Disconnected = CACorridorRef_MakeTwoBlobGrid();
+	FCellularAutomataGridData Disconnected = CellularAutomataTestsPrivate::CACorridorRef_MakeTwoBlobGrid();
 	FRandomStream			  DisconnectedStream(42);
 	UCellularAutomataGenerator2D::CarveCorridors(Disconnected, 1.0f, 2, DisconnectedStream);
 
@@ -396,17 +396,17 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FCellularAutomataCarveCorridorsWidthTest::RunTest(const FString& Parameters)
 {
 	// The carve is forced regardless of CA randomness, so CorridorWidth is the only variable between the runs.
-	FCellularAutomataGridData NarrowData = CACorridorRef_MakeTwoBlobGrid();
-	const int32				  FloorBefore = CACorridorRef_CountFloor(NarrowData);
+	FCellularAutomataGridData NarrowData = CellularAutomataTestsPrivate::CACorridorRef_MakeTwoBlobGrid();
+	const int32				  FloorBefore = CellularAutomataTestsPrivate::CACorridorRef_CountFloor(NarrowData);
 
 	FRandomStream NarrowStream(42);
 	UCellularAutomataGenerator2D::CarveCorridors(NarrowData, 1.0f, 1, NarrowStream);
-	const int32 NarrowFloor = CACorridorRef_CountFloor(NarrowData);
+	const int32 NarrowFloor = CellularAutomataTestsPrivate::CACorridorRef_CountFloor(NarrowData);
 
-	FCellularAutomataGridData WideData = CACorridorRef_MakeTwoBlobGrid();
+	FCellularAutomataGridData WideData = CellularAutomataTestsPrivate::CACorridorRef_MakeTwoBlobGrid();
 	FRandomStream			  WideStream(42);
 	UCellularAutomataGenerator2D::CarveCorridors(WideData, 1.0f, 3, WideStream);
-	const int32 WideFloor = CACorridorRef_CountFloor(WideData);
+	const int32 WideFloor = CellularAutomataTestsPrivate::CACorridorRef_CountFloor(WideData);
 
 	TestTrue("Width 1 carves a corridor between the two regions", NarrowFloor > FloorBefore);
 	TestTrue("Width 3 carves strictly more floor than width 1", WideFloor > NarrowFloor);
@@ -414,7 +414,7 @@ bool FCellularAutomataCarveCorridorsWidthTest::RunTest(const FString& Parameters
 	return true;
 }
 
-namespace
+namespace CellularAutomataTestsPrivate
 {
 	/**
 	 * Reference CarveCorridors: the plain double loop over both regions, against which the generator's indexed search
@@ -633,7 +633,7 @@ namespace
 
 		return Data;
 	}
-} // namespace
+} // namespace CellularAutomataTestsPrivate
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCellularAutomataCarveCorridorsNearestPairTest,
 	"ProceduralGeometry.CellularAutomata.CarveCorridors.NearestPairMatchesBruteForce",
@@ -649,7 +649,7 @@ bool FCellularAutomataCarveCorridorsNearestPairTest::RunTest(const FString& Para
 
 		FCellularAutomataGridData Reference = Source;
 		FRandomStream			  ReferenceStream(4242);
-		CACorridorRef_CarveCorridorsBruteForce(Reference, 1.0f, CorridorWidth, ReferenceStream);
+		CellularAutomataTestsPrivate::CACorridorRef_CarveCorridorsBruteForce(Reference, 1.0f, CorridorWidth, ReferenceStream);
 
 		int32 Mismatches = 0;
 		int32 Carved = 0;
@@ -684,7 +684,7 @@ bool FCellularAutomataCarveCorridorsNearestPairTest::RunTest(const FString& Para
 			FIntRect(FIntPoint(4, 20), FIntPoint(14, 27)),
 			FIntRect(FIntPoint(22, 22), FIntPoint(27, 26)) };
 
-		const FCellularAutomataGridData Blobbed = CACorridorRef_MakeBlobGrid(31, 31, Blobs);
+		const FCellularAutomataGridData Blobbed = CellularAutomataTestsPrivate::CACorridorRef_MakeBlobGrid(31, 31, Blobs);
 		CompareRun(TEXT("FourBlobs width 1"), Blobbed, 1);
 		CompareRun(TEXT("FourBlobs width 3"), Blobbed, 3);
 	}
@@ -693,7 +693,7 @@ bool FCellularAutomataCarveCorridorsNearestPairTest::RunTest(const FString& Para
 	const TArray<int32> PocketSeeds = { 101, 202, 303, 404 };
 	for (const int32 PocketSeed : PocketSeeds)
 	{
-		const FCellularAutomataGridData Pockets = CACorridorRef_MakePocketGrid(5, 5, 7, 24, PocketSeed);
+		const FCellularAutomataGridData Pockets = CellularAutomataTestsPrivate::CACorridorRef_MakePocketGrid(5, 5, 7, 24, PocketSeed);
 		CompareRun(FString::Printf(TEXT("Pockets seed %d"), PocketSeed), Pockets, 2);
 	}
 

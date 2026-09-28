@@ -3,7 +3,7 @@
 
 #if WITH_DEV_AUTOMATION_TESTS
 
-namespace
+namespace GeometryUtilsTestsPrivate
 {
 	/** Unit square [0,0]-[100,100] in CCW order */
 	TArray<FVector2D> MakeSquare100()
@@ -107,13 +107,13 @@ namespace
 		}
 		return true;
 	}
-} // namespace
+} // namespace GeometryUtilsTestsPrivate
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FClipAllInsideTest, "ProceduralGeometry.GeometryUtils.Clip.AllInside", DefaultTestFlags)
 
 bool FClipAllInsideTest::RunTest(const FString& Parameters)
 {
-	TArray<FVector2D> Polygon = MakeSquare100();
+	TArray<FVector2D> Polygon = GeometryUtilsTestsPrivate::MakeSquare100();
 
 	// PlanePoint=(200,0), PlaneNormal=(1,0) → kept side: X ≤ 200.
 	bool bResult = FGeometryUtils::ClipPolygonByHalfPlane(Polygon, FVector2D(200, 0), FVector2D(1, 0));
@@ -128,7 +128,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FClipAllOutsideTest, "ProceduralGeometry.Geomet
 
 bool FClipAllOutsideTest::RunTest(const FString& Parameters)
 {
-	TArray<FVector2D> Polygon = MakeSquare100();
+	TArray<FVector2D> Polygon = GeometryUtilsTestsPrivate::MakeSquare100();
 
 	// PlanePoint=(-10,0), PlaneNormal=(1,0) → kept side: dot ≤ 0, i.e. X ≤ -10.
 	bool bResult = FGeometryUtils::ClipPolygonByHalfPlane(Polygon, FVector2D(-10, 0), FVector2D(1, 0));
@@ -143,7 +143,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FClipSquareHorizontalTest, "ProceduralGeometry.
 
 bool FClipSquareHorizontalTest::RunTest(const FString& Parameters)
 {
-	TArray<FVector2D> Polygon = MakeSquare100();
+	TArray<FVector2D> Polygon = GeometryUtilsTestsPrivate::MakeSquare100();
 
 	// PlanePoint=(0,50), PlaneNormal=(0,1) → kept side: Y ≤ 50.
 	bool bResult = FGeometryUtils::ClipPolygonByHalfPlane(Polygon, FVector2D(0, 50), FVector2D(0, 1));
@@ -169,7 +169,7 @@ bool FClipVertexOnBoundaryTest::RunTest(const FString& Parameters)
 	bool bResult = FGeometryUtils::ClipPolygonByHalfPlane(Polygon, FVector2D(50, 0), FVector2D(1, 0));
 
 	TestTrue("Should return true", bResult);
-	TestTrue("All vertices should be finite (no NaN)", AllVerticesFinite(Polygon));
+	TestTrue("All vertices should be finite (no NaN)", GeometryUtilsTestsPrivate::AllVerticesFinite(Polygon));
 	TestTrue("Should have >= 3 vertices", Polygon.Num() >= 3);
 
 	for (int32 i = 0; i < Polygon.Num(); ++i)
@@ -191,7 +191,7 @@ bool FClipNearTangentialTest::RunTest(const FString& Parameters)
 	bool bResult = FGeometryUtils::ClipPolygonByHalfPlane(Polygon, FVector2D(0, 0), FVector2D(0, 1));
 
 	// A valid polygon is not required here, only the absence of NaN/Inf.
-	TestTrue("All result vertices should be finite (no NaN/Inf)", AllVerticesFinite(Polygon));
+	TestTrue("All result vertices should be finite (no NaN/Inf)", GeometryUtilsTestsPrivate::AllVerticesFinite(Polygon));
 
 	return true;
 }
@@ -217,7 +217,7 @@ bool FClipPlaneCoincidentVertexTest::RunTest(const FString& Parameters)
 	// The diagonal through (0,0) and (100,100) touches two square corners exactly, so one CCW pass hits both
 	// degenerate branches: a crossing on the edge's Prev end and a crossing on its Curr end.
 	{
-		TArray<FVector2D> Polygon = MakeSquare100();
+		TArray<FVector2D> Polygon = GeometryUtilsTestsPrivate::MakeSquare100();
 
 		// PlanePoint=(0,0), PlaneNormal=(1,-1) → kept side: X - Y <= 0 (the upper-left triangle).
 		const bool bResult = FGeometryUtils::ClipPolygonByHalfPlane(Polygon, FVector2D(0, 0), FVector2D(1, -1));
@@ -234,7 +234,7 @@ bool FClipPlaneCoincidentVertexTest::RunTest(const FString& Parameters)
 
 	// The mirrored half-plane hits the same branches at the opposite corners and in the opposite order.
 	{
-		TArray<FVector2D> Polygon = MakeSquare100();
+		TArray<FVector2D> Polygon = GeometryUtilsTestsPrivate::MakeSquare100();
 
 		// PlanePoint=(0,0), PlaneNormal=(-1,1) → kept side: Y - X <= 0 (the lower-right triangle).
 		const bool bResult = FGeometryUtils::ClipPolygonByHalfPlane(Polygon, FVector2D(0, 0), FVector2D(-1, 1));
@@ -357,7 +357,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPointInPolygonCenterTest, "ProceduralGeometry.
 
 bool FPointInPolygonCenterTest::RunTest(const FString& Parameters)
 {
-	TArray<FVector2D> Square = MakeSquare100();
+	TArray<FVector2D> Square = GeometryUtilsTestsPrivate::MakeSquare100();
 
 	TestTrue("Center should be inside", FGeometryUtils::PointInPolygon(Square, FVector2D(50, 50)));
 	TestTrue("Off-center interior point should be inside", FGeometryUtils::PointInPolygon(Square, FVector2D(10, 90)));
@@ -369,7 +369,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPointInPolygonOutsideTest, "ProceduralGeometry
 
 bool FPointInPolygonOutsideTest::RunTest(const FString& Parameters)
 {
-	TArray<FVector2D> Square = MakeSquare100();
+	TArray<FVector2D> Square = GeometryUtilsTestsPrivate::MakeSquare100();
 
 	TestFalse("Point far right should be outside", FGeometryUtils::PointInPolygon(Square, FVector2D(200, 50)));
 	TestFalse("Point far above should be outside", FGeometryUtils::PointInPolygon(Square, FVector2D(50, 200)));
@@ -382,7 +382,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPointInPolygonEdgeTest, "ProceduralGeometry.Ge
 
 bool FPointInPolygonEdgeTest::RunTest(const FString& Parameters)
 {
-	TArray<FVector2D> Square = MakeSquare100();
+	TArray<FVector2D> Square = GeometryUtilsTestsPrivate::MakeSquare100();
 
 	// The winding number for exact-edge points is implementation-defined, so only consistency is asserted.
 	bool bOnBottomEdge = FGeometryUtils::PointInPolygon(Square, FVector2D(50, 0));
@@ -401,7 +401,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCentroidSquareTest, "ProceduralGeometry.Geomet
 
 bool FCentroidSquareTest::RunTest(const FString& Parameters)
 {
-	FVector2D Centroid = FGeometryUtils::GetPolygonCentroid(MakeSquare100());
+	FVector2D Centroid = FGeometryUtils::GetPolygonCentroid(GeometryUtilsTestsPrivate::MakeSquare100());
 
 	TestEqual("Square centroid X", static_cast<float>(Centroid.X), 50.0f, 0.01f);
 	TestEqual("Square centroid Y", static_cast<float>(Centroid.Y), 50.0f, 0.01f);
@@ -583,7 +583,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDistanceToBoundaryCenterTest, "ProceduralGeome
 
 bool FDistanceToBoundaryCenterTest::RunTest(const FString& Parameters)
 {
-	TArray<FVector2D> Square = MakeSquare100();
+	TArray<FVector2D> Square = GeometryUtilsTestsPrivate::MakeSquare100();
 
 	float Distance = FGeometryUtils::DistanceToPolygonBoundary(Square, FVector2D(50, 50));
 	TestEqual("Center of 100x100 square → distance 50", Distance, 50.0f, 0.01f);
@@ -598,7 +598,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDistanceToBoundaryEdgeTest, "ProceduralGeometr
 
 bool FDistanceToBoundaryEdgeTest::RunTest(const FString& Parameters)
 {
-	TArray<FVector2D> Square = MakeSquare100();
+	TArray<FVector2D> Square = GeometryUtilsTestsPrivate::MakeSquare100();
 
 	float DistBottom = FGeometryUtils::DistanceToPolygonBoundary(Square, FVector2D(50, 0));
 	TestEqual("Point on bottom edge → distance ≈ 0", DistBottom, 0.0f, 0.01f);
@@ -686,7 +686,7 @@ bool FPoissonMatchesLinearRejectionTest::RunTest(const FString& Parameters)
 
 		FRandomStream	  ReferenceStream(Case.Seed);
 		TArray<FVector2D> ReferencePoints;
-		PoissonRef_SampleWithLinearRejection(Case.Polygon, Case.Radius, Case.MaxPoints, ReferenceStream, ReferencePoints);
+		GeometryUtilsTestsPrivate::PoissonRef_SampleWithLinearRejection(Case.Polygon, Case.Radius, Case.MaxPoints, ReferenceStream, ReferencePoints);
 
 		TotalPoints += LibraryPoints.Num();
 

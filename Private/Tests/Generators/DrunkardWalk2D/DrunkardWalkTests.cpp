@@ -1,5 +1,3 @@
-// Fill out your copyright notice in the Description page of Project Settings.
-
 #include "Generators/DrunkardWalk2D/DrunkardWalkGenerator2D.h"
 #include "Generators/DrunkardWalk2D/DrunkardWalkConfig.h"
 #include "GridBudget.h"
@@ -7,7 +5,7 @@
 
 #if WITH_DEV_AUTOMATION_TESTS
 
-namespace
+namespace DrunkardWalkTestsPrivate
 {
 	/** Creates a DrunkardWalk generator pre-configured with N identical rooms. */
 	UDrunkardWalkGenerator2D* MakeDrunkardGenerator(const FString& Seed, int32 RoomCount, int32 FootprintCells = 4)
@@ -25,13 +23,13 @@ namespace
 		Gen->SetResolvedRoomTypes({ RoomType });
 		return Gen;
 	}
-} // namespace
+} // namespace DrunkardWalkTestsPrivate
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDrunkardWalkDefaultGenerateTest, "ProceduralGeometry.DrunkardWalk.DefaultGenerate", DefaultTestFlags)
 
 bool FDrunkardWalkDefaultGenerateTest::RunTest(const FString& Parameters)
 {
-	UDrunkardWalkGenerator2D*	Gen = MakeDrunkardGenerator(TEXT("DefaultTest"), /*RoomCount=*/3);
+	UDrunkardWalkGenerator2D*	Gen = DrunkardWalkTestsPrivate::MakeDrunkardGenerator(TEXT("DefaultTest"), /*RoomCount=*/3);
 	const FDrunkardWalkGridData Data = Gen->GenerateWithGridData();
 
 	TestTrue("DefaultGenerate: Diagram has cells", Data.Diagram.Cells.Num() > 0);
@@ -44,8 +42,8 @@ bool FDrunkardWalkDeterminismTest::RunTest(const FString& Parameters)
 {
 	const FString Seed = TEXT("DeterminismSeed42");
 
-	UDrunkardWalkGenerator2D* Gen1 = MakeDrunkardGenerator(Seed, 4);
-	UDrunkardWalkGenerator2D* Gen2 = MakeDrunkardGenerator(Seed, 4);
+	UDrunkardWalkGenerator2D* Gen1 = DrunkardWalkTestsPrivate::MakeDrunkardGenerator(Seed, 4);
+	UDrunkardWalkGenerator2D* Gen2 = DrunkardWalkTestsPrivate::MakeDrunkardGenerator(Seed, 4);
 
 	const FDrunkardWalkGridData Data1 = Gen1->GenerateWithGridData();
 	const FDrunkardWalkGridData Data2 = Gen2->GenerateWithGridData();
@@ -100,7 +98,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDrunkardWalkParallelArraySizesTest, "Procedura
 
 bool FDrunkardWalkParallelArraySizesTest::RunTest(const FString& Parameters)
 {
-	UDrunkardWalkGenerator2D*	Gen = MakeDrunkardGenerator(TEXT("ParallelArrayTest"), 3);
+	UDrunkardWalkGenerator2D*	Gen = DrunkardWalkTestsPrivate::MakeDrunkardGenerator(TEXT("ParallelArrayTest"), 3);
 	const FDrunkardWalkGridData Data = Gen->GenerateWithGridData();
 
 	// Seed and room count are fixed, so an empty grid is a regression rather than a case to skip.
@@ -125,7 +123,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FDrunkardWalkRoomCountMatchesPlacementTest::RunTest(const FString& Parameters)
 {
-	UDrunkardWalkGenerator2D*	Gen = MakeDrunkardGenerator(TEXT("RoomCountTest"), 5);
+	UDrunkardWalkGenerator2D*	Gen = DrunkardWalkTestsPrivate::MakeDrunkardGenerator(TEXT("RoomCountTest"), 5);
 	const FDrunkardWalkGridData Data = Gen->GenerateWithGridData();
 
 	// A config asking for rooms that requests none is the regression here, so fail instead of skipping.
@@ -145,7 +143,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDrunkardWalkOOMGuardTest, "ProceduralGeometry.
 
 bool FDrunkardWalkOOMGuardTest::RunTest(const FString& Parameters)
 {
-	UDrunkardWalkGenerator2D*	Gen = MakeDrunkardGenerator(TEXT("OOMTest"), 1, /*FootprintCells=*/2500);
+	UDrunkardWalkGenerator2D*	Gen = DrunkardWalkTestsPrivate::MakeDrunkardGenerator(TEXT("OOMTest"), 1, /*FootprintCells=*/2500);
 	const FDrunkardWalkGridData Data = Gen->GenerateWithGridData();
 
 	TestTrue("OOMGuard: degraded resolution flagged", Data.bDegradedResolution);
@@ -177,7 +175,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FDrunkardWalkAllFloorCellsHaveValidRegionTest::RunTest(const FString& Parameters)
 {
-	UDrunkardWalkGenerator2D*	Gen = MakeDrunkardGenerator(TEXT("RegionValidTest"), 4);
+	UDrunkardWalkGenerator2D*	Gen = DrunkardWalkTestsPrivate::MakeDrunkardGenerator(TEXT("RegionValidTest"), 4);
 	const FDrunkardWalkGridData Data = Gen->GenerateWithGridData();
 
 	// Fixed seed, fixed room count: an empty grid is a failure, not a reason to skip the per-cell checks.
@@ -207,7 +205,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDrunkardWalkCellTypeConsistencyTest, "Procedur
 
 bool FDrunkardWalkCellTypeConsistencyTest::RunTest(const FString& Parameters)
 {
-	UDrunkardWalkGenerator2D*	Gen = MakeDrunkardGenerator(TEXT("CellTypeTest"), 4);
+	UDrunkardWalkGenerator2D*	Gen = DrunkardWalkTestsPrivate::MakeDrunkardGenerator(TEXT("CellTypeTest"), 4);
 	const FDrunkardWalkGridData Data = Gen->GenerateWithGridData();
 
 	// Fixed seed, fixed room count: an empty grid is a failure, not a reason to skip the per-cell checks.
@@ -250,7 +248,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FDrunkardWalkCorridorGraphIndicesValidTest::RunTest(const FString& Parameters)
 {
-	UDrunkardWalkGenerator2D*	Gen = MakeDrunkardGenerator(TEXT("CorridorIndexTest"), 4);
+	UDrunkardWalkGenerator2D*	Gen = DrunkardWalkTestsPrivate::MakeDrunkardGenerator(TEXT("CorridorIndexTest"), 4);
 	const FDrunkardWalkGridData Data = Gen->GenerateWithGridData();
 
 	const int32 RoomCount = Data.PlacedRooms.Num();
@@ -270,7 +268,7 @@ bool FDrunkardWalkCorridorGraphIndicesValidTest::RunTest(const FString& Paramete
 	return true;
 }
 
-namespace
+namespace DrunkardWalkTestsPrivate
 {
 	/** Builds a config with room types of the given weights. */
 	FDrunkardWalkConfig MakeDWConfig(const TArray<int32>& Weights)
@@ -298,13 +296,13 @@ namespace
 		}
 		return Sum;
 	}
-} // namespace
+} // namespace DrunkardWalkTestsPrivate
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDWConfigResolveForTotalZeroTest, "ProceduralGeometry.DrunkardWalk.Config.ResolveForTotal_Zero", DefaultTestFlags)
 
 bool FDWConfigResolveForTotalZeroTest::RunTest(const FString& Parameters)
 {
-	FDrunkardWalkConfig				  Config = MakeDWConfig({ 3, 1 });
+	FDrunkardWalkConfig				  Config = DrunkardWalkTestsPrivate::MakeDWConfig({ 3, 1 });
 	const FDrunkardWalkResolvedParams Params = Config.ResolveForTotal(0);
 
 	for (const FResolvedRoomType& RT : Params.RoomTypes)
@@ -319,7 +317,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FDWConfigResolveForTotalSingleTypeTest::RunTest(const FString& Parameters)
 {
-	FDrunkardWalkConfig				  Config = MakeDWConfig({ 1 });
+	FDrunkardWalkConfig				  Config = DrunkardWalkTestsPrivate::MakeDWConfig({ 1 });
 	const FDrunkardWalkResolvedParams Params = Config.ResolveForTotal(7);
 
 	TestEqual("ResolveForTotal_SingleType: one room type", Params.RoomTypes.Num(), 1);
@@ -336,11 +334,11 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FDWConfigResolveForTotalSumEqualWeightsTest::RunTest(const FString& Parameters)
 {
 	// Prime total over equal weights forces a rounding remainder.
-	FDrunkardWalkConfig				  Config = MakeDWConfig({ 1, 1, 1 });
+	FDrunkardWalkConfig				  Config = DrunkardWalkTestsPrivate::MakeDWConfig({ 1, 1, 1 });
 	constexpr int32					  Total = 7;
 	const FDrunkardWalkResolvedParams Params = Config.ResolveForTotal(Total);
 
-	TestEqual("ResolveForTotal_SumEqualWeights: sum == Total", SumDWCounts(Params), Total);
+	TestEqual("ResolveForTotal_SumEqualWeights: sum == Total", DrunkardWalkTestsPrivate::SumDWCounts(Params), Total);
 	for (const FResolvedRoomType& RT : Params.RoomTypes)
 	{
 		TestTrue("ResolveForTotal_SumEqualWeights: all counts >= 0", RT.ResolvedCount >= 0);
@@ -354,11 +352,11 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FDWConfigResolveForTotalWeightedTest::RunTest(const FString& Parameters)
 {
 	// Weights 3:1 over 8 rooms: Round(3/4*8)=6 for type 0, 2 for type 1.
-	FDrunkardWalkConfig				  Config = MakeDWConfig({ 3, 1 });
+	FDrunkardWalkConfig				  Config = DrunkardWalkTestsPrivate::MakeDWConfig({ 3, 1 });
 	const FDrunkardWalkResolvedParams Params = Config.ResolveForTotal(8);
 
 	TestEqual("ResolveForTotal_Weighted: two types remain", Params.RoomTypes.Num(), 2);
-	TestEqual("ResolveForTotal_Weighted: sum == 8", SumDWCounts(Params), 8);
+	TestEqual("ResolveForTotal_Weighted: sum == 8", DrunkardWalkTestsPrivate::SumDWCounts(Params), 8);
 	if (Params.RoomTypes.Num() == 2)
 	{
 		TestTrue("ResolveForTotal_Weighted: heavier type > lighter type", Params.RoomTypes[0].ResolvedCount > Params.RoomTypes[1].ResolvedCount);
@@ -371,11 +369,11 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FDWConfigResolveForTotalOvercountGuardTest::RunTest(const FString& Parameters)
 {
-	FDrunkardWalkConfig				  Config = MakeDWConfig({ 1, 1, 1 });
+	FDrunkardWalkConfig				  Config = DrunkardWalkTestsPrivate::MakeDWConfig({ 1, 1, 1 });
 	constexpr int32					  Total = 2;
 	const FDrunkardWalkResolvedParams Params = Config.ResolveForTotal(Total);
 
-	TestEqual("ResolveForTotal_OvercountGuard: sum == 2", SumDWCounts(Params), Total);
+	TestEqual("ResolveForTotal_OvercountGuard: sum == 2", DrunkardWalkTestsPrivate::SumDWCounts(Params), Total);
 	for (const FResolvedRoomType& RT : Params.RoomTypes)
 	{
 		TestTrue("ResolveForTotal_OvercountGuard: no negative counts", RT.ResolvedCount >= 0);
@@ -388,11 +386,11 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FDWConfigResolveForTotalEndToEndTest::RunTest(const FString& Parameters)
 {
-	FDrunkardWalkConfig				  Config = MakeDWConfig({ 2, 1 });
+	FDrunkardWalkConfig				  Config = DrunkardWalkTestsPrivate::MakeDWConfig({ 2, 1 });
 	constexpr int32					  Total = 6;
 	const FDrunkardWalkResolvedParams Params = Config.ResolveForTotal(Total);
 
-	TestEqual("ResolveForTotal_EndToEnd: sum == 6", SumDWCounts(Params), Total);
+	TestEqual("ResolveForTotal_EndToEnd: sum == 6", DrunkardWalkTestsPrivate::SumDWCounts(Params), Total);
 
 	UDrunkardWalkGenerator2D* Gen = NewObject<UDrunkardWalkGenerator2D>();
 	Gen->SetSeed(TEXT("ResolveForTotalE2E"));
@@ -425,7 +423,7 @@ bool FDWConfigResolveForTotalMinRespectedTest::RunTest(const FString& Parameters
 	}
 	const FDrunkardWalkResolvedParams Params = Config.ResolveForTotal(10);
 
-	TestEqual("ResolveForTotal_MinRespected: sum == 10", SumDWCounts(Params), 10);
+	TestEqual("ResolveForTotal_MinRespected: sum == 10", DrunkardWalkTestsPrivate::SumDWCounts(Params), 10);
 	for (const FResolvedRoomType& RT : Params.RoomTypes)
 	{
 		TestTrue("ResolveForTotal_MinRespected: each type >= Min(2)", RT.ResolvedCount >= 2);
@@ -460,7 +458,7 @@ bool FDWConfigResolveForTotalMaxRespectedTest::RunTest(const FString& Parameters
 	const FDrunkardWalkResolvedParams Params = Config.ResolveForTotal(10);
 
 	TestEqual("ResolveForTotal_MaxRespected: two types", Params.RoomTypes.Num(), 2);
-	TestEqual("ResolveForTotal_MaxRespected: sum == 10", SumDWCounts(Params), 10);
+	TestEqual("ResolveForTotal_MaxRespected: sum == 10", DrunkardWalkTestsPrivate::SumDWCounts(Params), 10);
 	if (Params.RoomTypes.Num() == 2)
 	{
 		TestTrue("ResolveForTotal_MaxRespected: capped type <= Max(4)", Params.RoomTypes[0].ResolvedCount <= 4);
@@ -485,7 +483,8 @@ bool FDrunkardWalkDoorWidthTest::RunTest(const FString& Parameters)
 
 	for (int32 SeedIndex = 0; SeedIndex < SeedCount; ++SeedIndex)
 	{
-		UDrunkardWalkGenerator2D* Gen = MakeDrunkardGenerator(FString::Printf(TEXT("DoorWidth%d"), SeedIndex), /*RoomCount=*/2, RoomSide);
+		UDrunkardWalkGenerator2D* Gen =
+			DrunkardWalkTestsPrivate::MakeDrunkardGenerator(FString::Printf(TEXT("DoorWidth%d"), SeedIndex), /*RoomCount=*/2, RoomSide);
 		Gen->SetCorridorWidth(CorridorWidth);
 		Gen->SetCorridorTurnProbability(0.0f);
 		Gen->SetCorridorBranchProbability(0.0f);
@@ -623,7 +622,7 @@ bool FDrunkardWalkRoomBorderMarginZeroTest::RunTest(const FString& Parameters)
 
 	for (int32 SeedIndex = 0; SeedIndex < SeedCount; ++SeedIndex)
 	{
-		UDrunkardWalkGenerator2D* Gen = MakeDrunkardGenerator(FString::Printf(TEXT("MarginZero%d"), SeedIndex), RoomCount);
+		UDrunkardWalkGenerator2D* Gen = DrunkardWalkTestsPrivate::MakeDrunkardGenerator(FString::Printf(TEXT("MarginZero%d"), SeedIndex), RoomCount);
 		Gen->SetRoomBorderMargin(0);
 		Gen->SetCorridorTurnProbability(0.0f);
 		Gen->SetCorridorBranchProbability(0.0f);
@@ -694,11 +693,11 @@ bool FDrunkardWalkCorridorBranchProbabilityTest::RunTest(const FString& Paramete
 		// Same seed and same room queue on both runs, so the fork probability is the only difference.
 		const FString Seed = FString::Printf(TEXT("CorridorFork%d"), SeedIndex);
 
-		UDrunkardWalkGenerator2D* Branching = MakeDrunkardGenerator(Seed, RoomCount);
+		UDrunkardWalkGenerator2D* Branching = DrunkardWalkTestsPrivate::MakeDrunkardGenerator(Seed, RoomCount);
 		Branching->SetCorridorBranchProbability(1.0f);
 		ForksWhenBranching += Branching->GenerateWithGridData().ForksPlaced;
 
-		UDrunkardWalkGenerator2D* Straight = MakeDrunkardGenerator(Seed, RoomCount);
+		UDrunkardWalkGenerator2D* Straight = DrunkardWalkTestsPrivate::MakeDrunkardGenerator(Seed, RoomCount);
 		Straight->SetCorridorBranchProbability(0.0f);
 		ForksWhenStraight += Straight->GenerateWithGridData().ForksPlaced;
 	}
@@ -713,7 +712,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDrunkardWalkGridToDiagramTest, "ProceduralGeom
 
 bool FDrunkardWalkGridToDiagramTest::RunTest(const FString& Parameters)
 {
-	UDrunkardWalkGenerator2D*	Gen = MakeDrunkardGenerator(TEXT("GridToDiagram"), 6);
+	UDrunkardWalkGenerator2D*	Gen = DrunkardWalkTestsPrivate::MakeDrunkardGenerator(TEXT("GridToDiagram"), 6);
 	const FDrunkardWalkGridData Data = Gen->GenerateWithGridData();
 
 	const FLayoutDiagram2D& Diagram = Data.Diagram;
@@ -959,7 +958,7 @@ bool FDWConfigMinOnlyRoomTypeTest::RunTest(const FString& Parameters)
 
 	TestEqual(TEXT("MinOnlyRoomType: the mandatory type receives exactly its Min"), Params.RoomTypes[0].ResolvedCount, 2);
 	TestEqual(TEXT("MinOnlyRoomType: the weighted type absorbs the rest"), Params.RoomTypes[1].ResolvedCount, 8);
-	TestEqual(TEXT("MinOnlyRoomType: sum == 10"), SumDWCounts(Params), 10);
+	TestEqual(TEXT("MinOnlyRoomType: sum == 10"), DrunkardWalkTestsPrivate::SumDWCounts(Params), 10);
 
 	return true;
 }
@@ -998,11 +997,11 @@ bool FDWConfigAllMinOnlyRoomTypesTest::RunTest(const FString& Parameters)
 
 	TestEqual(TEXT("AllMinOnly: Boss receives exactly its Min"), Params.RoomTypes[0].ResolvedCount, 1);
 	TestEqual(TEXT("AllMinOnly: Vault receives exactly its Min"), Params.RoomTypes[1].ResolvedCount, 2);
-	TestEqual(TEXT("AllMinOnly: the unclaimed budget is not distributed"), SumDWCounts(Params), 3);
+	TestEqual(TEXT("AllMinOnly: the unclaimed budget is not distributed"), DrunkardWalkTestsPrivate::SumDWCounts(Params), 3);
 
 	// Impossible minimums are reported, never silently scaled.
 	const FDrunkardWalkResolvedParams Squeezed = Config.ResolveForTotal(2);
-	TestEqual(TEXT("AllMinOnly: impossible minimums produce no fabricated partial allocation"), SumDWCounts(Squeezed), 0);
+	TestEqual(TEXT("AllMinOnly: impossible minimums produce no fabricated partial allocation"), DrunkardWalkTestsPrivate::SumDWCounts(Squeezed), 0);
 
 	return true;
 }

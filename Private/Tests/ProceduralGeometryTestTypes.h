@@ -1,5 +1,3 @@
-// Fill out your copyright notice in the Description page of Project Settings.
-
 #pragma once
 
 #include "CoreMinimal.h"
@@ -94,8 +92,6 @@ namespace PGTestHash
 } // namespace PGTestHash
 
 #endif
-
-// Fill out your copyright notice in the Description page of Project Settings.
 
 #include "Misc/AutomationTest.h"
 
