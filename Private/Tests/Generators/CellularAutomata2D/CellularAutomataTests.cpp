@@ -66,7 +66,8 @@ namespace CellularAutomataTestsPrivate
 	}
 } // namespace CellularAutomataTestsPrivate
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCellularAutomataDefaultGenerateTest, "ProceduralGeometry.CellularAutomata.DefaultGenerate", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FCellularAutomataDefaultGenerateTest, "ProceduralGeometry.CellularAutomata.DefaultGenerate", ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FCellularAutomataDefaultGenerateTest::RunTest(const FString& Parameters)
 {
@@ -86,7 +87,8 @@ bool FCellularAutomataDefaultGenerateTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCellularAutomataDeterminismTest, "ProceduralGeometry.CellularAutomata.Determinism", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FCellularAutomataDeterminismTest, "ProceduralGeometry.CellularAutomata.Determinism", ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FCellularAutomataDeterminismTest::RunTest(const FString& Parameters)
 {
@@ -115,7 +117,8 @@ bool FCellularAutomataDeterminismTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCellularAutomataNeighborSymmetryTest, "ProceduralGeometry.CellularAutomata.NeighborSymmetry", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FCellularAutomataNeighborSymmetryTest, "ProceduralGeometry.CellularAutomata.NeighborSymmetry", ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FCellularAutomataNeighborSymmetryTest::RunTest(const FString& Parameters)
 {
@@ -145,7 +148,8 @@ bool FCellularAutomataNeighborSymmetryTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCellularAutomataLowFillTest, "ProceduralGeometry.CellularAutomata.LowFillProbability", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FCellularAutomataLowFillTest, "ProceduralGeometry.CellularAutomata.LowFillProbability", ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FCellularAutomataLowFillTest::RunTest(const FString& Parameters)
 {
@@ -170,7 +174,8 @@ bool FCellularAutomataLowFillTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCellularAutomataHighFillTest, "ProceduralGeometry.CellularAutomata.HighFillProbability", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FCellularAutomataHighFillTest, "ProceduralGeometry.CellularAutomata.HighFillProbability", ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FCellularAutomataHighFillTest::RunTest(const FString& Parameters)
 {
@@ -189,7 +194,8 @@ bool FCellularAutomataHighFillTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCellularAutomataMinRegionSizeTest, "ProceduralGeometry.CellularAutomata.MinRegionSize", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FCellularAutomataMinRegionSizeTest, "ProceduralGeometry.CellularAutomata.MinRegionSize", ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FCellularAutomataMinRegionSizeTest::RunTest(const FString& Parameters)
 {
@@ -215,7 +221,8 @@ bool FCellularAutomataMinRegionSizeTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCellularAutomataKeepCenterTest, "ProceduralGeometry.CellularAutomata.KeepCenterRegion", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FCellularAutomataKeepCenterTest, "ProceduralGeometry.CellularAutomata.KeepCenterRegion", ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FCellularAutomataKeepCenterTest::RunTest(const FString& Parameters)
 {
@@ -243,7 +250,8 @@ bool FCellularAutomataKeepCenterTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCellularAutomataOOMGuardTest, "ProceduralGeometry.CellularAutomata.OOMGuard", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FCellularAutomataOOMGuardTest, "ProceduralGeometry.CellularAutomata.OOMGuard", ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FCellularAutomataOOMGuardTest::RunTest(const FString& Parameters)
 {
@@ -262,7 +270,8 @@ bool FCellularAutomataOOMGuardTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCellularAutomataRegionMergingTest, "ProceduralGeometry.CellularAutomata.RegionMerging", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FCellularAutomataRegionMergingTest, "ProceduralGeometry.CellularAutomata.RegionMerging", ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FCellularAutomataRegionMergingTest::RunTest(const FString& Parameters)
 {
@@ -305,8 +314,9 @@ bool FCellularAutomataRegionMergingTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FCellularAutomataCarveCorridorsTest, "ProceduralGeometry.CellularAutomata.CarveCorridorsConnectsDisconnected", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCellularAutomataCarveCorridorsTest,
+	"ProceduralGeometry.CellularAutomata.CarveCorridorsConnectsDisconnected",
+	ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FCellularAutomataCarveCorridorsTest::RunTest(const FString& Parameters)
 {
@@ -340,8 +350,9 @@ bool FCellularAutomataCarveCorridorsTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FCellularAutomataCarveCorridorsNoOpTest, "ProceduralGeometry.CellularAutomata.CarveCorridorsProbabilityZeroNoOp", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCellularAutomataCarveCorridorsNoOpTest,
+	"ProceduralGeometry.CellularAutomata.CarveCorridorsProbabilityZeroNoOp",
+	ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FCellularAutomataCarveCorridorsNoOpTest::RunTest(const FString& Parameters)
 {
@@ -363,8 +374,9 @@ bool FCellularAutomataCarveCorridorsNoOpTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FCellularAutomataCarveCorridorsAllConnectedTest, "ProceduralGeometry.CellularAutomata.CarveCorridorsAllConnectedNoOp", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCellularAutomataCarveCorridorsAllConnectedTest,
+	"ProceduralGeometry.CellularAutomata.CarveCorridorsAllConnectedNoOp",
+	ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FCellularAutomataCarveCorridorsAllConnectedTest::RunTest(const FString& Parameters)
 {
@@ -390,8 +402,9 @@ bool FCellularAutomataCarveCorridorsAllConnectedTest::RunTest(const FString& Par
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FCellularAutomataCarveCorridorsWidthTest, "ProceduralGeometry.CellularAutomata.CarveCorridorsWidthChangesCarve", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCellularAutomataCarveCorridorsWidthTest,
+	"ProceduralGeometry.CellularAutomata.CarveCorridorsWidthChangesCarve",
+	ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FCellularAutomataCarveCorridorsWidthTest::RunTest(const FString& Parameters)
 {
@@ -637,7 +650,7 @@ namespace CellularAutomataTestsPrivate
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCellularAutomataCarveCorridorsNearestPairTest,
 	"ProceduralGeometry.CellularAutomata.CarveCorridors.NearestPairMatchesBruteForce",
-	DefaultTestFlags)
+	ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FCellularAutomataCarveCorridorsNearestPairTest::RunTest(const FString& Parameters)
 {
@@ -701,8 +714,9 @@ bool FCellularAutomataCarveCorridorsNearestPairTest::RunTest(const FString& Para
 }
 
 // The CA re-seeds its stream at the top of every run, so reusing one instance must reproduce the layout.
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FCellularAutomataRepeatGenerateTest, "ProceduralGeometry.CellularAutomata.GenerateTwiceOnOneInstanceIsIdentical", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCellularAutomataRepeatGenerateTest,
+	"ProceduralGeometry.CellularAutomata.GenerateTwiceOnOneInstanceIsIdentical",
+	ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FCellularAutomataRepeatGenerateTest::RunTest(const FString& Parameters)
 {
@@ -727,8 +741,9 @@ bool FCellularAutomataRepeatGenerateTest::RunTest(const FString& Parameters)
 }
 
 // A coarsened run must not coarsen the generator: the degraded pitch belongs to that call's bounds only.
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FCellularAutomataDegradedCellSizeLeakTest, "ProceduralGeometry.CellularAutomata.DegradedCellSizeDoesNotLeakIntoGridSize", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCellularAutomataDegradedCellSizeLeakTest,
+	"ProceduralGeometry.CellularAutomata.DegradedCellSizeDoesNotLeakIntoGridSize",
+	ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FCellularAutomataDegradedCellSizeLeakTest::RunTest(const FString& Parameters)
 {
@@ -761,8 +776,9 @@ bool FCellularAutomataDegradedCellSizeLeakTest::RunTest(const FString& Parameter
 }
 
 // Pinch corner: the void and the enclosed hole meet at one grid corner, where a non-geometric pairing merges them.
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FCellularAutomataBoundaryPinchTest, "ProceduralGeometry.CellularAutomata.BoundaryTracePinchKeepsHoleSeparate", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCellularAutomataBoundaryPinchTest,
+	"ProceduralGeometry.CellularAutomata.BoundaryTracePinchKeepsHoleSeparate",
+	ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FCellularAutomataBoundaryPinchTest::RunTest(const FString& Parameters)
 {
@@ -830,8 +846,9 @@ bool FCellularAutomataBoundaryPinchTest::RunTest(const FString& Parameters)
 }
 
 // A CA layout cell is a whole cave lobe behind a walled raster ring, so no lobe can reach the raster edge.
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FCellularAutomataRegionExteriorTest, "ProceduralGeometry.CellularAutomata.RegionCellsAreNeverExterior", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCellularAutomataRegionExteriorTest,
+	"ProceduralGeometry.CellularAutomata.RegionCellsAreNeverExterior",
+	ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FCellularAutomataRegionExteriorTest::RunTest(const FString& Parameters)
 {
@@ -854,8 +871,9 @@ bool FCellularAutomataRegionExteriorTest::RunTest(const FString& Parameters)
 }
 
 // SetGridSize raises a request below the floor, and the value it raised to is what generates.
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FLayoutGeneratorGridSizeClampTest, "ProceduralGeometry.LayoutGenerator.GridSizeClampReportsEffectiveValue", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLayoutGeneratorGridSizeClampTest,
+	"ProceduralGeometry.LayoutGenerator.GridSizeClampReportsEffectiveValue",
+	ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FLayoutGeneratorGridSizeClampTest::RunTest(const FString& Parameters)
 {

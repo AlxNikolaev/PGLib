@@ -97,15 +97,21 @@ namespace PGTestHash
 
 #if WITH_DEV_AUTOMATION_TESTS
 
-// Shared automation flags, inline so unity-merged test translation units do not redefine them.
+namespace ProceduralGeometryTestFlags
+{
+	/** Editor and client ProductFilter suite, with medium priority. */
 
-inline constexpr EAutomationTestFlags DefaultTestFlags = EAutomationTestFlags::EditorContext | EAutomationTestFlags::ClientContext
-	| EAutomationTestFlags::ProductFilter | EAutomationTestFlags::MediumPriority;
+	inline constexpr EAutomationTestFlags DefaultTestFlags = EAutomationTestFlags::EditorContext | EAutomationTestFlags::ClientContext
+		| EAutomationTestFlags::ProductFilter | EAutomationTestFlags::MediumPriority;
 
-inline constexpr EAutomationTestFlags SmokeTestFlags = EAutomationTestFlags::EditorContext | EAutomationTestFlags::ClientContext
-	| EAutomationTestFlags::SmokeFilter | EAutomationTestFlags::HighPriority;
+	/** Editor and client SmokeFilter suite, with high priority. */
+	inline constexpr EAutomationTestFlags SmokeTestFlags = EAutomationTestFlags::EditorContext | EAutomationTestFlags::ClientContext
+		| EAutomationTestFlags::SmokeFilter | EAutomationTestFlags::HighPriority;
 
-inline constexpr EAutomationTestFlags PerfTestFlags =
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ClientContext | EAutomationTestFlags::PerfFilter | EAutomationTestFlags::LowPriority;
+	/** Editor and client PerfFilter suite, with low priority. */
+	inline constexpr EAutomationTestFlags PerfTestFlags = EAutomationTestFlags::EditorContext | EAutomationTestFlags::ClientContext
+		| EAutomationTestFlags::PerfFilter | EAutomationTestFlags::LowPriority;
+
+} // namespace ProceduralGeometryTestFlags
 
 #endif

@@ -109,7 +109,7 @@ namespace GeometryUtilsTestsPrivate
 	}
 } // namespace GeometryUtilsTestsPrivate
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FClipAllInsideTest, "ProceduralGeometry.GeometryUtils.Clip.AllInside", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FClipAllInsideTest, "ProceduralGeometry.GeometryUtils.Clip.AllInside", ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FClipAllInsideTest::RunTest(const FString& Parameters)
 {
@@ -124,7 +124,8 @@ bool FClipAllInsideTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FClipAllOutsideTest, "ProceduralGeometry.GeometryUtils.Clip.AllOutside", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FClipAllOutsideTest, "ProceduralGeometry.GeometryUtils.Clip.AllOutside", ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FClipAllOutsideTest::RunTest(const FString& Parameters)
 {
@@ -139,7 +140,8 @@ bool FClipAllOutsideTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FClipSquareHorizontalTest, "ProceduralGeometry.GeometryUtils.Clip.HorizontalClip", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FClipSquareHorizontalTest, "ProceduralGeometry.GeometryUtils.Clip.HorizontalClip", ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FClipSquareHorizontalTest::RunTest(const FString& Parameters)
 {
@@ -159,7 +161,8 @@ bool FClipSquareHorizontalTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FClipVertexOnBoundaryTest, "ProceduralGeometry.GeometryUtils.Clip.VertexOnBoundary", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FClipVertexOnBoundaryTest, "ProceduralGeometry.GeometryUtils.Clip.VertexOnBoundary", ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FClipVertexOnBoundaryTest::RunTest(const FString& Parameters)
 {
@@ -180,7 +183,8 @@ bool FClipVertexOnBoundaryTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FClipNearTangentialTest, "ProceduralGeometry.GeometryUtils.Clip.NearTangential", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FClipNearTangentialTest, "ProceduralGeometry.GeometryUtils.Clip.NearTangential", ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FClipNearTangentialTest::RunTest(const FString& Parameters)
 {
@@ -197,8 +201,9 @@ bool FClipNearTangentialTest::RunTest(const FString& Parameters)
 }
 
 // A clip plane running exactly through two polygon vertices emits each of them once.
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FClipPlaneCoincidentVertexTest, "ProceduralGeometry.GeometryUtils.Clip.PlaneCoincidentVertexEmittedOnce", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FClipPlaneCoincidentVertexTest,
+	"ProceduralGeometry.GeometryUtils.Clip.PlaneCoincidentVertexEmittedOnce",
+	ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FClipPlaneCoincidentVertexTest::RunTest(const FString& Parameters)
 {
@@ -264,8 +269,9 @@ bool FClipPlaneCoincidentVertexTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FClipPhysicalIntersectionTest, "ProceduralGeometry.GeometryUtils.Clip.PhysicalIntersectionPrecision", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FClipPhysicalIntersectionTest,
+	"ProceduralGeometry.GeometryUtils.Clip.PhysicalIntersectionPrecision",
+	ProceduralGeometryTestFlags::DefaultTestFlags)
 bool FClipPhysicalIntersectionTest::RunTest(const FString& Parameters)
 {
 	// A 0.5 cm retained strip on 125000 cm bounds must not disappear because its
@@ -287,7 +293,8 @@ bool FClipPhysicalIntersectionTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSortVerticesCCWTest, "ProceduralGeometry.GeometryUtils.Sort.ShuffledToCCW", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FSortVerticesCCWTest, "ProceduralGeometry.GeometryUtils.Sort.ShuffledToCCW", ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FSortVerticesCCWTest::RunTest(const FString& Parameters)
 {
@@ -310,7 +317,8 @@ bool FSortVerticesCCWTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSortVerticesAlreadySortedTest, "ProceduralGeometry.GeometryUtils.Sort.AlreadySorted", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FSortVerticesAlreadySortedTest, "ProceduralGeometry.GeometryUtils.Sort.AlreadySorted", ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FSortVerticesAlreadySortedTest::RunTest(const FString& Parameters)
 {
@@ -330,7 +338,8 @@ bool FSortVerticesAlreadySortedTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSortVerticesDegenerateTest, "ProceduralGeometry.GeometryUtils.Sort.Degenerate", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FSortVerticesDegenerateTest, "ProceduralGeometry.GeometryUtils.Sort.Degenerate", ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FSortVerticesDegenerateTest::RunTest(const FString& Parameters)
 {
@@ -353,7 +362,8 @@ bool FSortVerticesDegenerateTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPointInPolygonCenterTest, "ProceduralGeometry.GeometryUtils.PointInPolygon.CenterInside", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FPointInPolygonCenterTest, "ProceduralGeometry.GeometryUtils.PointInPolygon.CenterInside", ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FPointInPolygonCenterTest::RunTest(const FString& Parameters)
 {
@@ -365,7 +375,8 @@ bool FPointInPolygonCenterTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPointInPolygonOutsideTest, "ProceduralGeometry.GeometryUtils.PointInPolygon.FarOutside", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FPointInPolygonOutsideTest, "ProceduralGeometry.GeometryUtils.PointInPolygon.FarOutside", ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FPointInPolygonOutsideTest::RunTest(const FString& Parameters)
 {
@@ -378,7 +389,8 @@ bool FPointInPolygonOutsideTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPointInPolygonEdgeTest, "ProceduralGeometry.GeometryUtils.PointInPolygon.OnEdge", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FPointInPolygonEdgeTest, "ProceduralGeometry.GeometryUtils.PointInPolygon.OnEdge", ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FPointInPolygonEdgeTest::RunTest(const FString& Parameters)
 {
@@ -397,7 +409,8 @@ bool FPointInPolygonEdgeTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCentroidSquareTest, "ProceduralGeometry.GeometryUtils.Centroid.RegularSquare", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FCentroidSquareTest, "ProceduralGeometry.GeometryUtils.Centroid.RegularSquare", ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FCentroidSquareTest::RunTest(const FString& Parameters)
 {
@@ -409,7 +422,8 @@ bool FCentroidSquareTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCentroidLShapeTest, "ProceduralGeometry.GeometryUtils.Centroid.LShape", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FCentroidLShapeTest, "ProceduralGeometry.GeometryUtils.Centroid.LShape", ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FCentroidLShapeTest::RunTest(const FString& Parameters)
 {
@@ -430,7 +444,8 @@ bool FCentroidLShapeTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCentroidDegenerateTest, "ProceduralGeometry.GeometryUtils.Centroid.Degenerate", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FCentroidDegenerateTest, "ProceduralGeometry.GeometryUtils.Centroid.Degenerate", ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FCentroidDegenerateTest::RunTest(const FString& Parameters)
 {
@@ -455,7 +470,8 @@ bool FCentroidDegenerateTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPoissonInsidePolygonTest, "ProceduralGeometry.GeometryUtils.Poisson.AllPointsInside", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FPoissonInsidePolygonTest, "ProceduralGeometry.GeometryUtils.Poisson.AllPointsInside", ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FPoissonInsidePolygonTest::RunTest(const FString& Parameters)
 {
@@ -475,7 +491,8 @@ bool FPoissonInsidePolygonTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPoissonMinDistanceTest, "ProceduralGeometry.GeometryUtils.Poisson.MinDistance", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FPoissonMinDistanceTest, "ProceduralGeometry.GeometryUtils.Poisson.MinDistance", ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FPoissonMinDistanceTest::RunTest(const FString& Parameters)
 {
@@ -500,7 +517,8 @@ bool FPoissonMinDistanceTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPoissonDeterminismTest, "ProceduralGeometry.GeometryUtils.Poisson.Determinism", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FPoissonDeterminismTest, "ProceduralGeometry.GeometryUtils.Poisson.Determinism", ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FPoissonDeterminismTest::RunTest(const FString& Parameters)
 {
@@ -525,7 +543,8 @@ bool FPoissonDeterminismTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPoissonEmptyPolygonTest, "ProceduralGeometry.GeometryUtils.Poisson.EmptyPolygon", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FPoissonEmptyPolygonTest, "ProceduralGeometry.GeometryUtils.Poisson.EmptyPolygon", ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FPoissonEmptyPolygonTest::RunTest(const FString& Parameters)
 {
@@ -542,7 +561,8 @@ bool FPoissonEmptyPolygonTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMaxInscribedCircleSquareTest, "ProceduralGeometry.GeometryUtils.MaxInscribedCircle.Square", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FMaxInscribedCircleSquareTest, "ProceduralGeometry.GeometryUtils.MaxInscribedCircle.Square", ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FMaxInscribedCircleSquareTest::RunTest(const FString& Parameters)
 {
@@ -561,8 +581,9 @@ bool FMaxInscribedCircleSquareTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FMaxInscribedCircleDegenerateTest, "ProceduralGeometry.GeometryUtils.MaxInscribedCircle.Degenerate", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMaxInscribedCircleDegenerateTest,
+	"ProceduralGeometry.GeometryUtils.MaxInscribedCircle.Degenerate",
+	ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FMaxInscribedCircleDegenerateTest::RunTest(const FString& Parameters)
 {
@@ -579,7 +600,8 @@ bool FMaxInscribedCircleDegenerateTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDistanceToBoundaryCenterTest, "ProceduralGeometry.GeometryUtils.DistanceToBoundary.Center", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FDistanceToBoundaryCenterTest, "ProceduralGeometry.GeometryUtils.DistanceToBoundary.Center", ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FDistanceToBoundaryCenterTest::RunTest(const FString& Parameters)
 {
@@ -594,7 +616,8 @@ bool FDistanceToBoundaryCenterTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDistanceToBoundaryEdgeTest, "ProceduralGeometry.GeometryUtils.DistanceToBoundary.OnEdge", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FDistanceToBoundaryEdgeTest, "ProceduralGeometry.GeometryUtils.DistanceToBoundary.OnEdge", ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FDistanceToBoundaryEdgeTest::RunTest(const FString& Parameters)
 {
@@ -617,7 +640,8 @@ bool FDistanceToBoundaryEdgeTest::RunTest(const FString& Parameters)
 
 // A kilometre-scale bounds asks for billions of acceleration cells to hold a handful of points; the sampler
 // must bound that grid instead of overflowing the cell-count product.
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPoissonHugeBoundsTest, "ProceduralGeometry.GeometryUtils.PoissonDiskSampling.HugeBoundsIsBounded", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FPoissonHugeBoundsTest, "ProceduralGeometry.GeometryUtils.PoissonDiskSampling.HugeBoundsIsBounded", ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FPoissonHugeBoundsTest::RunTest(const FString& Parameters)
 {
@@ -648,8 +672,9 @@ bool FPoissonHugeBoundsTest::RunTest(const FString& Parameters)
 
 // For inputs that already fit the budget the bucket ring must still see every point within Radius, so the
 // accepted sequence has to match a sampler that rejects against every accepted point.
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FPoissonMatchesLinearRejectionTest, "ProceduralGeometry.GeometryUtils.PoissonDiskSampling.UnchangedForNormalInputs", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPoissonMatchesLinearRejectionTest,
+	"ProceduralGeometry.GeometryUtils.PoissonDiskSampling.UnchangedForNormalInputs",
+	ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FPoissonMatchesLinearRejectionTest::RunTest(const FString& Parameters)
 {
@@ -707,8 +732,9 @@ bool FPoissonMatchesLinearRejectionTest::RunTest(const FString& Parameters)
 
 // A sliver polygon far from the origin has a cell size below the float spacing at its coordinates; the grid
 // must still be walked to completion instead of spinning on an accumulator that cannot advance.
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FMaxInscribedCircleFarFromOriginTest, "ProceduralGeometry.GeometryUtils.MaxInscribedCircle.FarFromOrigin", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMaxInscribedCircleFarFromOriginTest,
+	"ProceduralGeometry.GeometryUtils.MaxInscribedCircle.FarFromOrigin",
+	ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FMaxInscribedCircleFarFromOriginTest::RunTest(const FString& Parameters)
 {

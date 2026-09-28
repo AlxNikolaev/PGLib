@@ -3,8 +3,9 @@
 
 #if WITH_DEV_AUTOMATION_TESTS
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FCellularAutomataGridDataStructuralTest, "ProceduralGeometry.CellularAutomataGenerator2D.GridDataStructuralConsistency", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCellularAutomataGridDataStructuralTest,
+	"ProceduralGeometry.CellularAutomataGenerator2D.GridDataStructuralConsistency",
+	ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FCellularAutomataGridDataStructuralTest::RunTest(const FString& Parameters)
 {
@@ -33,8 +34,9 @@ bool FCellularAutomataGridDataStructuralTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FCellularAutomataGridDataRegionIdConsistencyTest, "ProceduralGeometry.CellularAutomataGenerator2D.GridDataRegionIdConsistency", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCellularAutomataGridDataRegionIdConsistencyTest,
+	"ProceduralGeometry.CellularAutomataGenerator2D.GridDataRegionIdConsistency",
+	ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FCellularAutomataGridDataRegionIdConsistencyTest::RunTest(const FString& Parameters)
 {
@@ -92,7 +94,7 @@ bool FCellularAutomataGridDataRegionIdConsistencyTest::RunTest(const FString& Pa
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCellularAutomataGridDataRefactorRegressionTest,
 	"ProceduralGeometry.CellularAutomataGenerator2D.GenerateMatchesGridDataDiagram",
-	DefaultTestFlags)
+	ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FCellularAutomataGridDataRefactorRegressionTest::RunTest(const FString& Parameters)
 {
@@ -129,8 +131,9 @@ bool FCellularAutomataGridDataRefactorRegressionTest::RunTest(const FString& Par
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FCellularAutomataGridDataCullingTest, "ProceduralGeometry.CellularAutomataGenerator2D.SurvivingRegionsReflectsCulling", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCellularAutomataGridDataCullingTest,
+	"ProceduralGeometry.CellularAutomataGenerator2D.SurvivingRegionsReflectsCulling",
+	ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FCellularAutomataGridDataCullingTest::RunTest(const FString& Parameters)
 {

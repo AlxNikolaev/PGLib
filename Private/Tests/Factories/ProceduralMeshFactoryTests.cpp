@@ -83,8 +83,9 @@ static bool MeshFactoryTests_MeshesIdentical(const FMeshData& A, const FMeshData
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FProceduralMeshFactoryScratchReuseTest, "ProceduralGeometry.MeshFactory.PrismScratchReuseIsIdentical", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FProceduralMeshFactoryScratchReuseTest,
+	"ProceduralGeometry.MeshFactory.PrismScratchReuseIsIdentical",
+	ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FProceduralMeshFactoryScratchReuseTest::RunTest(const FString& /*Parameters*/)
 {

@@ -236,7 +236,8 @@ namespace VoroIndexTest
 
 // In default ascending clip order, the pruned cell build must match the exhaustive one exactly;
 // spatial clip order has a separate repeat-determinism contract under the same indexed configuration.
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVoronoiPrunedMatchesFullScanTest, "ProceduralGeometry.Voronoi.PrunedMatchesFullScan", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVoronoiPrunedMatchesFullScanTest, "ProceduralGeometry.Voronoi.PrunedMatchesFullScan", ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FVoronoiPrunedMatchesFullScanTest::RunTest(const FString& Parameters)
 {
@@ -288,8 +289,9 @@ bool FVoronoiPrunedMatchesFullScanTest::RunTest(const FString& Parameters)
 }
 
 // Spatial ordering repeats exactly with the same indexed configuration; legacy ascending order retains pruning equivalence.
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FVoronoiSpatialClipOrderDeterministicTest, "ProceduralGeometry.Voronoi.SpatialClipOrderDeterministic", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVoronoiSpatialClipOrderDeterministicTest,
+	"ProceduralGeometry.Voronoi.SpatialClipOrderDeterministic",
+	ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FVoronoiSpatialClipOrderDeterministicTest::RunTest(const FString& Parameters)
 {
@@ -343,7 +345,8 @@ bool FVoronoiSpatialClipOrderDeterministicTest::RunTest(const FString& Parameter
 // within a handful of clips, while row-major substrate order keeps a full-width polygon until the scan reaches its
 // own row, and that case also carries a duration assertion. The 4x-sites ratios are logged, not asserted: the build
 // stays quadratic, and pruning against the final cell radius would be asymptotic but would move the diagram.
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVoronoiPruningScalingTest, "ProceduralGeometry.Voronoi.PruningScaling", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVoronoiPruningScalingTest, "ProceduralGeometry.Voronoi.PruningScaling", ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FVoronoiPruningScalingTest::RunTest(const FString& Parameters)
 {
@@ -406,7 +409,8 @@ bool FVoronoiPruningScalingTest::RunTest(const FString& Parameters)
 }
 
 // The indexed point-location answers must be the answers the linear scans give, probe for probe.
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVoronoiSiteIndexNearestTest, "ProceduralGeometry.VoronoiSiteIndex.NearestMatchesLinearScan", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVoronoiSiteIndexNearestTest, "ProceduralGeometry.VoronoiSiteIndex.NearestMatchesLinearScan", ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FVoronoiSiteIndexNearestTest::RunTest(const FString& Parameters)
 {
@@ -466,7 +470,8 @@ bool FVoronoiSiteIndexNearestTest::RunTest(const FString& Parameters)
 }
 
 // The box gather must never hide a site the caller's own containment filter would have accepted.
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVoronoiSiteIndexBoxQueryTest, "ProceduralGeometry.VoronoiSiteIndex.BoxQueryIsExactAndOrdered", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVoronoiSiteIndexBoxQueryTest, "ProceduralGeometry.VoronoiSiteIndex.BoxQueryIsExactAndOrdered", ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FVoronoiSiteIndexBoxQueryTest::RunTest(const FString& Parameters)
 {
@@ -549,7 +554,8 @@ bool FVoronoiSiteIndexBoxQueryTest::RunTest(const FString& Parameters)
 }
 
 // Degenerate site sets are the inputs where a bucket grid divides by zero or answers with an index nobody owns.
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVoronoiSiteIndexDegenerateTest, "ProceduralGeometry.VoronoiSiteIndex.DegenerateInputs", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVoronoiSiteIndexDegenerateTest, "ProceduralGeometry.VoronoiSiteIndex.DegenerateInputs", ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FVoronoiSiteIndexDegenerateTest::RunTest(const FString& Parameters)
 {
@@ -631,8 +637,9 @@ bool FVoronoiSiteIndexDegenerateTest::RunTest(const FString& Parameters)
 
 #if WITH_DEV_AUTOMATION_TESTS
 // Kept separate from parallel equivalence: this is a pre-existing broad-phase false negative.
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FVoronoiTwoBucketAdjacencyTest, "ProceduralGeometry.Voronoi.Adjacency.TwoBucketCoincidenceCoverage", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVoronoiTwoBucketAdjacencyTest,
+	"ProceduralGeometry.Voronoi.Adjacency.TwoBucketCoincidenceCoverage",
+	ProceduralGeometryTestFlags::DefaultTestFlags)
 bool FVoronoiTwoBucketAdjacencyTest::RunTest(const FString&)
 {
 	FVoronoiDiagram2D Diagram;
@@ -662,8 +669,9 @@ bool FVoronoiTwoBucketAdjacencyTest::RunTest(const FString&)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FVoronoiParallelCellsTest, "ProceduralGeometry.Voronoi.ParallelCells.ExactPolygonsNeighborsAndCounters", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVoronoiParallelCellsTest,
+	"ProceduralGeometry.Voronoi.ParallelCells.ExactPolygonsNeighborsAndCounters",
+	ProceduralGeometryTestFlags::DefaultTestFlags)
 bool FVoronoiParallelCellsTest::RunTest(const FString&)
 {
 	const auto Bounds = VoroIndexTest::TestBounds();

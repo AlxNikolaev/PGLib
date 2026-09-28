@@ -40,7 +40,8 @@ namespace GeomFnLibSatTestUtils
 	}
 } // namespace GeomFnLibSatTestUtils
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FChaikinBasicDoublingTest, "ProceduralGeometry.GeometryUtils.ChaikinSubdivide.BasicDoubling", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FChaikinBasicDoublingTest, "ProceduralGeometry.GeometryUtils.ChaikinSubdivide.BasicDoubling", ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FChaikinBasicDoublingTest::RunTest(const FString& Parameters)
 {
@@ -57,8 +58,9 @@ bool FChaikinBasicDoublingTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FChaikinTriangleConvexHullTest, "ProceduralGeometry.GeometryUtils.ChaikinSubdivide.TriangleConvexHull", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FChaikinTriangleConvexHullTest,
+	"ProceduralGeometry.GeometryUtils.ChaikinSubdivide.TriangleConvexHull",
+	ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FChaikinTriangleConvexHullTest::RunTest(const FString& Parameters)
 {
@@ -79,7 +81,8 @@ bool FChaikinTriangleConvexHullTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FChaikinDegenerateInputsTest, "ProceduralGeometry.GeometryUtils.ChaikinSubdivide.DegenerateInputs", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FChaikinDegenerateInputsTest, "ProceduralGeometry.GeometryUtils.ChaikinSubdivide.DegenerateInputs", ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FChaikinDegenerateInputsTest::RunTest(const FString& Parameters)
 {
@@ -129,7 +132,8 @@ bool FChaikinDegenerateInputsTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FChaikinPreservesClosureTest, "ProceduralGeometry.GeometryUtils.ChaikinSubdivide.PreservesClosure", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FChaikinPreservesClosureTest, "ProceduralGeometry.GeometryUtils.ChaikinSubdivide.PreservesClosure", ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FChaikinPreservesClosureTest::RunTest(const FString& Parameters)
 {
@@ -150,8 +154,9 @@ bool FChaikinPreservesClosureTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FChaikinSmoothsRightAnglesTest, "ProceduralGeometry.GeometryUtils.ChaikinSubdivide.SmoothsRightAngles", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FChaikinSmoothsRightAnglesTest,
+	"ProceduralGeometry.GeometryUtils.ChaikinSubdivide.SmoothsRightAngles",
+	ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FChaikinSmoothsRightAnglesTest::RunTest(const FString& Parameters)
 {
@@ -178,8 +183,9 @@ bool FChaikinSmoothsRightAnglesTest::RunTest(const FString& Parameters)
 
 // The angle convention and corner order here feed the SAT gate that decides which Voronoi cells a rotated
 // room footprint claims, so a regression silently moves every room.
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FRotatedRectCornersAnglesTest, "ProceduralGeometry.GeometryUtils.RotatedRectCorners.CornerPositions", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRotatedRectCornersAnglesTest,
+	"ProceduralGeometry.GeometryUtils.RotatedRectCorners.CornerPositions",
+	ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FRotatedRectCornersAnglesTest::RunTest(const FString& Parameters)
 {
@@ -234,8 +240,9 @@ bool FRotatedRectCornersAnglesTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FRotatedRectCornersWindingTest, "ProceduralGeometry.GeometryUtils.RotatedRectCorners.WindingAndArea", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRotatedRectCornersWindingTest,
+	"ProceduralGeometry.GeometryUtils.RotatedRectCorners.WindingAndArea",
+	ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FRotatedRectCornersWindingTest::RunTest(const FString& Parameters)
 {
@@ -258,8 +265,9 @@ bool FRotatedRectCornersWindingTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FConvexPolygonsOverlapAxisAlignedTest, "ProceduralGeometry.GeometryUtils.ConvexPolygonsOverlap.AxisAligned", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FConvexPolygonsOverlapAxisAlignedTest,
+	"ProceduralGeometry.GeometryUtils.ConvexPolygonsOverlap.AxisAligned",
+	ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FConvexPolygonsOverlapAxisAlignedTest::RunTest(const FString& Parameters)
 {
@@ -283,8 +291,9 @@ bool FConvexPolygonsOverlapAxisAlignedTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FConvexPolygonsOverlapRotatedTest, "ProceduralGeometry.GeometryUtils.ConvexPolygonsOverlap.RotatedAABBFalsePositive", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FConvexPolygonsOverlapRotatedTest,
+	"ProceduralGeometry.GeometryUtils.ConvexPolygonsOverlap.RotatedAABBFalsePositive",
+	ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FConvexPolygonsOverlapRotatedTest::RunTest(const FString& Parameters)
 {
@@ -305,8 +314,9 @@ bool FConvexPolygonsOverlapRotatedTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FConvexPolygonsOverlapHexagonTest, "ProceduralGeometry.GeometryUtils.ConvexPolygonsOverlap.RectVsHexagon", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FConvexPolygonsOverlapHexagonTest,
+	"ProceduralGeometry.GeometryUtils.ConvexPolygonsOverlap.RectVsHexagon",
+	ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FConvexPolygonsOverlapHexagonTest::RunTest(const FString& Parameters)
 {
@@ -329,8 +339,9 @@ bool FConvexPolygonsOverlapHexagonTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FConvexPolygonsOverlapDegenerateTest, "ProceduralGeometry.GeometryUtils.ConvexPolygonsOverlap.DegenerateInputs", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FConvexPolygonsOverlapDegenerateTest,
+	"ProceduralGeometry.GeometryUtils.ConvexPolygonsOverlap.DegenerateInputs",
+	ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FConvexPolygonsOverlapDegenerateTest::RunTest(const FString& Parameters)
 {

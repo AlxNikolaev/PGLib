@@ -67,7 +67,8 @@ float FVoronoiTestBase::CalculatePolygonArea(const TArray<FVector2D>& Vertices)
 	return FMath::Abs(Area) * 0.5f;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVoronoiCellPropertiesTest, "ProceduralGeometry.Voronoi.Cell.Properties", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVoronoiCellPropertiesTest, "ProceduralGeometry.Voronoi.Cell.Properties", ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FVoronoiCellPropertiesTest::RunTest(const FString& Parameters)
 {
@@ -96,7 +97,8 @@ bool FVoronoiCellPropertiesTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVoronoiFixedSitesTest, "ProceduralGeometry.Voronoi.Generator.FixedSites", SmokeTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVoronoiFixedSitesTest, "ProceduralGeometry.Voronoi.Generator.FixedSites", ProceduralGeometryTestFlags::SmokeTestFlags)
 
 bool FVoronoiFixedSitesTest::RunTest(const FString& Parameters)
 {
@@ -133,7 +135,8 @@ bool FVoronoiFixedSitesTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVoronoiNeighborsTest, "ProceduralGeometry.Voronoi.Generator.Neighbors", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVoronoiNeighborsTest, "ProceduralGeometry.Voronoi.Generator.Neighbors", ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FVoronoiNeighborsTest::RunTest(const FString& Parameters)
 {
@@ -165,7 +168,8 @@ bool FVoronoiNeighborsTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVoronoiRandomGenerationTest, "ProceduralGeometry.Voronoi.Generator.Random", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVoronoiRandomGenerationTest, "ProceduralGeometry.Voronoi.Generator.Random", ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FVoronoiRandomGenerationTest::RunTest(const FString& Parameters)
 {
@@ -204,7 +208,8 @@ bool FVoronoiRandomGenerationTest::RunTest(const FString& Parameters)
 // but a wall clock on a shared machine can never decide a red.
 // Two site counts, one per regime: below MinSitesForSpatialPruning the scan is the full pairwise sweep, N*(N-1);
 // above it the index must skip clips, and a build that stopped skipping would land back on that exact number.
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVoronoiPerformanceTest, "ProceduralGeometry.Voronoi.Generator.Performance", PerfTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVoronoiPerformanceTest, "ProceduralGeometry.Voronoi.Generator.Performance", ProceduralGeometryTestFlags::PerfTestFlags)
 
 bool FVoronoiPerformanceTest::RunTest(const FString& Parameters)
 {
@@ -243,7 +248,8 @@ bool FVoronoiPerformanceTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVoronoiPointLocationTest, "ProceduralGeometry.Voronoi.Diagram.PointLocation", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVoronoiPointLocationTest, "ProceduralGeometry.Voronoi.Diagram.PointLocation", ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FVoronoiPointLocationTest::RunTest(const FString& Parameters)
 {
@@ -271,7 +277,8 @@ bool FVoronoiPointLocationTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVoronoiDegenerateInputTest, "ProceduralGeometry.Voronoi.DegenerateInput", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVoronoiDegenerateInputTest, "ProceduralGeometry.Voronoi.DegenerateInput", ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FVoronoiDegenerateInputTest::RunTest(const FString& Parameters)
 {
@@ -339,7 +346,8 @@ bool FVoronoiDegenerateInputTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVoronoiDeterministicSeedTest, "ProceduralGeometry.Voronoi.DeterministicSeed", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVoronoiDeterministicSeedTest, "ProceduralGeometry.Voronoi.DeterministicSeed", ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FVoronoiDeterministicSeedTest::RunTest(const FString& Parameters)
 {
@@ -379,7 +387,8 @@ bool FVoronoiDeterministicSeedTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVoronoiLloydRelaxationTest, "ProceduralGeometry.Voronoi.LloydRelaxation", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVoronoiLloydRelaxationTest, "ProceduralGeometry.Voronoi.LloydRelaxation", ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FVoronoiLloydRelaxationTest::RunTest(const FString& Parameters)
 {
@@ -420,7 +429,7 @@ bool FVoronoiLloydRelaxationTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVoronoiPoissonDiscTest, "ProceduralGeometry.Voronoi.PoissonDisc", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVoronoiPoissonDiscTest, "ProceduralGeometry.Voronoi.PoissonDisc", ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FVoronoiPoissonDiscTest::RunTest(const FString& Parameters)
 {
@@ -451,7 +460,8 @@ bool FVoronoiPoissonDiscTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVoronoiRelaxationIterationsTest, "ProceduralGeometry.Voronoi.RelaxationIterations", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVoronoiRelaxationIterationsTest, "ProceduralGeometry.Voronoi.RelaxationIterations", ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FVoronoiRelaxationIterationsTest::RunTest(const FString& Parameters)
 {
@@ -514,7 +524,8 @@ bool FVoronoiRelaxationIterationsTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVoronoiMinSiteDistanceTest, "ProceduralGeometry.Voronoi.MinSiteDistance", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVoronoiMinSiteDistanceTest, "ProceduralGeometry.Voronoi.MinSiteDistance", ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FVoronoiMinSiteDistanceTest::RunTest(const FString& Parameters)
 {
@@ -574,7 +585,8 @@ bool FVoronoiMinSiteDistanceTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVoronoiRelaxSitesDuplicateGuardTest, "ProceduralGeometry.Voronoi.RelaxSites.DuplicateGuard", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVoronoiRelaxSitesDuplicateGuardTest, "ProceduralGeometry.Voronoi.RelaxSites.DuplicateGuard", ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FVoronoiRelaxSitesDuplicateGuardTest::RunTest(const FString& Parameters)
 {
@@ -611,7 +623,8 @@ bool FVoronoiRelaxSitesDuplicateGuardTest::RunTest(const FString& Parameters)
 
 // A regular lattice makes four cells meet at one point: corner-only contact is not adjacency, and every recorded
 // neighbour pair must be retrievable as a shared edge.
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVoronoiCornerContactTest, "ProceduralGeometry.Voronoi.CornerContactIsNotAdjacent", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVoronoiCornerContactTest, "ProceduralGeometry.Voronoi.CornerContactIsNotAdjacent", ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FVoronoiCornerContactTest::RunTest(const FString& Parameters)
 {
@@ -691,8 +704,9 @@ bool FVoronoiCornerContactTest::RunTest(const FString& Parameters)
 }
 
 // An unseeded generator is a contract violation, but the diagram must still record the seed it used.
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FVoronoiUnseededSeedRecordedTest, "ProceduralGeometry.Voronoi.UnseededGeneratorRecordsTheSeedItUsed", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVoronoiUnseededSeedRecordedTest,
+	"ProceduralGeometry.Voronoi.UnseededGeneratorRecordsTheSeedItUsed",
+	ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FVoronoiUnseededSeedRecordedTest::RunTest(const FString& Parameters)
 {
@@ -733,7 +747,8 @@ bool FVoronoiUnseededSeedRecordedTest::RunTest(const FString& Parameters)
 }
 
 // The stream is re-derived at every RNG entry point, so a second generate call cannot continue where the first stopped.
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVoronoiReuseIsIdenticalTest, "ProceduralGeometry.Voronoi.GenerateTwiceOnOneInstanceIsIdentical", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVoronoiReuseIsIdenticalTest, "ProceduralGeometry.Voronoi.GenerateTwiceOnOneInstanceIsIdentical", ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FVoronoiReuseIsIdenticalTest::RunTest(const FString& Parameters)
 {
@@ -767,8 +782,9 @@ bool FVoronoiReuseIsIdenticalTest::RunTest(const FString& Parameters)
 
 // Seed is reflected and RandomStream is not, so a seed that arrived by property copy has no stream derived from it;
 // generation must still come from the seed the diagram reports.
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FVoronoiDeserializedSeedTest, "ProceduralGeometry.Voronoi.SeedSetWithoutSetSeedStillDrivesGeneration", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVoronoiDeserializedSeedTest,
+	"ProceduralGeometry.Voronoi.SeedSetWithoutSetSeedStillDrivesGeneration",
+	ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FVoronoiDeserializedSeedTest::RunTest(const FString& Parameters)
 {

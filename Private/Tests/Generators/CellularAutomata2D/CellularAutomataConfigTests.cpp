@@ -3,8 +3,9 @@
 
 #if WITH_DEV_AUTOMATION_TESTS
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FCellularAutomataConfigDefaultResolveTest, "ProceduralGeometry.CellularAutomataConfig.DefaultResolve", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCellularAutomataConfigDefaultResolveTest,
+	"ProceduralGeometry.CellularAutomataConfig.DefaultResolve",
+	ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FCellularAutomataConfigDefaultResolveTest::RunTest(const FString& Parameters)
 {
@@ -40,8 +41,9 @@ bool FCellularAutomataConfigDefaultResolveTest::RunTest(const FString& Parameter
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FCellularAutomataConfigAllStylePresetsTest, "ProceduralGeometry.CellularAutomataConfig.AllStylePresets", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCellularAutomataConfigAllStylePresetsTest,
+	"ProceduralGeometry.CellularAutomataConfig.AllStylePresets",
+	ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FCellularAutomataConfigAllStylePresetsTest::RunTest(const FString& Parameters)
 {
@@ -89,8 +91,9 @@ bool FCellularAutomataConfigAllStylePresetsTest::RunTest(const FString& Paramete
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FCellularAutomataConfigOpennessTest, "ProceduralGeometry.CellularAutomataConfig.OpennessModulatesFillProbability", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCellularAutomataConfigOpennessTest,
+	"ProceduralGeometry.CellularAutomataConfig.OpennessModulatesFillProbability",
+	ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FCellularAutomataConfigOpennessTest::RunTest(const FString& Parameters)
 {
@@ -114,8 +117,9 @@ bool FCellularAutomataConfigOpennessTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FCellularAutomataConfigSmoothnessTest, "ProceduralGeometry.CellularAutomataConfig.SmoothnessMapsToIterations", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCellularAutomataConfigSmoothnessTest,
+	"ProceduralGeometry.CellularAutomataConfig.SmoothnessMapsToIterations",
+	ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FCellularAutomataConfigSmoothnessTest::RunTest(const FString& Parameters)
 {
@@ -133,8 +137,9 @@ bool FCellularAutomataConfigSmoothnessTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FCellularAutomataConfigRegionScaleTest, "ProceduralGeometry.CellularAutomataConfig.AllRegionScalePresets", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCellularAutomataConfigRegionScaleTest,
+	"ProceduralGeometry.CellularAutomataConfig.AllRegionScalePresets",
+	ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FCellularAutomataConfigRegionScaleTest::RunTest(const FString& Parameters)
 {
@@ -167,8 +172,9 @@ bool FCellularAutomataConfigRegionScaleTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FCellularAutomataConfigAdvancedOverrideTest, "ProceduralGeometry.CellularAutomataConfig.AdvancedOverrideBypassesSemantic", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCellularAutomataConfigAdvancedOverrideTest,
+	"ProceduralGeometry.CellularAutomataConfig.AdvancedOverrideBypassesSemantic",
+	ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FCellularAutomataConfigAdvancedOverrideTest::RunTest(const FString& Parameters)
 {
@@ -206,8 +212,9 @@ bool FCellularAutomataConfigAdvancedOverrideTest::RunTest(const FString& Paramet
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FCellularAutomataConfigResolveRuleNotationTest, "ProceduralGeometry.CellularAutomataConfig.ResolveAdvancedRuleNotation", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCellularAutomataConfigResolveRuleNotationTest,
+	"ProceduralGeometry.CellularAutomataConfig.ResolveAdvancedRuleNotation",
+	ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FCellularAutomataConfigResolveRuleNotationTest::RunTest(const FString& Parameters)
 {
@@ -289,8 +296,9 @@ bool FCellularAutomataConfigResolveRuleNotationTest::RunTest(const FString& Para
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FCellularAutomataConfigParserValidTest, "ProceduralGeometry.CellularAutomataConfig.ParseBSRuleNotation_ValidInputs", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCellularAutomataConfigParserValidTest,
+	"ProceduralGeometry.CellularAutomataConfig.ParseBSRuleNotation_ValidInputs",
+	ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FCellularAutomataConfigParserValidTest::RunTest(const FString& Parameters)
 {
@@ -371,8 +379,9 @@ bool FCellularAutomataConfigParserValidTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FCellularAutomataConfigParserInvalidTest, "ProceduralGeometry.CellularAutomataConfig.ParseBSRuleNotation_InvalidInputs", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCellularAutomataConfigParserInvalidTest,
+	"ProceduralGeometry.CellularAutomataConfig.ParseBSRuleNotation_InvalidInputs",
+	ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FCellularAutomataConfigParserInvalidTest::RunTest(const FString& Parameters)
 {
@@ -461,8 +470,9 @@ bool FCellularAutomataConfigParserInvalidTest::RunTest(const FString& Parameters
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FCellularAutomataConfigKeepCenterTest, "ProceduralGeometry.CellularAutomataConfig.KeepCenterRegionPassthrough", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCellularAutomataConfigKeepCenterTest,
+	"ProceduralGeometry.CellularAutomataConfig.KeepCenterRegionPassthrough",
+	ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FCellularAutomataConfigKeepCenterTest::RunTest(const FString& Parameters)
 {
@@ -484,8 +494,9 @@ bool FCellularAutomataConfigKeepCenterTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FCellularAutomataConfigBoundsValidationTest, "ProceduralGeometry.CellularAutomataConfig.AdvancedOverrideBoundsValidation", DefaultTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCellularAutomataConfigBoundsValidationTest,
+	"ProceduralGeometry.CellularAutomataConfig.AdvancedOverrideBoundsValidation",
+	ProceduralGeometryTestFlags::DefaultTestFlags)
 
 bool FCellularAutomataConfigBoundsValidationTest::RunTest(const FString& Parameters)
 {
