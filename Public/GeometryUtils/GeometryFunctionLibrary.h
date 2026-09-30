@@ -5,19 +5,40 @@
 class PROCEDURALGEOMETRY_API FGeometryUtils
 {
 public:
+	/** Sorts at least three XY vertices by polar angle around their arithmetic centroid.
+	 * Copies shorter inputs unchanged to OutSortedVertices
+	 * and returns false; otherwise returns true. */
 	static bool SortPlaneVerticesByAngle(const TArray<FVector2D>& InVertices, TArray<FVector2D>& OutSortedVertices);
+	/** Clips OutPolygon in place to the nonpositive side of the plane normal.
+	 * Returns true when at least three vertices survive; an empty input
+	 * returns false unchanged. */
 	static bool ClipPolygonByHalfPlane(TArray<FVector2D>& OutPolygon, const FVector2D& PlanePoint, const FVector2D& PlaneNormal);
 
-	/** Overload that reuses Scratch to avoid per-call allocation; Scratch is cleared and swapped each call.
-	 *  Callers that clip many times in a loop should declare a TArray and pass it as Scratch. */
+	/** Clips in place with reusable Scratch to avoid allocation across successive calls.
+	 * Scratch is cleared/swapped on nonempty input; true
+	 * means at least three vertices survive. */
 	static bool ClipPolygonByHalfPlane(
 		TArray<FVector2D>& OutPolygon, TArray<FVector2D>& Scratch, const FVector2D& PlanePoint, const FVector2D& PlaneNormal);
 
-	static bool	 PointInPolygon(const TArray<FVector2D>& PolygonVertices, const FVector2D& Point);
+	/** Winding-number containment query for a polygon of at least three vertices.
+	 * Returns false for shorter inputs; no mutation or world access.
+	 */
+	static bool PointInPolygon(const TArray<FVector2D>& PolygonVertices, const FVector2D& Point);
+	/** Minimum Euclidean distance from Point to a polygon edge in the input's units.
+	 * Returns zero for fewer than three vertices. */
 	static float DistanceToPolygonBoundary(const TArray<FVector2D>& PolygonVertices, const FVector2D& Point);
-	static bool	 MaxInscribedCircle(const TArray<FVector2D>& PolygonVertices, FVector2D& OutCenter, float& OutRadius, float Epsilon = 10.0f);
-	static void	 PoissonDiskSampling(
-		 const TArray<FVector2D>& PolygonVertices, float Radius, int32 MaxPoints, FRandomStream& RandomStream, TArray<FVector2D>& OutPoints);
+	/** Approximates the largest inscribed circle using a bounded polylabel search.
+	 * Returns false for degenerate or unrepresentable bounds;
+	 * outputs are meaningful on success. */
+	static bool MaxInscribedCircle(const TArray<FVector2D>& PolygonVertices, FVector2D& OutCenter, float& OutRadius, float Epsilon = 10.0f);
+	/** Replaces OutPoints with up to MaxPoints sites inside the polygon, separated by Radius where possible.
+	 * Uses the supplied RNG; invalid
+	 * polygon, radius or budget produces an empty result. */
+	static void PoissonDiskSampling(
+		const TArray<FVector2D>& PolygonVertices, float Radius, int32 MaxPoints, FRandomStream& RandomStream, TArray<FVector2D>& OutPoints);
+	/** Returns the area-weighted XY polygon centroid, with defined empty/one/two-point fallbacks.
+	 * Pure value calculation; degenerate area uses
+	 * the implementation's fallback. */
 	static FVector2D GetPolygonCentroid(const TArray<FVector2D>& PolygonVertices);
 
 	/** Chaikin's corner-cutting subdivision. Smooths a closed polygon in place. Each iteration ~doubles vertex count.

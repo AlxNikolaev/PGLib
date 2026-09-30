@@ -66,12 +66,14 @@ struct PROCEDURALGEOMETRY_API FCellularAutomataConfig
 {
 	GENERATED_BODY()
 
+	/** Visual cave preset supplying the base birth/survival rules and initial wall probability. */
 	UPROPERTY(EditAnywhere,
 		BlueprintReadWrite,
 		Category = "Cave Generation",
 		meta = (ToolTip = "Visual style preset. Determines base B/S rules and fill probability."))
 	ECaveStyle CaveStyle = ECaveStyle::NaturalCaves;
 
+	/** Cave openness from 0 (more walls) to 1 (more floor); adjusts the preset's wall fill. */
 	UPROPERTY(EditAnywhere,
 		BlueprintReadWrite,
 		Category = "Cave Generation",
@@ -80,30 +82,35 @@ struct PROCEDURALGEOMETRY_API FCellularAutomataConfig
 			ToolTip = "0 = dense/more walls, 1 = sparse/more open. Adjusts fill probability +/- 0.15 from the style's base."))
 	float Openness = 0.5f;
 
+	/** Number of CA smoothing iterations in preset mode; more iterations settle wall edges. */
 	UPROPERTY(EditAnywhere,
 		BlueprintReadWrite,
 		Category = "Cave Generation",
 		meta = (ClampMin = 1, ClampMax = 10, ToolTip = "Number of CA iterations. Higher = smoother, more settled cave walls."))
 	int32 Smoothness = 5;
 
+	/** Preset grid density and minimum surviving region size; larger scales cost more cells. */
 	UPROPERTY(EditAnywhere,
 		BlueprintReadWrite,
 		Category = "Cave Generation",
 		meta = (ToolTip = "Controls grid cell density and minimum region size. Larger = finer detail but slower."))
 	ECaveRegionScale RegionScale = ECaveRegionScale::Medium;
 
+	/** Keeps the region containing the cave centre even if it is smaller than the size threshold. */
 	UPROPERTY(EditAnywhere,
 		BlueprintReadWrite,
 		Category = "Cave Generation",
 		meta = (ToolTip = "If true, the center region is always kept even if below MinRegionSize."))
 	bool bKeepCenterRegion = true;
 
+	/** Replaces the visual presets with the advanced rules and values below. */
 	UPROPERTY(EditAnywhere,
 		BlueprintReadWrite,
 		Category = "Cave Generation|Advanced",
 		meta = (ToolTip = "When enabled, ignores CaveStyle/Openness/Smoothness/RegionScale and uses raw values below."))
 	bool bUseAdvancedOverride = false;
 
+	/** Advanced birth/survival rule in B/S notation; empty uses the default rule. */
 	UPROPERTY(EditAnywhere,
 		BlueprintReadWrite,
 		Category = "Cave Generation|Advanced",
@@ -112,6 +119,7 @@ struct PROCEDURALGEOMETRY_API FCellularAutomataConfig
 				"B/S rule notation: B=birth (dead cell becomes alive), S=survival (alive cell stays alive). Digits are neighbor counts (0-8). Example: 'B678/S345'. Case-insensitive. Empty = use defaults (B678/S345)."))
 	FString AdvancedRuleNotation;
 
+	/** Initial wall probability in advanced mode, from zero to one. */
 	UPROPERTY(EditAnywhere,
 		BlueprintReadWrite,
 		Category = "Cave Generation|Advanced",
@@ -121,21 +129,24 @@ struct PROCEDURALGEOMETRY_API FCellularAutomataConfig
 			ToolTip = "Initial wall probability. Higher = more walls in initial random grid."))
 	float AdvancedFillProbability = 0.45f;
 
+	/** Number of CA smoothing iterations in advanced mode. */
 	UPROPERTY(EditAnywhere,
 		BlueprintReadWrite,
 		Category = "Cave Generation|Advanced",
 		meta = (EditCondition = "bUseAdvancedOverride", ClampMin = 1, ClampMax = 20, ToolTip = "Number of CA smoothing iterations."))
 	int32 AdvancedIterations = 5;
 
+	/** Cave grid density in advanced mode; higher values produce finer cells and cost more generation work. */
 	UPROPERTY(EditAnywhere,
 		BlueprintReadWrite,
 		Category = "Cave Generation|Advanced",
 		meta = (EditCondition = "bUseAdvancedOverride",
 			ClampMin = 1,
 			ClampMax = 30,
-			ToolTip = "Grid density multiplier. CellSize = BoundsExtent / this value. Higher = finer grid, slower generation."))
+			ToolTip = "Cave cell size = CaveZoneSize / this value, clamped to 10 cm; higher = finer grid, slower generation."))
 	int32 AdvancedGridDensityMultiplier = 10;
 
+	/** Minimum surviving region size in cells, except for the retained centre region. */
 	UPROPERTY(EditAnywhere,
 		BlueprintReadWrite,
 		Category = "Cave Generation|Advanced",
@@ -144,6 +155,7 @@ struct PROCEDURALGEOMETRY_API FCellularAutomataConfig
 			ToolTip = "Regions with fewer cells than this are culled (unless center region is kept)."))
 	int32 AdvancedMinRegionSize = 20;
 
+	/** Per surviving region-pair chance to carve a direct corridor; no value guarantees full connectivity. */
 	UPROPERTY(EditAnywhere,
 		BlueprintReadWrite,
 		Category = "Cave Generation|Corridors",
@@ -153,6 +165,7 @@ struct PROCEDURALGEOMETRY_API FCellularAutomataConfig
 				"Chance, rolled separately for each pair of surviving regions, that a straight corridor joins the pair's closest floor cells. Pairs already listed as neighbours, including regions separated by one wall cell, are skipped; no value guarantees a connected cave. 0 = off."))
 	float CorridorProbability = 0.0f;
 
+	/** Corridor brush width in grid cells, rounded up to an odd width for carving. */
 	UPROPERTY(EditAnywhere,
 		BlueprintReadWrite,
 		Category = "Cave Generation|Corridors",

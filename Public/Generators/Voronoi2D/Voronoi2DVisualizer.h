@@ -11,21 +11,24 @@ class PROCEDURALGEOMETRY_API AVoronoi2DVisualizer : public AActor
 {
 	GENERATED_BODY()
 
+	/** Generator retained through preview construction so Unreal GC cannot reclaim it mid-build. */
 	UPROPERTY()
 	UVoronoiGenerator2D* Generator;
 
-	UPROPERTY(EditInstanceOnly)
+	/** Spaces preview sites with Poisson sampling when enabled; otherwise uses uniform random positions. */
+	UPROPERTY(EditInstanceOnly, Category = "Voronoi Preview")
 	bool bUsePoissonDisc = false;
 
-	UPROPERTY(EditInstanceOnly)
+	/** Requested number of preview sites; a Poisson sample may return fewer when bounds are crowded. */
+	UPROPERTY(EditInstanceOnly, Category = "Voronoi Preview", meta = (ClampMin = "0"))
 	int32 NumSites = 10;
 
-	UPROPERTY(EditInstanceOnly)
+	/** XY region clipped into Voronoi cells, in centimetres. */
+	UPROPERTY(EditInstanceOnly, Category = "Voronoi Preview", meta = (Units = "cm"))
 	FBox2D Bounds;
 
-	/** Non-empty by default: an unseeded generator logs an Error and invents a seed, so the preview would draw a
-	 *  different diagram on every construction. */
-	UPROPERTY(EditInstanceOnly)
+	/** Deterministic preview seed; an empty seed is replaced during generation and changes on construction. */
+	UPROPERTY(EditInstanceOnly, Category = "Voronoi Preview")
 	FString Seed = TEXT("Preview");
 
 public:

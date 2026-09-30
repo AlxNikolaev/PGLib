@@ -13,22 +13,27 @@ struct PROCEDURALGEOMETRY_API FVoronoiCell2D
 {
 	GENERATED_BODY()
 
-	// Convex, counter-clockwise vertices
+	/** Convex counter-clockwise polygon vertices in diagram XY space. */
 	UPROPERTY()
 	TArray<FVector2D> Vertices;
 
+	/** Indices of cells sharing a positive-length edge with this polygon. */
 	UPROPERTY()
 	TArray<int32> Neighbors;
 
+	/** Input site that owns this polygon, in diagram XY space. */
 	UPROPERTY()
 	FVector2D SiteLocation;
 
+	/** Index into the owning diagram's Cells and Sites arrays. */
 	UPROPERTY()
 	int32 CellIndex;
 
+	/** Whether clipping produced a usable polygon. */
 	UPROPERTY()
 	bool bIsValid;
 
+	/** Whether the polygon touches the diagram's outer bounds. */
 	UPROPERTY()
 	bool bIsBoundaryCell;
 
@@ -59,15 +64,19 @@ struct PROCEDURALGEOMETRY_API FVoronoiDiagram2D
 {
 	GENERATED_BODY()
 
+	/** Clipped cells, parallel to Sites. */
 	UPROPERTY()
 	TArray<FVoronoiCell2D> Cells;
 
+	/** World-space XY bounds used to clip every cell. */
 	UPROPERTY()
 	FBox2D Bounds = FBox2D(ForceInit);
 
+	/** Ordered input sites in diagram XY space. */
 	UPROPERTY()
 	TArray<FVector2D> Sites;
 
+	/** Seed used for random or relaxed site generation; explicit sites need no random draws. */
 	UPROPERTY()
 	FString Seed;
 
@@ -130,9 +139,11 @@ class PROCEDURALGEOMETRY_API UVoronoiGenerator2D final : public UObject
 {
 	GENERATED_BODY()
 
+	/** Current clip bounds; callers set them before generating sites or cells. */
 	UPROPERTY()
 	FBox2D Bounds;
 
+	/** Author-supplied deterministic seed, or a generated seed when an RNG entry point receives none. */
 	UPROPERTY()
 	FString Seed;
 
@@ -150,9 +161,21 @@ class PROCEDURALGEOMETRY_API UVoronoiGenerator2D final : public UObject
 public:
 	UVoronoiGenerator2D();
 
+	/** Sets the clipping rectangle for subsequent generation; caller supplies valid finite bounds.
+	 * Returns this generator for fluent
+	 * configuration and does not generate cells. */
 	UVoronoiGenerator2D* SetBounds(const FBox2D& InBounds);
+	/** Sets and initializes the deterministic RNG seed; an empty seed is replaced at the next RNG entry.
+	 * Returns this generator and does not
+	 * consume random site draws. */
 	UVoronoiGenerator2D* SetSeed(const FString& InSeed);
+	/** Sets Poisson minimum site spacing in centimetres, clamped to at least one.
+	 * Returns this generator; explicit-site generation does not use
+	 * this spacing. */
 	UVoronoiGenerator2D* SetMinSiteDistance(float Distance);
+	/** Sets the number of centroid-relaxation passes, clamped to zero or greater.
+	 * Returns this generator; only GenerateRelaxed applies the
+	 * passes. */
 	UVoronoiGenerator2D* SetRelaxationIterations(int32 Iterations);
 
 	/** Opt into nearby preclips when a valid index exists: pruning enabled and at least MinSitesForSpatialPruning (currently 64) sites.
@@ -164,8 +187,17 @@ public:
 	void SetSerialCellsForTest(bool bSerial) { bSerialCellsForTest = bSerial; }
 #endif
 
+	/** Clips caller-supplied sites against Bounds and builds shared-edge adjacency.
+	 * Does not draw RNG values; returns a diagram even when no
+	 * sites produce valid cells. */
 	FVoronoiDiagram2D GenerateFromSites(const TArray<FVector2D>& SiteLocations) const;
+	/** Draws NumSites from Bounds, optionally with Poisson spacing, then builds a diagram.
+	 * Re-derives the RNG from Seed per call;
+	 * invalid/empty sampling can return an empty diagram. */
 	FVoronoiDiagram2D GenerateRandomSites(int32 NumSites, bool bUsePoissonDisc = false);
+	/** Draws Poisson sites and applies configured centroid-relaxation passes before clipping.
+	 * Re-derives the RNG from Seed per call; returns an
+	 * empty diagram if sampling finds no sites. */
 	FVoronoiDiagram2D GenerateRelaxed(int32 NumSites);
 
 private:

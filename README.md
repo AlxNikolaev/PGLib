@@ -1,6 +1,6 @@
 # ProceduralGeometry
 
-`ProceduralGeometry` is a runtime Unreal Engine module of 2D layout and mesh-generation utilities. It provides grid-based Voronoi diagrams, raster layout generators (Drunkard's Walk and Cellular Automata), polygon helpers, and a prism mesh factory. This project's vendored version links `Core`, `CoreUObject`, `Engine`, `ProceduralMeshComponent`, and the Core-only `VariatCore` module for common probability and count-allocation rules. It has no dependency on gameplay or editor modules.
+`ProceduralGeometry` is a runtime Unreal Engine module of 2D layout and mesh-generation utilities. It provides site-based Voronoi diagrams, raster layout generators (Drunkard's Walk and Cellular Automata), polygon helpers, and a prism mesh factory. The grid-based Voronoi wrapper, `FVoronoiGridGenerator`, lives in `ProceduralGenerationRuntime`. This project's vendored version links `Core`, `CoreUObject`, `Engine`, `ProceduralMeshComponent`, and the `VariatCore` module for common probability and count-allocation rules. It has no dependency on gameplay or editor modules.
 
 The ADRoguelike repository tracks these source files directly; it is not a Git submodule. Every change under `Source/ProceduralGeometry` is committed to the parent repository and the nested PGLib checkout in the same change set; pushing the nested commits to its remote is a separate operation. Copy `Source/VariatCore` as well when reusing this version in another project, register both runtime modules, and keep their shared selection contract together.
 
